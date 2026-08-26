@@ -10,3 +10,14 @@ policy:
   logging:
     level: "INFO"
     format: "json"
+  detection:
+    min_unique_destination_ports: 4
+    min_packet_count: 5
+    min_packets_per_second: 0.5
+    threat_score_threshold: 0.8
+  decision:
+    low_threat_score_max: 0.2
+    recon_decoy_score_min: 0.8
+    recon_decoy_confidence_min: 0.8
+    severe_threat_score_min: 0.95
+    severe_confidence_min: 0.95

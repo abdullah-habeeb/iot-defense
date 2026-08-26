@@ -1,18 +1,31 @@
-"""Decision agent responsible for choosing a response to suspicious activity."""
+"""Decision agent that transforms threat events into defense decisions."""
 
 from __future__ import annotations
 
-from typing import Any
+from iot_defense.defense.context import build_security_context
+from iot_defense.defense.decision import DefenseDecision
+from iot_defense.defense.policy import DefensePolicy, RuleBasedDefensePolicy
+from iot_defense.detection.threat_event import ThreatEvent
 
 
 class DecisionAgent:
-    """Select a response based on a detection result and configured policy."""
+    """Convert threat events into contextualized decisions via a pluggable policy."""
 
-    def __init__(self, default_action: str = "allow") -> None:
-        self.default_action = default_action
+    def __init__(self, policy: DefensePolicy | None = None) -> None:
+        self.policy = policy or RuleBasedDefensePolicy()
+        self._event_history: list[ThreatEvent] = []
 
-    def decide(self, detection_result: dict[str, Any]) -> str:
-        """Return the response action for the current detection result."""
-        if detection_result.get("suspicious"):
-            return "isolate"
-        return self.default_action
+    def build_context(self, threat_event: ThreatEvent, device_criticality: str | None = None):
+        """Build BDI-style context from the current event and relevant history."""
+        return build_security_context(
+            threat_event,
+            previous_events=self._event_history,
+            device_criticality=device_criticality,
+        )
+
+    def decide(self, threat_event: ThreatEvent, device_criticality: str | None = None) -> DefenseDecision:
+        """Return a structured decision for a threat event without executing actions."""
+        context = self.build_context(threat_event, device_criticality=device_criticality)
+        decision = self.policy.decide(context)
+        self._event_history.append(threat_event)
+        return decision

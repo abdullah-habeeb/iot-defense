@@ -51,6 +51,16 @@ class TrafficGenerator:
         results["sensor_to_camera"] = sensor.cmd("ping -c 2 10.0.0.20")
         results["sensor_to_plug"] = sensor.cmd("ping -c 2 10.0.0.30")
         results["camera_to_sensor"] = camera.cmd("ping -c 2 10.0.0.10")
+        results["plug_udp_heartbeat"] = plug.cmd(
+            "python3 - <<'PY'\n"
+            "import socket\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "for _ in range(5):\n"
+            "    sock.sendto(b'iot-heartbeat', ('10.0.0.10', 5683))\n"
+            "sock.close()\n"
+            "print('udp_heartbeat_done')\n"
+            "PY"
+        )
         results["smart_plug_heartbeat"] = plug.cmd("python3 - <<'PY'\nimport socket\nfor host, port in [('10.0.0.20', 80), ('10.0.0.10', 8080)]:\n    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    s.settimeout(1)\n    try:\n        s.connect((host, port))\n    except OSError:\n        pass\n    finally:\n        s.close()\nprint('tcp_heartbeat_done')\nPY")
         return results
 

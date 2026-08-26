@@ -44,15 +44,23 @@ class PacketMonitor:
             if not hasattr(packet, "payload"):
                 continue
             ip_layer = packet.getlayer("IP")
+            arp_layer = packet.getlayer("ARP")
             tcp_udp_layer = packet.getlayer("TCP") or packet.getlayer("UDP")
-            protocol_name = "TCP" if tcp_udp_layer is not None and tcp_udp_layer.name == "TCP" else "UDP"
+            protocol_name = "UNKNOWN"
+            if tcp_udp_layer is not None:
+                protocol_name = "TCP" if tcp_udp_layer.name == "TCP" else "UDP"
             if packet.haslayer("ICMP"):
                 protocol_name = "ICMP"
+            if packet.haslayer("ARP"):
+                protocol_name = "ARP"
+
+            src_ip = ip_layer.src if ip_layer is not None else (arp_layer.psrc if arp_layer is not None else "unknown")
+            dst_ip = ip_layer.dst if ip_layer is not None else (arp_layer.pdst if arp_layer is not None else "unknown")
 
             event = {
                 "timestamp": float(packet.time),
-                "src_ip": ip_layer.src if ip_layer is not None else "unknown",
-                "dst_ip": ip_layer.dst if ip_layer is not None else "unknown",
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
                 "protocol": protocol_name,
                 "src_port": getattr(tcp_udp_layer, "sport", None),
                 "dst_port": getattr(tcp_udp_layer, "dport", None),
