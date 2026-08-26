@@ -1,0 +1,12 @@
+policy:
+  default_action: "allow"
+  suspicious_threshold: 0.75
+  response_actions:
+    - "allow"
+    - "alert"
+    - "isolate"
+    - "decoy"
+  isolation_timeout_seconds: 15
+  logging:
+    level: "INFO"
+    format: "json"

@@ -1,0 +1,1 @@
+"""Defense and response logic."""

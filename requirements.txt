@@ -1,0 +1,6 @@
+scapy
+numpy
+pandas
+scikit-learn
+pyyaml
+pytest

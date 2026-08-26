@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# Virtual environment / OS
+.DS_Store
+
+# Generated artifacts
+logs/
+data/logs/
+data/metrics/
+data/captures/
+*.log
+*.jsonl
+*.csv
+
+# Editors
+.vscode/
+.idea/
