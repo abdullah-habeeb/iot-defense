@@ -18,11 +18,11 @@ class FeatureExtractor:
             "src_ip": sample.get("src_ip"),
             "dst_ip": sample.get("dst_ip"),
             "protocol": sample.get("protocol"),
-            "packet_length": sample.get("packet_length", 0),
-            "ttl": sample.get("ttl", 0),
+            "packet_length": int(sample.get("packet_length", 0)),
+            "ttl": int(sample.get("ttl", 0)),
             "src_port": sample.get("src_port"),
             "dst_port": sample.get("dst_port"),
-            "timestamp": sample.get("timestamp", 0.0),
+            "timestamp": float(sample.get("timestamp", 0.0)),
             "direction": sample.get("direction", "unknown"),
         }
 
