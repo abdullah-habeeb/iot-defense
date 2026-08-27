@@ -21,3 +21,31 @@ policy:
     recon_decoy_confidence_min: 0.8
     severe_threat_score_min: 0.95
     severe_confidence_min: 0.95
+  stackelberg:
+    payoffs:
+      NORMAL:
+        ALLOW:
+          CONTINUE: {attacker: 1.0, defender: 8.0}
+          RETREAT: {attacker: 0.0, defender: 7.0}
+        ALERT:
+          CONTINUE: {attacker: 0.0, defender: 6.0}
+          RETREAT: {attacker: -1.0, defender: 5.0}
+        DECOY:
+          CONTINUE: {attacker: -2.0, defender: 3.0}
+          RETREAT: {attacker: -3.0, defender: 2.0}
+        ISOLATE:
+          CONTINUE: {attacker: -5.0, defender: 1.0}
+          RETREAT: {attacker: -6.0, defender: 0.0}
+      RECONNAISSANCE_PORT_SCAN:
+        ALLOW:
+          CONTINUE: {attacker: 8.0, defender: -5.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 4.0, defender: 2.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: -4.0, defender: 4.0}
+          RETREAT: {attacker: -3.0, defender: 8.0}
+        ISOLATE:
+          CONTINUE: {attacker: 1.0, defender: 3.0}
+          RETREAT: {attacker: -6.0, defender: 5.0}

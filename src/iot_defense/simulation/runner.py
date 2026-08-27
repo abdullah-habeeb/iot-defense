@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from iot_defense.agents.decision_agent import DecisionAgent
+from iot_defense.defense.decision import DefenseAction, DefenseDecision
+from iot_defense.defense.executor import MininetResponseExecutor
+from iot_defense.defense.policy import StackelbergDefensePolicy, compare_policies
 from iot_defense.detection.detector import RuleBasedReconDetector
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
@@ -27,6 +30,8 @@ class SimulationRunner:
         self.aggregator = FeatureAggregator(window_seconds=3.0)
         self.detector = RuleBasedReconDetector()
         self.decision_agent = DecisionAgent()
+        self.stackelberg_policy = StackelbergDefensePolicy()
+        self.response_executor: MininetResponseExecutor | None = None
 
     def create_and_start(self) -> Any:
         """Create and start the Mininet network."""
@@ -62,12 +67,67 @@ class SimulationRunner:
         feature_records = self.aggregator.aggregate(observed_events)
 
         threat_events: list[ThreatEvent] = []
+        policy_comparisons: list[dict[str, Any]] = []
         for record in feature_records:
-            threat_events.append(self.detector.detect(record.to_dict()))
+            event = self.detector.detect(record.to_dict())
+            threat_events.append(event)
+            context = self.decision_agent.build_context(event)
+            policy_comparisons.append(
+                compare_policies(
+                    context,
+                    rule_policy=self.decision_agent.policy,
+                    stackelberg_policy=self.stackelberg_policy,
+                )
+            )
 
         decisions = [self.decision_agent.decide(event) for event in threat_events]
         detections = [event.to_dict() for event in threat_events]
         decision_records = [decision.to_dict() for decision in decisions]
+
+        self.response_executor = MininetResponseExecutor(self.net)
+        response_results = [self.response_executor.execute(decision) for decision in decisions]
+        response_records = [result.to_dict() for result in response_results]
+
+        decoy_interaction = None
+        if any(decision.action == DefenseAction.DECOY for decision in decisions):
+            attacker = self.net.get("attacker")
+            decoy_interaction = attacker.cmd(
+                "python3 - <<'PY'\n"
+                "import socket\n"
+                "sock = socket.create_connection(('10.0.0.10', 22), timeout=2)\n"
+                "sock.sendall(b'GET /status')\n"
+                "print(sock.recv(128).decode(errors='replace').strip())\n"
+                "sock.close()\n"
+                "PY"
+            )
+
+        isolation_event = threat_events[0] if threat_events else self.detector.detect(
+            {
+                "source_ip": "10.0.0.20",
+                "destination_ip": "10.0.0.10",
+                "protocol": "ICMP",
+                "packet_count": 1,
+                "packets_per_second": 0.1,
+                "unique_destination_ports": 0,
+            }
+        )
+        isolation_decision = DefenseDecision.create(
+            action=DefenseAction.ISOLATE,
+            target_ip="10.0.0.10",
+            source_ip=isolation_event.source_ip,
+            reason="Explicit reversible isolation validation for the simulated sensor.",
+            confidence=isolation_event.confidence,
+            threat_score=isolation_event.threat_score,
+            policy_name="Phase4IsolationValidation",
+            context={"validation": "simulated_sensor_isolation"},
+        )
+        sensor = self.net.get("sensor")
+        camera = self.net.get("camera")
+        isolation_before = camera.cmd("ping -c 1 -W 1 10.0.0.10")
+        isolation_result = self.response_executor.execute(isolation_decision)
+        isolation_after = camera.cmd("ping -c 1 -W 1 10.0.0.10")
+        restore_details = self.response_executor.restore("10.0.0.10")
+        isolation_cleanup = camera.cmd("ping -c 1 -W 1 10.0.0.10")
 
         normal_detected = next((item for item in detections if item["attack_type"] == "normal"), None)
         suspicious_detected = next((item for item in detections if item["attack_type"] == "reconnaissance_port_scan"), None)
@@ -94,12 +154,26 @@ class SimulationRunner:
             "scan_detection": suspicious_detected,
             "normal_decision": normal_decision,
             "scan_decision": scan_decision,
+            "policy_comparisons": policy_comparisons,
+            "response_results": response_records,
+            "decoy_interaction": decoy_interaction,
+            "isolation_validation": {
+                "target_host": sensor.name,
+                "before": isolation_before,
+                "isolation_result": isolation_result.to_dict(),
+                "after": isolation_after,
+                "restore": restore_details,
+                "after_restore": isolation_cleanup,
+            },
         }
         return summary
 
     def stop(self) -> None:
         """Stop Mininet cleanly."""
         if self.net is not None:
+            if self.response_executor is not None:
+                self.response_executor.cleanup()
+                self.response_executor = None
             self.net.stop()
             self.net = None
 

@@ -16,6 +16,9 @@ topology:
     - name: "attacker"
       ip: "10.0.0.100/24"
       role: "attacker"
+    - name: "decoy"
+      ip: "10.0.0.200/24"
+      role: "simulated_decoy"
   links:
     - "sensor:s1"
     - "camera:s1"

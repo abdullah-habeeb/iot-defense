@@ -10,6 +10,7 @@ import yaml
 
 from iot_defense.defense.context import SecurityContext
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
+from iot_defense.defense.stackelberg import StackelbergGame
 
 
 def _load_decision_policy_config() -> dict[str, Any]:
@@ -98,3 +99,56 @@ class RuleBasedDefensePolicy(DefensePolicy):
             policy_name=self.name,
             context=context.to_dict(),
         )
+
+
+class StackelbergDefensePolicy(DefensePolicy):
+    """Select a defense action using a simplified configurable leader-follower game."""
+
+    def __init__(self, game: StackelbergGame | None = None) -> None:
+        self.game = game or StackelbergGame()
+
+    def decide(self, context: SecurityContext) -> DefenseDecision:
+        beliefs = context.beliefs
+        observed_threat = beliefs.threat_type.upper()
+        solution = self.game.solve(observed_threat)
+        reasoning = solution.to_dict()
+        reason = (
+            f"Observed threat: {observed_threat}. Defender candidate: {solution.selected_action.value}. "
+            f"Predicted attacker response: {solution.predicted_attacker_strategy}. "
+            f"Attacker utility: {solution.selected_attacker_utility:g}. "
+            f"Defender utility: {solution.selected_defender_utility:g}. "
+            f"Selected defense: {solution.selected_action.value}."
+        )
+        decision_context = context.to_dict()
+        decision_context["stackelberg_reasoning"] = reasoning
+        return DefenseDecision.create(
+            action=solution.selected_action,
+            target_ip=beliefs.destination_device,
+            source_ip=beliefs.source_device,
+            reason=reason,
+            confidence=beliefs.confidence,
+            threat_score=beliefs.threat_score,
+            policy_name=self.name,
+            context=decision_context,
+        )
+
+
+def compare_policies(
+    context: SecurityContext,
+    rule_policy: RuleBasedDefensePolicy | None = None,
+    stackelberg_policy: StackelbergDefensePolicy | None = None,
+) -> dict[str, Any]:
+    """Evaluate both policies against the same context without executing either action."""
+    rule_decision = (rule_policy or RuleBasedDefensePolicy()).decide(context)
+    stack_decision = (stackelberg_policy or StackelbergDefensePolicy()).decide(context)
+    reasoning = stack_decision.context["stackelberg_reasoning"]
+    return {
+        "same_context": rule_decision.context["beliefs"] == context.to_dict()["beliefs"],
+        "observed_threat": reasoning["observed_threat"],
+        "rule_based_action": rule_decision.action.value,
+        "stackelberg_action": stack_decision.action.value,
+        "predicted_attacker_response": reasoning["predicted_attacker_strategy"],
+        "defender_utility": reasoning["selected_defender_utility"],
+        "rule_based_decision": rule_decision.to_dict(),
+        "stackelberg_decision": stack_decision.to_dict(),
+    }

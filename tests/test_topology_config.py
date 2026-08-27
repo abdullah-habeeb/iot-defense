@@ -9,8 +9,14 @@ def test_topology_config_loads_expected_hosts():
     config = TopologyConfig(Path("config/topology.yaml"))
     hosts = config.hosts
 
-    assert [host["name"] for host in hosts] == ["sensor", "camera", "smart_plug", "attacker"]
-    assert [host["ip"] for host in hosts] == ["10.0.0.10/24", "10.0.0.20/24", "10.0.0.30/24", "10.0.0.100/24"]
+    assert [host["name"] for host in hosts] == ["sensor", "camera", "smart_plug", "attacker", "decoy"]
+    assert [host["ip"] for host in hosts] == [
+        "10.0.0.10/24",
+        "10.0.0.20/24",
+        "10.0.0.30/24",
+        "10.0.0.100/24",
+        "10.0.0.200/24",
+    ]
 
 
 def test_topology_config_yaml_is_valid():
@@ -18,4 +24,4 @@ def test_topology_config_yaml_is_valid():
         data = yaml.safe_load(fh)
 
     assert data["topology"]["switch"]["name"] == "s1"
-    assert len(data["topology"]["hosts"]) == 4
+    assert len(data["topology"]["hosts"]) == 5
