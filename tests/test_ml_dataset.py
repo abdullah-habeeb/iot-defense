@@ -5,6 +5,7 @@ import pandas as pd
 from iot_defense.detection.flow_features import FlowFeatures
 from iot_defense.ml.evaluation import classification_metrics, split_by_run
 from iot_defense.ml.random_forest import RandomForestDetector
+from iot_defense.ml.generate_dataset import _reconnaissance_traffic
 from iot_defense.ml.schema import DATASET_COLUMNS, FEATURE_COLUMNS, flow_to_dataset_row, validate_dataset
 from iot_defense.ml.train_random_forest import train_and_evaluate
 
@@ -91,3 +92,13 @@ def test_random_forest_training_save_load_and_threat_event(tmp_path: Path):
     assert result.attack_type in {"normal", "reconnaissance_port_scan"}
     assert result.source_ip == "10.0.0.100"
     assert result.destination_ip == "10.0.0.10"
+
+
+def test_reconnaissance_traffic_no_bind():
+    # Mock host object that just returns the command
+    class MockHost:
+        def cmd(self, command: str) -> str:
+            return command
+
+    command = _reconnaissance_traffic(MockHost(), "10.0.0.1", [80, 443], 0.01)
+    assert "sock.bind" not in command

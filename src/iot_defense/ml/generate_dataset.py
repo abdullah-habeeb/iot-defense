@@ -32,16 +32,14 @@ def _normal_traffic(host: Any, target_ip: str, port: int, packet_count: int, pay
     )
 
 
-def _reconnaissance_traffic(host: Any, target_ip: str, ports: list[int], interval: float, source_port: int | None = None) -> str:
+def _reconnaissance_traffic(host: Any, target_ip: str, ports: list[int], interval: float) -> str:
     ports_literal = repr(ports)
-    bind_code = f"sock.bind(('', {source_port}))\n" if source_port else ""
     return host.cmd(
         "python3 - <<'PY'\n"
         "import socket, time\n"
         f"ports = {ports_literal}\n"
         "for port in ports:\n"
         "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
-        f"{bind_code}"
         "    sock.settimeout(0.15)\n"
         "    try:\n"
         f"        sock.connect(('{target_ip}', port))\n"
@@ -81,7 +79,6 @@ def generate_dataset(
         [26, 808, 3000, 5000, 8888, 9001, 9443],
         [22, 80, 443, 8081],
     ]
-    attacker_source_ports = [40000, 40001, 40002, 40003, 40004]
     rows: list[dict[str, Any]] = []
     aggregator = FeatureAggregator(window_seconds=3.0)
 
@@ -112,8 +109,7 @@ def generate_dataset(
                 port_sets = unseen_scan_port_sets if unseen_pattern else known_scan_port_sets
                 ports = rng.choice(port_sets)
                 interval = rng.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1])
-                source_port = rng.choice(attacker_source_ports)
-                _reconnaissance_traffic(source, target_ip, ports, interval, source_port=source_port)
+                _reconnaissance_traffic(source, target_ip, ports, interval)
             time.sleep(1.0)
             net.get(target_name).cmd("pkill tcpdump || true")
             time.sleep(0.1)
