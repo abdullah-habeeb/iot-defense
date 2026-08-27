@@ -31,6 +31,25 @@ python -m iot_defense.simulation.train_ppo --timesteps 512 --output models/ppo_d
 
 The generated model is ignored by Git. `PPODefensePolicy` fails clearly when it is absent unless an explicit fallback policy is provided. The trained policy should not be interpreted as learning real-world attacker behaviour or general autonomous cyber defense.
 
+## Controlled ML detection experiment
+Phase 6B adds a reproducible controlled dataset and Random Forest detector. Generate labelled rows from fresh Mininet runs with:
+
+```bash
+sudo -E env PYTHONPATH="/home/abdullah/iot-defense/.venv/lib/python3.12/site-packages:/home/abdullah/iot-defense/src" \
+	/usr/bin/python3 -m iot_defense.ml.generate_dataset --runs 20 --seed 7 \
+	--output data/ml/controlled_flows.csv
+```
+
+Train and evaluate on run-held-out groups with:
+
+```bash
+python -m iot_defense.ml.train_random_forest \
+	--dataset data/ml/controlled_flows.csv \
+	--model models/random_forest_detector.joblib --seed 7
+```
+
+The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run identifiers, timestamps, metadata, and labels remain audit fields. The current experiment is a small synthetic Mininet study covering normal traffic and bounded reconnaissance scans, so its held-out metrics must not be generalized to arbitrary IoT traffic.
+
 ## Planned future components
 - Random Forest / SVM detection models
 - Broader learned detection and evaluation datasets

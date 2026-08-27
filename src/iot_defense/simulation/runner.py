@@ -15,6 +15,7 @@ from iot_defense.defense.ppo_policy import PPODefensePolicy
 from iot_defense.detection.detector import RuleBasedReconDetector
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
+from iot_defense.ml.random_forest import RandomForestDetector
 from iot_defense.network.topology import create_mininet_network
 from iot_defense.monitoring.monitor import PacketMonitor
 from iot_defense.simulation.traffic import TrafficGenerator
@@ -30,6 +31,10 @@ class SimulationRunner:
         self.packet_monitor = PacketMonitor()
         self.aggregator = FeatureAggregator(window_seconds=3.0)
         self.detector = RuleBasedReconDetector()
+        self.ml_detector: RandomForestDetector | None = None
+        model_path = Path("models/random_forest_detector.joblib")
+        if model_path.exists():
+            self.ml_detector = RandomForestDetector(model_path)
         self.decision_agent = DecisionAgent()
         self.stackelberg_policy = StackelbergDefensePolicy()
         self.ppo_policy = PPODefensePolicy(fallback=self.stackelberg_policy)
@@ -69,10 +74,13 @@ class SimulationRunner:
         feature_records = self.aggregator.aggregate(observed_events)
 
         threat_events: list[ThreatEvent] = []
+        ml_threat_events: list[ThreatEvent] = []
         policy_comparisons: list[dict[str, Any]] = []
         for record in feature_records:
             event = self.detector.detect(record.to_dict())
             threat_events.append(event)
+            if self.ml_detector is not None:
+                ml_threat_events.append(self.ml_detector.detect(record.to_dict()))
             context = self.decision_agent.build_context(event)
             policy_comparisons.append(
                 compare_policies(
@@ -151,6 +159,7 @@ class SimulationRunner:
             "observed_events": observed_events,
             "feature_records": [record.to_dict() for record in feature_records],
             "threat_events": detections,
+            "ml_threat_events": [event.to_dict() for event in ml_threat_events],
             "detections": detections,
             "defense_decisions": decision_records,
             "normal_detection": normal_detected,
