@@ -15,8 +15,8 @@ data/ml/
 logs/
 data/logs/
 data/metrics/
-data/captures/
 *.log
+data/captures/
 *.jsonl
 *.csv
 

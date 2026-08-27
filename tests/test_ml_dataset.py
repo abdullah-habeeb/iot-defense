@@ -5,7 +5,7 @@ import pandas as pd
 from iot_defense.detection.flow_features import FlowFeatures
 from iot_defense.ml.evaluation import classification_metrics, split_by_run
 from iot_defense.ml.random_forest import RandomForestDetector
-from iot_defense.ml.generate_dataset import _reconnaissance_traffic
+from iot_defense.ml.generate_dataset import _reconnaissance_traffic, _start_tcp_listener
 from iot_defense.ml.schema import DATASET_COLUMNS, FEATURE_COLUMNS, flow_to_dataset_row, validate_dataset
 from iot_defense.ml.train_random_forest import train_and_evaluate
 
@@ -102,3 +102,11 @@ def test_reconnaissance_traffic_no_bind():
 
     command = _reconnaissance_traffic(MockHost(), "10.0.0.1", [80, 443], 0.01)
     assert "sock.bind" not in command
+
+def test_start_tcp_listener_command():
+    class MockHost:
+        def cmd(self, command: str) -> str:
+            return "1234" # Mock PID
+    
+    pid = _start_tcp_listener(MockHost(), 8080)
+    assert pid == "1234"
