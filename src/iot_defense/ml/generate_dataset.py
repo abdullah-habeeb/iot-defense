@@ -17,7 +17,7 @@ from iot_defense.network.topology import create_mininet_network
 from iot_defense.ml.schema import DATASET_COLUMNS, flow_to_dataset_row, validate_dataset
 
 
-def _normal_traffic(host: Any, target_ip: str, port: int, packet_count: int, payload_size: int) -> str:
+def _normal_traffic(host: Any, target_ip: str, port: int, packet_count: int, payload_size: int, delay: float) -> str:
     return host.cmd(
         "python3 - <<'PY'\n"
         "import socket, time\n"
@@ -25,21 +25,23 @@ def _normal_traffic(host: Any, target_ip: str, port: int, packet_count: int, pay
         "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
         f"for _ in range({packet_count}):\n"
         f"    sock.sendto(payload, ('{target_ip}', {port}))\n"
-        "    time.sleep(0.05)\n"
+        f"    time.sleep({delay})\n"
         "sock.close()\n"
         "print('normal_dataset_traffic_done')\n"
         "PY"
     )
 
 
-def _reconnaissance_traffic(host: Any, target_ip: str, ports: list[int], interval: float) -> str:
+def _reconnaissance_traffic(host: Any, target_ip: str, ports: list[int], interval: float, source_port: int | None = None) -> str:
     ports_literal = repr(ports)
+    bind_code = f"sock.bind(('', {source_port}))\n" if source_port else ""
     return host.cmd(
         "python3 - <<'PY'\n"
         "import socket, time\n"
         f"ports = {ports_literal}\n"
         "for port in ports:\n"
         "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+        f"{bind_code}"
         "    sock.settimeout(0.15)\n"
         "    try:\n"
         f"        sock.connect(('{target_ip}', port))\n"
@@ -64,18 +66,22 @@ def generate_dataset(
         raise ValueError("At least six independent runs are required for group-aware evaluation.")
     rng = random.Random(seed)
     target_options = [("sensor", "10.0.0.10"), ("camera", "10.0.0.20"), ("smart_plug", "10.0.0.30")]
-    normal_ports = [5683, 1883, 8080, 9999, 10001]
+    normal_ports = [5683, 1883, 8080, 9999, 10001, 80, 443]
+    heartbeat_delays = [0.02, 0.05, 0.1, 0.2]
     known_scan_port_sets = [
         [22, 80, 443, 8080],
         [21, 23, 53, 8080],
         [22, 80, 8000, 8443],
         [25, 110, 143, 993, 995],
+        [80, 8080, 8888],
     ]
     unseen_scan_port_sets = [
         [22, 81, 444, 8081, 9000],
         [24, 88, 8008, 8444, 10080, 10443],
         [26, 808, 3000, 5000, 8888, 9001, 9443],
+        [22, 80, 443, 8081],
     ]
+    attacker_source_ports = [40000, 40001, 40002, 40003, 40004]
     rows: list[dict[str, Any]] = []
     aggregator = FeatureAggregator(window_seconds=3.0)
 
@@ -97,15 +103,17 @@ def generate_dataset(
                 )
                 source = net.get(source_name)
                 port = rng.choice(normal_ports)
-                packet_count = rng.randint(4, 8)
-                payload_size = rng.randint(12, 48)
-                _normal_traffic(source, target_ip, port, packet_count, payload_size)
+                packet_count = rng.randint(5, 20)
+                payload_size = rng.randint(16, 128)
+                delay = rng.choice(heartbeat_delays)
+                _normal_traffic(source, target_ip, port, packet_count, payload_size, delay)
             else:
                 source = net.get("attacker")
                 port_sets = unseen_scan_port_sets if unseen_pattern else known_scan_port_sets
                 ports = rng.choice(port_sets)
-                interval = rng.choice([0.01, 0.03, 0.05, 0.08])
-                _reconnaissance_traffic(source, target_ip, ports, interval)
+                interval = rng.choice([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1])
+                source_port = rng.choice(attacker_source_ports)
+                _reconnaissance_traffic(source, target_ip, ports, interval, source_port=source_port)
             time.sleep(1.0)
             net.get(target_name).cmd("pkill tcpdump || true")
             time.sleep(0.1)
