@@ -49,3 +49,18 @@ policy:
         ISOLATE:
           CONTINUE: {attacker: 1.0, defender: 3.0}
           RETREAT: {attacker: -6.0, defender: 5.0}
+  ppo:
+    model_path: "models/ppo_defense"
+    fallback_policy: "stackelberg"
+    training_timesteps: 512
+    environment_episode_length: 4
+    reward:
+      attack_contained: 5.0
+      attacker_diverted: 4.0
+      intelligence_gained: 3.0
+      service_preserved: 3.0
+      successful_compromise: -6.0
+      false_positive_intervention: -4.0
+      unnecessary_isolation: -3.0
+      service_disruption: -3.0
+      response_cost: -0.5

@@ -11,6 +11,7 @@ from iot_defense.agents.decision_agent import DecisionAgent
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.executor import MininetResponseExecutor
 from iot_defense.defense.policy import StackelbergDefensePolicy, compare_policies
+from iot_defense.defense.ppo_policy import PPODefensePolicy
 from iot_defense.detection.detector import RuleBasedReconDetector
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
@@ -31,6 +32,7 @@ class SimulationRunner:
         self.detector = RuleBasedReconDetector()
         self.decision_agent = DecisionAgent()
         self.stackelberg_policy = StackelbergDefensePolicy()
+        self.ppo_policy = PPODefensePolicy(fallback=self.stackelberg_policy)
         self.response_executor: MininetResponseExecutor | None = None
 
     def create_and_start(self) -> Any:
@@ -77,6 +79,7 @@ class SimulationRunner:
                     context,
                     rule_policy=self.decision_agent.policy,
                     stackelberg_policy=self.stackelberg_policy,
+                    ppo_policy=self.ppo_policy,
                 )
             )
 

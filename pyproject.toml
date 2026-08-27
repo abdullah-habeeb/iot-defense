@@ -15,6 +15,9 @@ dependencies = [
   "scikit-learn",
   "pyyaml",
   "pytest",
+  "gymnasium",
+  "stable-baselines3",
+  "torch",
 ]
 
 [tool.setuptools]

@@ -21,12 +21,20 @@ Mininet IoT Network -> Monitoring Agent -> Feature Extraction -> Detection Agent
 - Open vSwitch 3.3.9
 
 ## Current implementation status
-This repository is in the foundation stage. The initial implementation focuses on a minimal, testable prototype that is extensible for future ML, Stackelberg, and RL components without overbuilding the system upfront.
+The prototype now includes a validated Mininet traffic-to-response vertical slice, configurable Stackelberg policy reasoning, and a small CPU-only PPO policy trained on a standalone decision simulator. PPO does not train against Mininet traffic and does not execute responses; the live runner compares RuleBased, Stackelberg, and PPO decisions while retaining the existing response path.
+
+The PPO environment uses a deterministic normalized security-context observation and a four-action mapping: `ALLOW=0`, `ALERT=1`, `ISOLATE=2`, and `DECOY=3`. Reward coefficients are modelling assumptions, not objective security values. Train a short model with:
+
+```bash
+python -m iot_defense.simulation.train_ppo --timesteps 512 --output models/ppo_defense
+```
+
+The generated model is ignored by Git. `PPODefensePolicy` fails clearly when it is absent unless an explicit fallback policy is provided. The trained policy should not be interpreted as learning real-world attacker behaviour or general autonomous cyber defense.
 
 ## Planned future components
 - Random Forest / SVM detection models
-- Stackelberg strategy layer
-- PPO reinforcement learning integration
+- Broader learned detection and evaluation datasets
+- PPO policy evaluation against measured scenarios
 - Richer honeypot and deception flows
 - Enhanced evaluation metrics and dashboards
 

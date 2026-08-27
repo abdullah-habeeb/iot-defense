@@ -5,6 +5,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
+models/
 
 # Virtual environment / OS
 .DS_Store

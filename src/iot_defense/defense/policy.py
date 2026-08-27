@@ -137,12 +137,13 @@ def compare_policies(
     context: SecurityContext,
     rule_policy: RuleBasedDefensePolicy | None = None,
     stackelberg_policy: StackelbergDefensePolicy | None = None,
+    ppo_policy: DefensePolicy | None = None,
 ) -> dict[str, Any]:
-    """Evaluate both policies against the same context without executing either action."""
+    """Evaluate configured policies against the same context without executing actions."""
     rule_decision = (rule_policy or RuleBasedDefensePolicy()).decide(context)
     stack_decision = (stackelberg_policy or StackelbergDefensePolicy()).decide(context)
     reasoning = stack_decision.context["stackelberg_reasoning"]
-    return {
+    comparison = {
         "same_context": rule_decision.context["beliefs"] == context.to_dict()["beliefs"],
         "observed_threat": reasoning["observed_threat"],
         "rule_based_action": rule_decision.action.value,
@@ -152,3 +153,8 @@ def compare_policies(
         "rule_based_decision": rule_decision.to_dict(),
         "stackelberg_decision": stack_decision.to_dict(),
     }
+    if ppo_policy is not None:
+        ppo_decision = ppo_policy.decide(context, stackelberg_info=reasoning)
+        comparison["ppo_action"] = ppo_decision.action.value
+        comparison["ppo_decision"] = ppo_decision.to_dict()
+    return comparison
