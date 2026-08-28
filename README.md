@@ -57,6 +57,56 @@ The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run
 - Richer honeypot and deception flows
 - Enhanced evaluation metrics and dashboards
 
+## Dashboard
+
+The dashboard is a read-only, browser-based operations console for observing the live pipeline during a demonstration. It is served by FastAPI and pushes updates to the browser over Server-Sent Events (SSE) — no React/Vue/Node/Docker/database, and no internet access is required to view it.
+
+### Architecture
+`DemoController` (in `src/iot_defense/demo/controller.py`) drives the real pipeline (Mininet network → traffic generation → packet capture → feature aggregation → detection → `SecurityContext` → policy comparison → response execution → restoration) and publishes every state change onto an in-process `asyncio.Queue`. `src/iot_defense/dashboard/server.py` exposes that state over HTTP/SSE and serves the static frontend from `data/dashboard/static/`. The dashboard never runs its own attack/defense logic — it only renders the controller's real state, falling back to "N/A" for any field that is absent.
+
+### Prerequisites
+```bash
+cd /home/abdullah/iot-defense
+source .venv/bin/activate
+```
+`fastapi`, `uvicorn`, and `httpx` are declared in `pyproject.toml` / `requirements.txt`.
+
+### Start the dashboard server
+```bash
+cd /home/abdullah/iot-defense
+source .venv/bin/activate
+PYTHONPATH=src uvicorn iot_defense.dashboard.server:app --host 127.0.0.1 --port 8000
+```
+Then open **http://127.0.0.1:8000** in a browser.
+
+### Run the live demo (requires Mininet, typically sudo)
+```bash
+cd /home/abdullah/iot-defense
+source .venv/bin/activate
+sudo -E env PYTHONPATH="$(pwd)/.venv/lib/python3.12/site-packages:$(pwd)/src"     "$(pwd)/.venv/bin/python" -m iot_defense.demo.controller
+```
+The dashboard server and the demo process share `data/dashboard/state.json` and the controller's SSE event queue when run together as one process; run the dashboard server itself with the demo controller instantiated once (as `server.py` does) so browser clients observe the same controller instance.
+
+### Dashboard sections
+Header (phase, connection status, clock) · pipeline flow strip · network topology (5-node SVG: sensor, camera, smart plug, attacker, decoy) · live packet feed · threat detection panel with flow features · BDI-style security context (beliefs / desires / intention) · policy comparison (Rule-Based, Stackelberg, PPO) with selected action · response & containment (decoy / isolation / restoration detail) · event timeline · metrics.
+
+### Live demo sequence
+1. `STARTING_NETWORK` — Mininet topology comes up, all 5 nodes go `ONLINE`.
+2. `BASELINE` / `OBSERVING` — benign traffic is generated and captured; a normal `ThreatEvent` is built and `ALLOW`ed.
+3. `THREAT_DETECTED` / `DECIDING` — a bounded reconnaissance port-scan is generated and captured; Rule-Based, Stackelberg, and PPO policies are each evaluated against the same `SecurityContext`.
+4. `RESPONDING` → `DECOY_ACTIVE` or `ISOLATED` — the selected action is actually executed inside Mininet (decoy redirect or interface isolation).
+5. `RESTORING` → `RESTORED` — connectivity is verified and restored.
+6. `COMPLETE` → `CLEANUP` — Mininet and any redirect/isolation state are torn down.
+
+### Cleanup
+The controller's `cleanup()` tears down the response executor (removing any iptables redirect rules and restoring isolated interfaces) and stops the Mininet network on completion or on error. If a run is interrupted, `sudo mn -c` clears any leftover Mininet state.
+
+### Known limitations
+- The dashboard is read-only by design — scenarios are triggered from the terminal via `DemoController`, not from browser buttons, to avoid duplicating attack/defense logic in JavaScript.
+- The Random Forest detector reflects a preliminary evaluation on a small controlled Mininet dataset (see "Controlled ML detection experiment" above) and should not be generalized to arbitrary IoT traffic.
+- The PPO policy is trained in a lightweight simulated decision environment, not against live Mininet traffic; it does not execute responses directly.
+- Stackelberg utilities are configured/modelled values (see `config/policies.yaml`), not measured real-world costs.
+
 ## Virtual environment
 ```bash
 cd /home/abdullah/iot-defense

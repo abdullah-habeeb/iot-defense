@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Residential IoT Defense System</title>
+  <meta name="description" content="Real-time cybersecurity operations console for residential IoT network defense — featuring live packet capture, threat detection, multi-policy decision-making and automated response." />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════ -->
+<header class="dashboard-header">
+  <div class="header-logo">
+    <span class="sys-title">🛡 RESIDENTIAL IoT DEFENSE SYSTEM</span>
+    <span class="sys-sub">Security Operations Console · Cyber Defense Demonstrator</span>
+  </div>
+
+  <div class="header-sep"></div>
+
+  <div class="header-meta">
+    <div class="conn-indicator disconnected" id="conn-indicator">
+      <span class="conn-dot"></span>
+      <span class="conn-label" id="conn-label">DISCONNECTED</span>
+    </div>
+
+    <div class="phase-badge" id="phase-badge">IDLE</div>
+
+    <div class="header-clock mono" id="header-clock">—</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PIPELINE FLOW
+════════════════════════════════════════════════════════════ -->
+<div style="background:var(--bg-surface);border-bottom:1px solid var(--border-subtle);">
+  <div class="pipeline-flow" id="pipeline-flow">
+    <div class="pipe-step" id="pipe-network"  data-phases="STARTING_NETWORK,BASELINE,OBSERVING,THREAT_DETECTED,DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
+      <div class="pipe-icon">🌐</div><div class="pipe-label">Network</div>
+    </div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-step" id="pipe-observe"  data-phases="OBSERVING,THREAT_DETECTED,DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
+      <div class="pipe-icon">📡</div><div class="pipe-label">Capture</div>
+    </div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-step" id="pipe-detect"   data-phases="THREAT_DETECTED,DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
+      <div class="pipe-icon">🔍</div><div class="pipe-label">Detection</div>
+    </div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-step" id="pipe-context"  data-phases="DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
+      <div class="pipe-icon">🧠</div><div class="pipe-label">Context</div>
+    </div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-step" id="pipe-decision" data-phases="RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
+      <div class="pipe-icon">⚖️</div><div class="pipe-label">Decision</div>
+    </div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-step" id="pipe-response" data-phases="DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
+      <div class="pipe-icon">🛡️</div><div class="pipe-label">Response</div>
+    </div>
+    <div class="pipe-arrow"></div>
+    <div class="pipe-step" id="pipe-recovery" data-phases="RESTORED,COMPLETE">
+      <div class="pipe-icon">✅</div><div class="pipe-label">Recovery</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN DASHBOARD GRID
+════════════════════════════════════════════════════════════ -->
+<main class="dashboard-main">
+
+  <!-- ── A. NETWORK TOPOLOGY ─────────────────────────────── -->
+  <section class="card span-3" id="section-topology">
+    <div class="card-header">
+      <span class="card-icon">🗺</span>
+      <span class="card-title card-title-accent">Network Topology</span>
+      <span style="margin-left:auto;font-size:0.7rem;color:var(--text-muted)">iot-home-lab · OVSKernelSwitch</span>
+    </div>
+    <div class="topology-wrap">
+      <svg class="topology-svg" id="topology-svg" viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg">
+        <!-- ── Links (drawn first, behind nodes) ── -->
+        <line class="topo-link" id="link-sensor"     x1="180" y1="130" x2="450" y2="130"/>
+        <line class="topo-link" id="link-camera"     x1="450" y1="130" x2="270" y2="60"/>
+        <line class="topo-link" id="link-plug"       x1="450" y1="130" x2="270" y2="200"/>
+        <line class="topo-link" id="link-attacker"   x1="450" y1="130" x2="630" y2="60"/>
+        <line class="topo-link" id="link-decoy"      x1="450" y1="130" x2="730" y2="200"/>
+
+        <!-- ── Switch ── -->
+        <rect x="408" y="108" width="84" height="44" rx="6" ry="6"
+              fill="#12161e" stroke="#2d4070" stroke-width="1.5"/>
+        <text x="450" y="127" text-anchor="middle" class="topo-label-name" style="font-size:10px">SWITCH</text>
+        <text x="450" y="141" text-anchor="middle" class="topo-label-ip">s1</text>
+
+        <!-- ── SENSOR (10.0.0.10) ── -->
+        <g id="node-sensor" class="topo-node" data-node="sensor">
+          <rect class="topo-node-bg" id="bg-sensor" x="64" y="100" width="120" height="60"/>
+          <text x="124" y="122" text-anchor="middle" class="topo-label-name">🌡 SENSOR</text>
+          <text x="124" y="137" text-anchor="middle" class="topo-label-ip">10.0.0.10</text>
+          <text x="124" y="150" text-anchor="middle" class="topo-label-status" id="status-sensor">OFFLINE</text>
+        </g>
+
+        <!-- ── CAMERA (10.0.0.20) ── -->
+        <g id="node-camera" class="topo-node" data-node="camera">
+          <rect class="topo-node-bg" id="bg-camera" x="178" y="24" width="120" height="60"/>
+          <text x="238" y="46" text-anchor="middle" class="topo-label-name">📷 CAMERA</text>
+          <text x="238" y="61" text-anchor="middle" class="topo-label-ip">10.0.0.20</text>
+          <text x="238" y="74" text-anchor="middle" class="topo-label-status" id="status-camera">OFFLINE</text>
+        </g>
+
+        <!-- ── SMART PLUG (10.0.0.30) ── -->
+        <g id="node-plug" class="topo-node" data-node="smart_plug">
+          <rect class="topo-node-bg" id="bg-plug" x="178" y="176" width="120" height="60"/>
+          <text x="238" y="198" text-anchor="middle" class="topo-label-name">🔌 SMART PLUG</text>
+          <text x="238" y="213" text-anchor="middle" class="topo-label-ip">10.0.0.30</text>
+          <text x="238" y="226" text-anchor="middle" class="topo-label-status" id="status-plug">OFFLINE</text>
+        </g>
+
+        <!-- ── ATTACKER (10.0.0.100) ── -->
+        <g id="node-attacker" class="topo-node" data-node="attacker">
+          <rect class="topo-node-bg" id="bg-attacker" x="578" y="24" width="120" height="60"/>
+          <text x="638" y="46" text-anchor="middle" class="topo-label-name">💀 ATTACKER</text>
+          <text x="638" y="61" text-anchor="middle" class="topo-label-ip">10.0.0.100</text>
+          <text x="638" y="74" text-anchor="middle" class="topo-label-status" id="status-attacker">OFFLINE</text>
+        </g>
+
+        <!-- ── DECOY (10.0.0.200) ── -->
+        <g id="node-decoy" class="topo-node" data-node="decoy">
+          <rect class="topo-node-bg" id="bg-decoy" x="678" y="170" width="120" height="60"/>
+          <text x="738" y="192" text-anchor="middle" class="topo-label-name">🪤 DECOY</text>
+          <text x="738" y="207" text-anchor="middle" class="topo-label-ip">10.0.0.200</text>
+          <text x="738" y="220" text-anchor="middle" class="topo-label-status" id="status-decoy">OFFLINE</text>
+        </g>
+
+        <!-- ── Traffic direction arrows (hidden by default) ── -->
+        <polygon id="arrow-attack" class="topo-arrow" opacity="0"
+                 points="455,118 463,130 455,142" />
+      </svg>
+    </div>
+  </section>
+
+  <!-- ── B. LIVE TRAFFIC ─────────────────────────────────── -->
+  <section class="card span-2" id="section-traffic">
+    <div class="card-header">
+      <span class="card-icon">📶</span>
+      <span class="card-title">Live Packet Feed</span>
+      <span class="card-badge" id="traffic-count-badge" style="background:rgba(6,182,212,0.1);color:var(--accent-cyan);border:1px solid rgba(6,182,212,0.3)">0 pkts</span>
+    </div>
+    <div class="card-body" style="padding:0;">
+      <div class="traffic-table-wrap">
+        <table class="traffic-table" id="traffic-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Source</th>
+              <th>Destination</th>
+              <th>Proto</th>
+              <th>Src Port</th>
+              <th>Dst Port</th>
+              <th>Length</th>
+            </tr>
+          </thead>
+          <tbody id="traffic-tbody">
+            <tr><td colspan="7" class="empty-state">Awaiting packets…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── C. METRICS ─────────────────────────────────────── -->
+  <section class="card" id="section-metrics">
+    <div class="card-header">
+      <span class="card-icon">📊</span>
+      <span class="card-title">Metrics</span>
+    </div>
+    <div class="card-body">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-val" id="m-packets">0</div>
+          <div class="metric-label">Packets</div>
+          <div class="metric-unit">observed</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" id="m-flows">0</div>
+          <div class="metric-label">Flows</div>
+          <div class="metric-unit">analyzed</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val accent-red" id="m-threats">0</div>
+          <div class="metric-label">Threats</div>
+          <div class="metric-unit">detected</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val accent-purple" id="m-decoy">0</div>
+          <div class="metric-label">Decoy</div>
+          <div class="metric-unit">interactions</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val accent-amber" id="m-isolations">0</div>
+          <div class="metric-label">Isolations</div>
+          <div class="metric-unit">executed</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val accent-cyan" id="m-restorations">0</div>
+          <div class="metric-label">Restorations</div>
+          <div class="metric-unit">completed</div>
+        </div>
+        <div class="metric-card" style="grid-column:span 2">
+          <div class="metric-val" id="m-detect-latency">—</div>
+          <div class="metric-label">Detection Latency</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric-card" style="grid-column:span 2">
+          <div class="metric-val" id="m-resp-latency">—</div>
+          <div class="metric-label">Response Latency</div>
+          <div class="metric-unit">ms</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── D. THREAT DETECTION ────────────────────────────── -->
+  <section class="card span-2" id="section-threat">
+    <div class="card-header">
+      <span class="card-icon">⚡</span>
+      <span class="card-title">Threat Detection</span>
+      <span class="card-badge" id="threat-badge" style="background:rgba(34,197,94,0.1);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)">NORMAL</span>
+    </div>
+    <div class="card-body">
+      <!-- Status bar -->
+      <div class="threat-status-bar normal" id="threat-status-bar">
+        <div class="threat-icon" id="threat-icon">✅</div>
+        <div>
+          <div class="threat-label" id="threat-label">NORMAL</div>
+          <div class="threat-meta" id="threat-meta">No threats detected — system nominal</div>
+        </div>
+        <div class="threat-score-big">
+          <div class="score-val" id="threat-score-val">0.00</div>
+          <div class="score-label">threat score</div>
+        </div>
+      </div>
+
+      <!-- Threat details -->
+      <div id="threat-details-wrap" style="display:none">
+        <div class="row-between" style="margin-bottom:0.5rem">
+          <div>
+            <div class="label">Attack Type</div>
+            <div style="font-family:var(--font-mono);font-size:0.85rem;font-weight:600;color:var(--accent-red)" id="attack-type">—</div>
+          </div>
+          <div style="text-align:right">
+            <div class="label">Confidence</div>
+            <div style="font-family:var(--font-mono);font-size:0.85rem;font-weight:600;color:var(--accent-cyan)" id="confidence-val">—</div>
+          </div>
+          <div style="text-align:right">
+            <div class="label">Detector</div>
+            <div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--text-secondary)" id="detector-name">—</div>
+          </div>
+        </div>
+        <div class="label" style="margin-bottom:0.4rem">Flow Features</div>
+        <div class="feature-grid" id="feature-grid">
+          <!-- populated by JS -->
+        </div>
+        <div class="separator"></div>
+        <div class="label" style="margin-bottom:0.25rem">Detection Reason</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.5" id="detection-reason">—</div>
+        <div class="separator"></div>
+        <div class="row-between">
+          <div><span class="label">Source</span> <span class="mono" style="font-size:0.78rem;color:var(--accent-red)" id="threat-src">—</span></div>
+          <div><span class="label">Target</span> <span class="mono" style="font-size:0.78rem;color:var(--accent-amber)" id="threat-dst">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── E. SECURITY CONTEXT (BDI) ──────────────────────── -->
+  <section class="card" id="section-context">
+    <div class="card-header">
+      <span class="card-icon">🧠</span>
+      <span class="card-title">Security Context</span>
+      <span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em">BDI-style</span>
+    </div>
+    <div class="card-body" id="bdi-body">
+      <div class="empty-state">Awaiting threat event…</div>
+    </div>
+  </section>
+
+  <!-- ── F. POLICY COMPARISON ───────────────────────────── -->
+  <section class="card span-3" id="section-policy">
+    <div class="card-header">
+      <span class="card-icon">⚖️</span>
+      <span class="card-title">Policy Comparison</span>
+      <span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted)">Rule-Based · Stackelberg · PPO</span>
+    </div>
+    <div class="card-body">
+      <div class="policy-grid" id="policy-grid">
+        <!-- Populated by JS -->
+        <div class="empty-state" style="grid-column:1/-1">Awaiting policy evaluation…</div>
+      </div>
+
+      <!-- Selected / Executed / Result summary banner -->
+      <div id="selected-action-wrap" style="display:none">
+        <div class="separator"></div>
+        <div class="selected-action-banner">
+          <div>
+            <div class="sa-label">Selected Policy</div>
+            <div class="sa-action" id="sel-policy-name">—</div>
+          </div>
+          <div style="width:1px;height:40px;background:var(--border-subtle)"></div>
+          <div>
+            <div class="sa-label">Selected Action</div>
+            <div class="sa-action policy-action-chip" id="sel-action-chip">—</div>
+          </div>
+          <div style="width:1px;height:40px;background:var(--border-subtle)"></div>
+          <div>
+            <div class="sa-label">Executed Action</div>
+            <div class="sa-action policy-action-chip" id="exec-action-chip">—</div>
+          </div>
+          <div style="width:1px;height:40px;background:var(--border-subtle)"></div>
+          <div>
+            <div class="sa-label">Execution Result</div>
+            <div class="sa-action" id="exec-result-chip">—</div>
+          </div>
+          <div class="sa-reason" id="sel-reason">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── G. RESPONSE / CONTAINMENT ──────────────────────── -->
+  <section class="card span-2" id="section-response">
+    <div class="card-header">
+      <span class="card-icon">🛡️</span>
+      <span class="card-title">Response &amp; Containment</span>
+      <span class="card-badge" id="resp-badge" style="background:rgba(34,197,94,0.1);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)">IDLE</span>
+    </div>
+    <div class="card-body" id="response-body">
+      <div class="empty-state">No response executed yet.</div>
+    </div>
+  </section>
+
+  <!-- ── H. EVENT TIMELINE ───────────────────────────────── -->
+  <section class="card" id="section-timeline">
+    <div class="card-header">
+      <span class="card-icon">📋</span>
+      <span class="card-title">Event Timeline</span>
+      <span class="card-badge" id="timeline-count" style="background:rgba(59,130,246,0.1);color:var(--accent-blue);border:1px solid rgba(59,130,246,0.3)">0 events</span>
+    </div>
+    <div class="timeline-wrap" id="timeline-wrap">
+      <div class="empty-state">No events yet.</div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Notification banner ──────────────────────────────────── -->
+<div class="alert-banner" id="alert-banner"></div>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

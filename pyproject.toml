@@ -18,6 +18,9 @@ dependencies = [
   "gymnasium",
   "stable-baselines3",
   "torch",
+  "fastapi",
+  "uvicorn",
+  "httpx",
 ]
 
 [tool.setuptools]
