@@ -602,8 +602,8 @@ function renderResponse(state) {
       <div class="response-detail-card">
         <div class="rdc-title">Response Details</div>
         <div class="rdc-row"><span class="rdc-key">Action</span><span class="rdc-val">${escHtml(action)}</span></div>
-        <div class="rdc-row"><span class="rdc-key">Target IP</span><span class="rdc-val">${escHtml(safe(rr.target_ip))}</span></div>
-        <div class="rdc-row"><span class="rdc-key">Source IP</span><span class="rdc-val">${escHtml(safe(rr.source_ip))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Target Device</span><span class="rdc-val">${escHtml(safe(rr.target_ip))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Remote IP</span><span class="rdc-val">${escHtml(safe(rr.source_ip))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Started</span><span class="rdc-val">${escHtml(fmtIso(rr.started_at))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Completed</span><span class="rdc-val">${escHtml(fmtIso(rr.completed_at))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Latency</span><span class="rdc-val">${escHtml(latency)}</span></div>

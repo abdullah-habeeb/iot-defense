@@ -186,14 +186,24 @@ def _dos_traffic(host: Any, target_ip: str, port: int, duration: float) -> str:
 def _brute_force_traffic(host: Any, target_ip: str, port: int, duration: float, interval: float) -> str:
     """Repeated real TCP connect attempts against a single fixed port at a
     moderate, sustained rate -- unlike a scan (many ports) or a flood (one
-    port, raw packet-rate burst)."""
+    port, raw packet-rate burst).
+
+    The connect timeout (0.15s) matches simulation/traffic.py's
+    generate_brute_force_mininet_traffic after a live run there showed a
+    0.3s timeout close to real RST latency produces barely enough packets
+    to clear RuleBasedBruteForceDetector's min_packet_count -- this
+    dataset-generation copy still had the old 0.3s value and, verified
+    against real Mininet, was producing runs as low as 9 packets against
+    a threshold of 12: a ground-truth "brute_force" label the live rule-
+    based detector couldn't actually have recognized as one.
+    """
     return host.cmd(
         "python3 - <<'PY'\n"
         "import socket, time\n"
         "start = time.time()\n"
         f"while time.time() - start < {duration}:\n"
         "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
-        "    sock.settimeout(0.3)\n"
+        "    sock.settimeout(0.15)\n"
         "    try:\n"
         f"        sock.connect(('{target_ip}', {port}))\n"
         "        sock.sendall(b'USER admin\\r\\nPASS wrong\\r\\n')\n"
@@ -378,8 +388,13 @@ def generate_dataset(
                 # Brute-force traffic
                 source = net.get("attacker")
                 bf_port = rng.choice(brute_force_target_ports)
-                bf_interval = rng.choice([0.2, 0.3, 0.4])
-                _brute_force_traffic(source, target_ip, bf_port, duration=4.0, interval=bf_interval)
+                # duration=6.0 with a 0.1-0.2s interval (not the original
+                # 4.0s/0.2-0.4s) mirrors the margin verified live in
+                # simulation/traffic.py: even the slowest combination here
+                # clears RuleBasedBruteForceDetector's min_packet_count=12
+                # with real headroom, instead of landing right at it.
+                bf_interval = rng.choice([0.1, 0.15, 0.2])
+                _brute_force_traffic(source, target_ip, bf_port, duration=6.0, interval=bf_interval)
             else:
                 # Exfiltration traffic -- direction reversed: the chosen
                 # target device is the compromised traffic *source*, not

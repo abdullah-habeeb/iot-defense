@@ -130,6 +130,17 @@ class RuleBasedBruteForceDetector(Detector):
     packet_count is much higher than a brief reconnaissance probe. The
     upper rate bound is what keeps a real brute-force run from ever also
     tripping RuleBasedDosDetector's much higher rate threshold.
+
+    max_average_packet_size exists specifically to keep this detector out
+    of RuleBasedExfiltrationDetector's territory: both restrict
+    unique_destination_ports to a single port, and their packet_count
+    windows overlap ([12, inf) vs [3, 25]), so without an upper bound on
+    payload size, a real exfiltration flow whose packet_count happened to
+    land in that overlap would be silently misclassified as brute-force --
+    this detector runs first in registry order, so it would win regardless
+    of exfiltration's much larger payloads. A real login attempt's payload
+    is tens of bytes; exfiltration's is 1200+; 200 sits with real margin on
+    both sides of that gap.
     """
 
     def __init__(
@@ -138,6 +149,7 @@ class RuleBasedBruteForceDetector(Detector):
         min_packet_count: int | None = None,
         min_packets_per_second: float | None = None,
         max_packets_per_second: float | None = None,
+        max_average_packet_size: float | None = None,
     ) -> None:
         config = _load_detection_policy()
         self.max_unique_ports = int(
@@ -152,16 +164,21 @@ class RuleBasedBruteForceDetector(Detector):
         self.max_packets_per_second = float(
             config.get("brute_force_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 15.0)
         )
+        self.max_average_packet_size = float(
+            config.get("brute_force_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 200.0)
+        )
 
     def detect(self, features: dict[str, Any]) -> ThreatEvent:
         unique_ports = int(features.get("unique_destination_ports", 0))
         packet_count = int(features.get("packet_count", 0))
         packets_per_second = float(features.get("packets_per_second", 0.0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
 
         is_threat = (
             unique_ports <= self.max_unique_ports
             and packet_count >= self.min_packet_count
             and self.min_packets_per_second <= packets_per_second <= self.max_packets_per_second
+            and average_packet_size <= self.max_average_packet_size
         )
 
         if is_threat:
