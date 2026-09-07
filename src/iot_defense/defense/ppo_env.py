@@ -15,7 +15,46 @@ from iot_defense.defense.decision import DefenseAction
 
 ACTION_TO_INDEX = {action: index for index, action in enumerate(DefenseAction)}
 INDEX_TO_ACTION = {index: action for action, index in ACTION_TO_INDEX.items()}
-OBSERVATION_SIZE = 16
+
+# Intentions are a distinct axis from attack identity -- several attacks may
+# reasonably share one (e.g. two containment-preferring attacks both using
+# "contain_malicious_activity") -- so this stays an explicit, static list
+# rather than one auto-derived 1:1 from ATTACK_SCENARIOS. Every intention
+# used by any registered scenario's `intention` field, plus the two fixed
+# ones below ("normal"'s own, and a reserved value used elsewhere in the
+# real controller but not by any training scenario), must appear here.
+INTENTIONS = (
+    "protect_legitimate_iot_service",
+    "contain_malicious_activity",
+    "gather_attacker_intelligence_when_appropriate",
+    "minimize_unnecessary_disruption",
+)
+
+
+# TRAINING_SCENARIOS, _scenario_by_attack_type(), and OBSERVATION_SIZE are
+# functions, not module-level constants: this module is eagerly imported by
+# iot_defense.defense's own package __init__, which the registry itself
+# pulls in while building ATTACK_SCENARIOS -- a top-level constant here
+# would deadlock that cycle. The underlying import is cheap after the
+# first real load (cached in sys.modules), so each call only rebuilds a
+# small tuple/dict, not a re-import.
+def TRAINING_SCENARIOS() -> tuple[str, ...]:
+    """The 'normal' scenario plus one entry per registered attack, in
+    registry order -- a new AttackScenario automatically gets its own
+    training scenario and one-hot slot with no other change in this file."""
+    from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+    return ("normal",) + tuple(scenario.attack_type for scenario in ATTACK_SCENARIOS.values())
+
+
+def _scenario_by_attack_type() -> dict[str, Any]:
+    from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+    return {scenario.attack_type: scenario for scenario in ATTACK_SCENARIOS.values()}
+
+
+def OBSERVATION_SIZE() -> int:
+    return 6 + len(TRAINING_SCENARIOS()) + len(INTENTIONS) + len(DefenseAction)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +85,8 @@ class SecurityContextEncoder:
         packet_rate = min(max(float(features.get("packets_per_second", 0.0)), 0.0) / 100.0, 1.0)
         unique_ports = min(max(float(features.get("unique_destination_ports", 0.0)), 0.0) / 20.0, 1.0)
         history = min(len(beliefs.previous_relevant_events) / 5.0, 1.0)
+        threat_one_hot = [float(threat_type == scenario) for scenario in TRAINING_SCENARIOS()]
+        intention_one_hot = [float(intention == candidate) for candidate in INTENTIONS]
         base_vector = [
                 np.clip(beliefs.threat_score, 0.0, 1.0),
                 np.clip(beliefs.confidence, 0.0, 1.0),
@@ -53,14 +94,8 @@ class SecurityContextEncoder:
                 unique_ports,
                 self.criticality.get(beliefs.device_criticality.lower(), 0.0),
                 history,
-                float(threat_type == "normal"),
-                float(threat_type == "reconnaissance_port_scan"),
-                float(intention == "protect_legitimate_iot_service"),
-                float(intention == "contain_malicious_activity"),
-                float(intention == "gather_attacker_intelligence_when_appropriate"),
-                float(intention == "minimize_unnecessary_disruption"),
-            ]
-        stack_vector = [0.0, 0.0, 0.0, 0.0]
+            ] + threat_one_hot + intention_one_hot
+        stack_vector = [0.0] * len(DefenseAction)
         if stackelberg_info:
             selected = stackelberg_info.get("selected_action")
             if selected in {action.value for action in DefenseAction}:
@@ -80,17 +115,20 @@ def context_for_scenario(scenario: str) -> SecurityContext:
             observed_features={"packets_per_second": 1.0, "unique_destination_ports": 0},
         )
         intention = "protect_legitimate_iot_service"
-    else:
-        beliefs = Beliefs(
-            threat_type="reconnaissance_port_scan",
-            threat_score=0.9,
-            confidence=0.88,
-            source_device="10.0.0.100",
-            destination_device="10.0.0.10",
-            observed_features={"packets_per_second": 20.0, "unique_destination_ports": 4},
-        )
-        intention = "gather_attacker_intelligence_when_appropriate"
-    return SecurityContext(beliefs=beliefs, desires=Desires(), intention=intention)
+        return SecurityContext(beliefs=beliefs, desires=Desires(), intention=intention)
+
+    attack = _scenario_by_attack_type().get(scenario)
+    if attack is None:
+        raise ValueError(f"Unsupported training scenario: {scenario!r}")
+    beliefs = Beliefs(
+        threat_type=attack.attack_type,
+        threat_score=attack.ppo_threat_score,
+        confidence=attack.ppo_confidence,
+        source_device="10.0.0.100",
+        destination_device="10.0.0.10",
+        observed_features=dict(attack.ppo_example_features),
+    )
+    return SecurityContext(beliefs=beliefs, desires=Desires(), intention=attack.intention)
 
 
 class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
@@ -101,7 +139,7 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
     def __init__(self, episode_length: int = 4, reward_config: RewardConfig | None = None) -> None:
         super().__init__()
         self.action_space = spaces.Discrete(len(DefenseAction))
-        self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE,), dtype=np.float32)
+        self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
         self.episode_length = episode_length
         self.reward_config = reward_config or RewardConfig()
         self.encoder = SecurityContextEncoder()
@@ -118,43 +156,63 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
     def step(self, action: int):
         if action not in INDEX_TO_ACTION:
             raise ValueError(f"Invalid defense action index: {action}")
-        scenario = "normal" if self._scenario_index % 2 == 0 else "reconnaissance_port_scan"
+        training_scenarios = TRAINING_SCENARIOS()
+        scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
         context = context_for_scenario(scenario)
         selected_action = INDEX_TO_ACTION[action]
         reward, components = self.calculate_reward(context, selected_action)
         self._step += 1
         self._scenario_index += 1
         terminated = self._step >= self.episode_length
-        next_scenario = "normal" if self._scenario_index % 2 == 0 else "reconnaissance_port_scan"
+        next_scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
         observation = self.encoder.encode(context_for_scenario(next_scenario))
         return observation, reward, terminated, False, {"scenario": scenario, "reward_components": components}
 
     def calculate_reward(self, context: SecurityContext, action: DefenseAction) -> tuple[float, dict[str, float]]:
         """Calculate the configured, deterministic reward for one simulated outcome."""
         config = self.reward_config
-        normal = context.beliefs.threat_type == "normal"
+        threat_type = context.beliefs.threat_type
         components: dict[str, float] = {"response_cost": config.response_cost}
         reward = config.response_cost
-        if normal and action == DefenseAction.ALLOW:
-            components["service_preserved"] = config.service_preserved
-            reward += config.service_preserved
-        elif normal:
-            components["false_positive_intervention"] = config.false_positive_intervention
-            reward += config.false_positive_intervention
-            if action == DefenseAction.ISOLATE:
-                components["unnecessary_isolation"] = config.unnecessary_isolation
-                reward += config.unnecessary_isolation
+
+        if threat_type == "normal":
+            if action == DefenseAction.ALLOW:
+                components["service_preserved"] = config.service_preserved
+                reward += config.service_preserved
+            else:
+                components["false_positive_intervention"] = config.false_positive_intervention
+                reward += config.false_positive_intervention
+                if action == DefenseAction.ISOLATE:
+                    components["unnecessary_isolation"] = config.unnecessary_isolation
+                    reward += config.unnecessary_isolation
+                    components["service_disruption"] = config.service_disruption
+                    reward += config.service_disruption
+        else:
+            attack = _scenario_by_attack_type().get(threat_type)
+            if attack is None:
+                raise ValueError(f"Unsupported threat type for reward calculation: {threat_type!r}")
+
+            if action == attack.preferred_action:
+                if attack.preferred_action == DefenseAction.DECOY:
+                    # Deception only pays off framed as diversion +
+                    # intelligence gathering, not generic "containment".
+                    components["attacker_diverted"] = config.attacker_diverted
+                    components["intelligence_gained"] = config.intelligence_gained
+                    reward += config.attacker_diverted + config.intelligence_gained
+                else:
+                    # ISOLATE (and, once registered, any other
+                    # containment-style preferred action) -- successful
+                    # containment of an attack this volumetric or direct
+                    # offers no useful deception target.
+                    components["attack_contained"] = config.attack_contained
+                    reward += config.attack_contained
+            elif action == DefenseAction.ALLOW:
+                components["successful_compromise"] = config.successful_compromise
+                reward += config.successful_compromise
+            else:
+                # Any other non-preferred, non-ALLOW response: still better
+                # than letting the attack through, but not the response
+                # this scenario is optimized for.
                 components["service_disruption"] = config.service_disruption
                 reward += config.service_disruption
-        elif action == DefenseAction.DECOY:
-            components["attacker_diverted"] = config.attacker_diverted
-            components["intelligence_gained"] = config.intelligence_gained
-            reward += config.attacker_diverted + config.intelligence_gained
-        elif action == DefenseAction.ISOLATE:
-            components["attack_contained"] = config.attack_contained
-            components["service_disruption"] = config.service_disruption
-            reward += config.attack_contained + config.service_disruption
-        elif action == DefenseAction.ALLOW:
-            components["successful_compromise"] = config.successful_compromise
-            reward += config.successful_compromise
         return float(reward), components

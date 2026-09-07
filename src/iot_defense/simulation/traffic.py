@@ -70,3 +70,30 @@ class TrafficGenerator:
         target_ip = "10.0.0.10"
         command = f"python3 - <<'PY'\nimport socket, time\nstart = time.time()\nports = [22, 80, 8080, 443]\nwhile time.time() - start < {duration_seconds}:\n    for port in ports:\n        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n        s.settimeout(0.25)\n        try:\n            s.connect(('10.0.0.10', port))\n        except OSError:\n            pass\n        finally:\n            s.close()\n    time.sleep(0.1)\nprint('attack_done')\nPY"
         return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
+    def generate_dos_mininet_traffic(self, net: Any, duration_seconds: int = 5) -> dict[str, Any]:
+        """Generate a bounded UDP flood attack over the simulated IoT network.
+
+        Unlike the port-scan attack above (many destination ports, moderate
+        rate), this sends a tight-loop burst of UDP packets to a single fixed
+        port for the whole window -- the signature detectors use to tell a
+        flood from reconnaissance is high packets_per_second combined with
+        low unique_destination_ports, the opposite profile of a port scan.
+        Entirely confined to the Mininet lab and bounded by duration_seconds.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 5683
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'x' * 64\n"
+            "start = time.time()\n"
+            f"while time.time() - start < {duration_seconds}:\n"
+            f"    sock.sendto(payload, ('{target_ip}', {target_port}))\n"
+            "sock.close()\n"
+            "print('dos_flood_done')\n"
+            "PY"
+        )
+        return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}

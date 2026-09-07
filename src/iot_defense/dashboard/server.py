@@ -78,12 +78,23 @@ async def message_stream(request: Request) -> StreamingResponse:
         last_sent: str | None = None
         last_mtime: float | None = None
 
-        # Send current state immediately on connect
+        # Send current state immediately on connect. state.json (not the
+        # in-process controller.state) is the authoritative source here: a
+        # demo run under sudo lives in a separate process, so the in-process
+        # object never changes during a real run. On a fresh connection mid
+        # or after a demo, sending the stale in-process snapshot first would
+        # briefly overwrite the correct data with a leftover IDLE state
+        # until the next poll cycle corrected it.
         try:
-            last_sent = json.dumps(controller.state, default=str)
+            last_sent = _STATE_FILE.read_text(encoding="utf-8")
+            json.loads(last_sent)  # validate before trusting a partial write
             yield f"data: {last_sent}\n\n"
-        except Exception:  # noqa: BLE001
-            yield f"data: {{}}\n\n"
+        except (OSError, json.JSONDecodeError):
+            try:
+                last_sent = json.dumps(controller.state, default=str)
+                yield f"data: {last_sent}\n\n"
+            except Exception:  # noqa: BLE001
+                yield f"data: {{}}\n\n"
         try:
             last_mtime = _STATE_FILE.stat().st_mtime
         except OSError:

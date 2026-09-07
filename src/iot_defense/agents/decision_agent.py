@@ -29,3 +29,17 @@ class DecisionAgent:
         decision = self.policy.decide(context)
         self._event_history.append(threat_event)
         return decision
+
+    def record(self, threat_event: ThreatEvent) -> None:
+        """Record an event into history without evaluating a policy for it.
+
+        Lets a caller build_context() a shared context once and evaluate
+        several policies against it, while still contributing that event to
+        future previous_relevant_events history exactly as decide() would.
+        """
+        self._event_history.append(threat_event)
+
+    @property
+    def event_history(self) -> list[ThreatEvent]:
+        """Read-only view of the events recorded so far."""
+        return list(self._event_history)

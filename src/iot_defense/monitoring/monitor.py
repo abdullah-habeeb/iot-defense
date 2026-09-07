@@ -63,16 +63,31 @@ class PacketMonitor:
         of assuming a fixed sleep was long enough -- reading the pcap file
         before tcpdump has flushed it produces a truncated/unparseable
         capture even when packets were genuinely captured. If tcpdump has not
-        hit its packet limit within completion_timeout, it is sent SIGTERM
-        (tcpdump flushes and exits cleanly on termination) so the file is
-        always safe to read when this returns.
+        hit its packet limit within completion_timeout, it is sent SIGTERM.
+
+        A low-traffic capture (e.g. a handful of benign packets) leaves
+        tcpdump mostly idle, blocked in libpcap's own read loop between
+        packets -- it doesn't always notice and act on SIGTERM instantly,
+        so a short grace window after sending it isn't always long enough
+        even though the signal itself was delivered. A high-traffic capture
+        doesn't have this problem, since its read loop is cycling
+        constantly and reacts to the signal almost immediately -- which is
+        exactly why this only ever showed up on low-traffic captures. The
+        grace window is generous enough to cover that, and SIGKILL is a
+        last-resort fallback that guarantees the process is gone (accepting
+        a possibly-truncated file over hanging indefinitely) so this method
+        never returns while tcpdump might still be mid-write.
         """
         host = net.get(session["host_name"])
         log_path = session["log_path"]
         completed = self._wait_for_log_marker(host, log_path, "packets captured", timeout=completion_timeout)
         if not completed and session.get("pid"):
-            host.cmd(f"kill -TERM {session['pid']} 2>/dev/null")
-            self._wait_for_log_marker(host, log_path, "packets captured", timeout=1.0)
+            pid = session["pid"]
+            host.cmd(f"kill -TERM {pid} 2>/dev/null")
+            completed = self._wait_for_log_marker(host, log_path, "packets captured", timeout=3.0)
+            if not completed:
+                host.cmd(f"kill -KILL {pid} 2>/dev/null")
+                time.sleep(0.3)
         return session["capture_path"]
 
     def _wait_for_log_marker(self, host: Any, log_path: str, marker: str, timeout: float, poll_interval: float = 0.05) -> bool:
@@ -90,7 +105,15 @@ class PacketMonitor:
         if not os.path.exists(capture_path):
             return []
 
-        packets = rdpcap(capture_path)
+        try:
+            packets = rdpcap(capture_path)
+        except Exception:  # noqa: BLE001
+            # Defense in depth: stop_capture() should already guarantee
+            # tcpdump has exited and flushed by the time this runs, but a
+            # single retry after a brief pause costs nothing and protects
+            # against any residual filesystem-visibility race.
+            time.sleep(0.5)
+            packets = rdpcap(capture_path)
         events: list[dict[str, Any]] = []
         for packet in packets:
             if not hasattr(packet, "payload"):

@@ -11,7 +11,22 @@ import yaml
 from iot_defense.defense.decision import DefenseAction
 
 
-OBSERVED_THREAT_TYPES = ("NORMAL", "RECONNAISSANCE_PORT_SCAN")
+def _observed_threat_types() -> tuple[str, ...]:
+    """NORMAL plus every registered attack's Stackelberg lookup key.
+
+    Computed lazily on each call, not as a module-level constant: this
+    module is eagerly imported by iot_defense.defense's own package
+    __init__, which the registry itself pulls in while building
+    ATTACK_SCENARIOS -- a top-level import/constant here would deadlock
+    that cycle. The underlying import is cheap after the first real load
+    (cached in sys.modules), so this costs a small dict/tuple rebuild per
+    call, not a re-import.
+    """
+    from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+    return ("NORMAL",) + tuple(scenario.observed_threat_key for scenario in ATTACK_SCENARIOS.values())
+
+
 ATTACKER_RESPONSE_STRATEGIES = ("CONTINUE", "RETREAT")
 DEFENDER_STRATEGIES = tuple(DefenseAction)
 
@@ -83,7 +98,7 @@ class StackelbergGame:
         raw_payoffs: dict[str, dict[str, dict[str, dict[str, float]]]]
     ) -> dict[str, dict[DefenseAction, dict[str, Payoff]]]:
         parsed: dict[str, dict[DefenseAction, dict[str, Payoff]]] = {}
-        for observed_threat in OBSERVED_THREAT_TYPES:
+        for observed_threat in _observed_threat_types():
             threat_values = raw_payoffs.get(observed_threat, {})
             parsed[observed_threat] = {}
             for action in DEFENDER_STRATEGIES:
@@ -99,7 +114,7 @@ class StackelbergGame:
 
     def attacker_best_response(self, observed_threat: str, defender_action: DefenseAction) -> tuple[str, float]:
         """Return the follower response maximizing utility for an observed threat."""
-        if observed_threat not in OBSERVED_THREAT_TYPES:
+        if observed_threat not in _observed_threat_types():
             raise ValueError(f"Unsupported observed threat type: {observed_threat}")
         candidates = [
             (response, self.payoffs[observed_threat][defender_action][response].attacker)
@@ -114,7 +129,7 @@ class StackelbergGame:
         attacker_response: str,
     ) -> float:
         """Return defender utility under the follower's predicted response."""
-        if observed_threat not in OBSERVED_THREAT_TYPES:
+        if observed_threat not in _observed_threat_types():
             raise ValueError(f"Unsupported observed threat type: {observed_threat}")
         if attacker_response not in ATTACKER_RESPONSE_STRATEGIES:
             raise ValueError(f"Unsupported attacker response strategy: {attacker_response}")
@@ -127,7 +142,7 @@ class StackelbergGame:
         action. The observed IDS threat is state, while the returned response is
         the attacker's strategic choice after the leader action.
         """
-        if observed_threat not in OBSERVED_THREAT_TYPES:
+        if observed_threat not in _observed_threat_types():
             raise ValueError(f"Unsupported observed threat type: {observed_threat}")
         evaluations = []
         for action in DEFENDER_STRATEGIES:

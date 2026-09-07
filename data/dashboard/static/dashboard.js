@@ -112,6 +112,23 @@ function renderHeader(state) {
     badge.textContent = phase;
     badge.className = 'phase-badge ' + (PHASE_CLASS[phase] || '');
   }
+
+  const attackBadge = $('attack-mode-badge');
+  if (attackBadge) {
+    const mode = state.attack_mode;
+    if (mode === 'dos') {
+      attackBadge.textContent = 'ATTACK: DDOS FLOOD';
+      attackBadge.style.display = '';
+      attackBadge.style.cssText += ';border-color:var(--accent-red);color:var(--accent-red);background:rgba(239,68,68,0.08)';
+    } else if (mode === 'reconnaissance') {
+      attackBadge.textContent = 'ATTACK: RECONNAISSANCE';
+      attackBadge.style.display = '';
+      attackBadge.style.cssText += ';border-color:var(--accent-amber);color:var(--accent-amber);background:rgba(245,158,11,0.08)';
+    } else {
+      attackBadge.style.display = 'none';
+    }
+  }
+
   updatePipeline(phase);
 }
 
@@ -174,7 +191,8 @@ function renderTraffic(state) {
   const tbody = $('traffic-tbody');
   const badge = $('traffic-count-badge');
   if (!tbody) return;
-  if (badge) badge.textContent = `${traffic.length} pkts`;
+  const suspiciousCount = traffic.filter(p => p.packet_suspicious).length;
+  if (badge) badge.textContent = suspiciousCount ? `${traffic.length} pkts · ${suspiciousCount} flagged` : `${traffic.length} pkts`;
 
   if (!traffic.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Awaiting packets…</td></tr>';
@@ -184,11 +202,13 @@ function renderTraffic(state) {
   const rows = [...traffic].reverse().slice(0, 20).map((pkt, idx) => {
     const proto = String(pkt.protocol || pkt.proto || 'UNKNOWN').toUpperCase();
     const cls = PROTO_CLASS[proto] || '';
-    return `<tr class="${idx === 0 ? 'tl-entry-new' : ''}">
+    const rowCls = [idx === 0 ? 'tl-entry-new' : '', pkt.packet_suspicious ? 'pkt-suspicious' : ''].filter(Boolean).join(' ');
+    const flag = pkt.packet_suspicious ? ' <span title="Flagged by packet-level heuristic detector">⚠</span>' : '';
+    return `<tr class="${rowCls}">
       <td>${escHtml(fmtTimestamp(pkt.timestamp))}</td>
       <td class="mono">${escHtml(safe(pkt.src_ip))}</td>
       <td class="mono">${escHtml(safe(pkt.dst_ip))}</td>
-      <td class="${cls}">${escHtml(proto)}</td>
+      <td class="${cls}">${escHtml(proto)}${flag}</td>
       <td>${safe(pkt.src_port)}</td>
       <td>${safe(pkt.dst_port)}</td>
       <td>${safe(pkt.packet_length)}</td>
