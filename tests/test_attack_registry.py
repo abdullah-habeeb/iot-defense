@@ -41,6 +41,18 @@ def test_every_scenario_has_distinct_attack_type_and_observed_threat_key():
     assert len({s.observed_threat_key for s in scenarios}) == len(scenarios)
 
 
+# Detector-triggering feature overrides for scenarios whose signature needs
+# more than "packet_count=200 + ppo_example_features" to trip -- e.g.
+# exfiltration's detector also requires a *bounded* packet_count and a
+# large average_packet_size, neither of which ppo_example_features carries
+# (that field is a template for PPO's simpler packet-rate/port-diversity
+# encoding, not a full detector-triggering feature set). Add an entry here
+# for any future attack whose detector inspects additional fields.
+DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
+    "exfiltration": {"packet_count": 10, "average_packet_size": 1200.0},
+}
+
+
 class TestUnifiedDetectorIsRegistryDriven:
     def test_default_construction_uses_the_full_registry(self):
         detector = UnifiedRuleBasedDetector()
@@ -52,16 +64,12 @@ class TestUnifiedDetectorIsRegistryDriven:
         registry) classifies it as this attack -- not "normal" and not a
         different registered attack."""
         detector = scenario.build_detector()
-        # Every currently registered detector only inspects
-        # unique_destination_ports/packet_count/packets_per_second, so a
-        # single feature dict driven from the scenario's own PPO example
-        # features (already tuned to trip that attack's thresholds) is
-        # enough to exercise real detection logic generically.
         features = {
             "source_ip": "10.0.0.100",
             "destination_ip": "10.0.0.10",
             "packet_count": 200,
             **scenario.ppo_example_features,
+            **DETECTION_FEATURE_OVERRIDES.get(scenario.key, {}),
         }
         event = detector.detect(features)
         assert event.attack_type == scenario.attack_type

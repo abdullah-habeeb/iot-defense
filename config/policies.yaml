@@ -22,6 +22,10 @@ policy:
     brute_force_min_packet_count: 12
     brute_force_min_packets_per_second: 1.0
     brute_force_max_packets_per_second: 15.0
+    exfiltration_max_unique_destination_ports: 2
+    exfiltration_min_packet_count: 3
+    exfiltration_max_packet_count: 25
+    exfiltration_min_average_packet_size: 600.0
   decision:
     low_threat_score_max: 0.2
     recon_decoy_score_min: 0.8
@@ -32,6 +36,8 @@ policy:
     dos_isolate_confidence_min: 0.7
     brute_force_score_min: 0.65
     brute_force_confidence_min: 0.65
+    exfiltration_score_min: 0.7
+    exfiltration_confidence_min: 0.7
   stackelberg:
     payoffs:
       NORMAL:
@@ -91,10 +97,35 @@ policy:
           # adds THROTTLE and a payoff column to match.
           CONTINUE: {attacker: -6.0, defender: 7.0}
           RETREAT: {attacker: -7.0, defender: 6.0}
+      DATA_EXFILTRATION:
+        ALLOW:
+          # Worse than every other ALLOW+CONTINUE here -- data actually
+          # leaves permanently, unlike a scan/flood/login attempt.
+          CONTINUE: {attacker: 10.0, defender: -9.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          # An automated exfiltration script doesn't notice an alert either.
+          CONTINUE: {attacker: 7.0, defender: -4.0}
+          RETREAT: {attacker: -2.0, defender: 2.0}
+        DECOY:
+          # No deception value once the real device is already
+          # compromised and actively leaking -- a decoy can't substitute
+          # for data that's already gone.
+          CONTINUE: {attacker: 3.0, defender: -3.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ISOLATE:
+          # Best available response -- stops the leak immediately.
+          CONTINUE: {attacker: -8.0, defender: 10.0}
+          RETREAT: {attacker: -9.0, defender: 8.0}
   ppo:
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"
-    training_timesteps: 768
+    # Raised from 768 after adding the fifth scenario (data exfiltration):
+    # at 768 timesteps PPO occasionally disagreed with the rule-based and
+    # Stackelberg policies specifically on exfiltration (picking DECOY
+    # instead of ISOLATE) even though it converged correctly on every
+    # other scenario -- 3000 timesteps (still ~12s to train) resolved it.
+    training_timesteps: 3000
     environment_episode_length: 6
     reward:
       attack_contained: 5.0
