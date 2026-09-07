@@ -120,6 +120,73 @@ class RuleBasedDosDetector(Detector):
         )
 
 
+class RuleBasedBruteForceDetector(Detector):
+    """A simple detector for credential-stuffing / brute-force behavior.
+
+    Sits between a scan and a flood on every axis: like a flood, traffic
+    concentrates on very few destination ports (repeated attempts against
+    one login service); unlike a flood, the rate is bounded to a moderate,
+    sustained band rather than a raw packet-rate burst, and the total
+    packet_count is much higher than a brief reconnaissance probe. The
+    upper rate bound is what keeps a real brute-force run from ever also
+    tripping RuleBasedDosDetector's much higher rate threshold.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_packets_per_second: float | None = None,
+        max_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(
+            config.get("brute_force_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2)
+        )
+        self.min_packet_count = int(
+            config.get("brute_force_min_packet_count", min_packet_count if min_packet_count is not None else 12)
+        )
+        self.min_packets_per_second = float(
+            config.get("brute_force_min_packets_per_second", min_packets_per_second if min_packets_per_second is not None else 1.0)
+        )
+        self.max_packets_per_second = float(
+            config.get("brute_force_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 15.0)
+        )
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_packets_per_second <= packets_per_second <= self.max_packets_per_second
+        )
+
+        if is_threat:
+            attack_type = "brute_force"
+            threat_score = 0.75
+            confidence = 0.75
+            reason = "many repeated connection attempts concentrated on a single service port"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet brute-force criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedBruteForceDetector",
+        )
+
+
 class UnifiedRuleBasedDetector(Detector):
     """Classify captured flow features without being told which attack (if
     any) is actually happening.

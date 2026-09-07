@@ -183,6 +183,30 @@ def _dos_traffic(host: Any, target_ip: str, port: int, duration: float) -> str:
     )
 
 
+def _brute_force_traffic(host: Any, target_ip: str, port: int, duration: float, interval: float) -> str:
+    """Repeated real TCP connect attempts against a single fixed port at a
+    moderate, sustained rate -- unlike a scan (many ports) or a flood (one
+    port, raw packet-rate burst)."""
+    return host.cmd(
+        "python3 - <<'PY'\n"
+        "import socket, time\n"
+        "start = time.time()\n"
+        f"while time.time() - start < {duration}:\n"
+        "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+        "    sock.settimeout(0.3)\n"
+        "    try:\n"
+        f"        sock.connect(('{target_ip}', {port}))\n"
+        "        sock.sendall(b'USER admin\\r\\nPASS wrong\\r\\n')\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "    finally:\n"
+        "        sock.close()\n"
+        f"    time.sleep({interval})\n"
+        "print('brute_force_dataset_traffic_done')\n"
+        "PY"
+    )
+
+
 def get_scenario_type(run_number: int) -> str:
     """Deterministically assign scenario type based on run number.
 
@@ -208,6 +232,8 @@ def get_scenario_type(run_number: int) -> str:
         return 'reconnaissance_unseen'
     if attack_key == "dos":
         return 'dos_flood'
+    if attack_key == "brute_force":
+        return 'brute_force'
     raise ValueError(f"No dataset-generation dispatch registered for attack key: {attack_key!r}")
 
 def generate_dataset(
@@ -241,6 +267,9 @@ def generate_dataset(
 
     # DoS flood target ports -- always a single fixed port per run
     dos_target_ports = [5683, 1883, 8080, 9999]
+
+    # Brute-force target port -- a single simulated login/management port
+    brute_force_target_ports = [2222, 8022, 9022]
 
 
     rows: list[dict[str, Any]] = []
@@ -314,11 +343,17 @@ def generate_dataset(
                 ports = rng.choice(recon_known_port_sets if scenario == 'reconnaissance_known' else recon_unseen_port_sets)
                 interval = rng.choice([0.01, 0.05, 0.1])
                 _reconnaissance_traffic(source, target_ip, ports, interval)
-            else:
+            elif scenario == "dos_flood":
                 # DoS flood traffic
                 source = net.get("attacker")
                 dos_port = rng.choice(dos_target_ports)
                 _dos_traffic(source, target_ip, dos_port, duration=2.0)
+            else:
+                # Brute-force traffic
+                source = net.get("attacker")
+                bf_port = rng.choice(brute_force_target_ports)
+                bf_interval = rng.choice([0.2, 0.3, 0.4])
+                _brute_force_traffic(source, target_ip, bf_port, duration=4.0, interval=bf_interval)
 
             current_stage = "process_capture"
             capture_path = monitor.stop_capture(net, capture_session, completion_timeout=4.0)
@@ -329,13 +364,14 @@ def generate_dataset(
             run_rows = 0
             for feature in features:
                 if feature.destination_ip == target_ip:
-                    # In normal, we trust the source IP. In recon/dos, we look for attacker IP.
+                    # In normal, we trust the source IP. In recon/dos/brute-force, we look for attacker IP.
                     is_recon = (scenario.startswith("reconnaissance") and feature.source_ip == "10.0.0.100")
                     is_dos = (scenario == "dos_flood" and feature.source_ip == "10.0.0.100")
+                    is_brute_force = (scenario == "brute_force" and feature.source_ip == "10.0.0.100")
                     is_normal = (scenario.startswith("normal") and feature.source_ip in {"10.0.0.30", "10.0.0.20"})
 
-                    if is_recon or is_dos or is_normal:
-                        label = 2 if is_dos else (1 if is_recon else 0)
+                    if is_recon or is_dos or is_brute_force or is_normal:
+                        label = 3 if is_brute_force else (2 if is_dos else (1 if is_recon else 0))
                         rows.append(
                             flow_to_dataset_row(
                                 feature,
