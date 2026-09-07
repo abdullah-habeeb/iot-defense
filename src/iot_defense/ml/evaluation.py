@@ -31,19 +31,55 @@ def split_by_run(
 
 
 def classification_metrics(y_true: Any, y_pred: Any) -> dict[str, Any]:
-    """Calculate binary metrics, including FPR and FNR, from held-out labels."""
-    matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
-    tn, fp, fn, tp = matrix.ravel()
+    """Calculate classification metrics from held-out labels.
+
+    Returns the original binary tn/fp/fn/tp/FPR/FNR summary unchanged when
+    only classes 0/1 are present (normal/reconnaissance), so existing binary
+    evaluations keep the exact same shape. With a third class present (e.g.
+    dos_flood=2), tn/fp/fn/tp are not well-defined, so a macro-averaged
+    summary plus a full confusion matrix and per-class breakdown are
+    returned instead.
+    """
+    true_labels = set(int(v) for v in y_true)
+    pred_labels = set(int(v) for v in y_pred)
+    present = true_labels | pred_labels
+
+    if present.issubset({0, 1}):
+        matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
+        tn, fp, fn, tp = matrix.ravel()
+        return {
+            "confusion_matrix": matrix.tolist(),
+            "labels": [0, 1],
+            "tn": int(tn),
+            "fp": int(fp),
+            "fn": int(fn),
+            "tp": int(tp),
+            "accuracy": float(accuracy_score(y_true, y_pred)),
+            "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+            "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+            "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+            "false_positive_rate": float(fp / (fp + tn)) if fp + tn else 0.0,
+            "false_negative_rate": float(fn / (fn + tp)) if fn + tp else 0.0,
+        }
+
+    labels = sorted(present | {0, 1, 2})
+    matrix = confusion_matrix(y_true, y_pred, labels=labels)
+    per_class_precision = precision_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
+    per_class_recall = recall_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
+    per_class_f1 = f1_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
     return {
         "confusion_matrix": matrix.tolist(),
-        "tn": int(tn),
-        "fp": int(fp),
-        "fn": int(fn),
-        "tp": int(tp),
+        "labels": labels,
         "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-        "false_positive_rate": float(fp / (fp + tn)) if fp + tn else 0.0,
-        "false_negative_rate": float(fn / (fn + tp)) if fn + tp else 0.0,
+        "precision": float(precision_score(y_true, y_pred, labels=labels, average="macro", zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, labels=labels, average="macro", zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0)),
+        "per_class": {
+            str(label): {
+                "precision": float(per_class_precision[i]),
+                "recall": float(per_class_recall[i]),
+                "f1": float(per_class_f1[i]),
+            }
+            for i, label in enumerate(labels)
+        },
     }

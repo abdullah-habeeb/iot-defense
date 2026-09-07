@@ -356,6 +356,8 @@ body {
   background: rgba(59,130,246,0.04);
 }
 .traffic-table tr:hover td { background: var(--bg-hover); }
+.pkt-suspicious td { background: rgba(239,68,68,0.06); color: var(--accent-red); }
+.pkt-suspicious:hover td { background: rgba(239,68,68,0.12); }
 .proto-tcp  { color: var(--accent-blue); }
 .proto-udp  { color: var(--accent-teal); }
 .proto-icmp { color: var(--accent-amber); }

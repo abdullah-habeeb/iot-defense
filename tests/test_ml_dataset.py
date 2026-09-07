@@ -106,7 +106,58 @@ def test_reconnaissance_traffic_no_bind():
 def test_start_tcp_listener_command():
     class MockHost:
         def cmd(self, command: str) -> str:
-            return "1234" # Mock PID
-    
+            # First call starts the listener (PID); every call after that
+            # is the readiness poll -- report "listening" immediately so
+            # the test doesn't actually wait out the real poll timeout.
+            return "1234" if "ss -ltn" not in command else "LISTEN 0 128 *:8080"
+
     pid = _start_tcp_listener(MockHost(), 8080)
     assert pid == "1234"
+
+
+def test_start_tcp_listener_heredoc_terminator_is_valid_shell_syntax():
+    """Regression test: the heredoc terminator line must be exactly "PY"
+    with nothing else on it, or bash never recognizes it as the end of the
+    heredoc and host.cmd() blocks forever waiting for a line that never
+    comes. A previous version appended " & echo $!" directly onto the
+    terminator line, which is invalid and caused a real, reproduced hang
+    during dataset generation.
+    """
+    captured: dict[str, str] = {}
+
+    class RecordingHost:
+        def cmd(self, command: str) -> str:
+            if "ss -ltn" in command:
+                return "LISTEN 0 128 *:8080"  # readiness poll: report ready immediately
+            captured["command"] = command
+            return "1234"
+
+    _start_tcp_listener(RecordingHost(), 8080)
+    lines = captured["command"].splitlines()
+    terminator_lines = [line for line in lines if line.strip() == "PY"]
+    assert terminator_lines, "heredoc terminator 'PY' must appear alone on its own line"
+    # Nothing may follow "PY" on the same line as the terminator itself.
+    for line in lines:
+        if line.startswith("PY") and line != "PY":
+            raise AssertionError(f"heredoc terminator line has trailing content: {line!r}")
+
+
+def test_start_tcp_listener_waits_for_readiness_before_returning():
+    """The listener must not be reported ready until an `ss` check actually
+    confirms the port is listening -- this is the fix for a real race where
+    traffic was sent before the backgrounded listener had finished binding."""
+    calls: list[str] = []
+
+    class SlowToStartHost:
+        def cmd(self, command: str) -> str:
+            calls.append(command)
+            if "ss -ltn" in command:
+                # Not listening on the first check, listening on the second.
+                ss_calls = [c for c in calls if "ss -ltn" in c]
+                return "" if len(ss_calls) <= 1 else "LISTEN 0 128 *:9090"
+            return "5678"
+
+    pid = _start_tcp_listener(SlowToStartHost(), 9090)
+    assert pid == "5678"
+    ss_call_count = sum(1 for c in calls if "ss -ltn" in c)
+    assert ss_call_count >= 2, "must poll again if the first readiness check reports not-yet-listening"

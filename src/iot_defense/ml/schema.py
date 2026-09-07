@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.detection.flow_features import FlowFeatures
 
 
@@ -34,7 +35,9 @@ AUDIT_COLUMNS = (
     "label_name",
 )
 DATASET_COLUMNS = AUDIT_COLUMNS + FEATURE_COLUMNS
-LABEL_NAMES = {0: "normal", 1: "reconnaissance_port_scan"}
+LABEL_NAMES = {0: "normal"} | {
+    index: scenario.attack_type for index, scenario in enumerate(ATTACK_SCENARIOS.values(), start=1)
+}
 NUMERIC_FEATURE_COLUMNS = tuple(column for column in FEATURE_COLUMNS if column != "protocol")
 
 

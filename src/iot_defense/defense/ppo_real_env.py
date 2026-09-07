@@ -1,0 +1,277 @@
+"""Real-Mininet-backed Gymnasium environment for PPO fine-tuning.
+
+Unlike ppo_env.DefenseDecisionEnv (a fast, deterministic synthetic
+simulator used for the base training pass), every step() here actually
+drives the real Mininet lab: it generates real traffic for the chosen
+scenario, captures and detects it with the exact same pipeline the live
+demo uses, executes the agent's chosen action for real, and computes a
+reward from a *verified* real outcome (a real ping check for ISOLATE, a
+real redirected connection for DECOY) rather than an assumed one.
+
+This is intended for a short, bounded fine-tuning run on top of an
+already-trained model -- not training from scratch. Each step costs several
+real seconds (traffic generation, capture, detection, response, and a
+restore-to-baseline before the next step), so total_timesteps should stay
+small (tens, not thousands). Requires root (Mininet) to run.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+from iot_defense.defense.context import build_security_context
+from iot_defense.defense.decision import DefenseAction, DefenseDecision
+from iot_defense.defense.executor import MininetResponseExecutor
+from iot_defense.defense.ppo_env import (
+    ACTION_TO_INDEX,
+    INDEX_TO_ACTION,
+    OBSERVATION_SIZE,
+    TRAINING_SCENARIOS,
+    RewardConfig,
+    SecurityContextEncoder,
+)
+from iot_defense.detection.detector import UnifiedRuleBasedDetector
+from iot_defense.detection.flow_features import FeatureAggregator
+from iot_defense.detection.threat_event import ThreatEvent
+from iot_defense.monitoring.monitor import PacketMonitor
+from iot_defense.network.topology import create_mininet_network
+from iot_defense.simulation.traffic import TrafficGenerator
+
+TARGET_IP = "10.0.0.10"
+ATTACKER_IP = "10.0.0.100"
+
+
+class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
+    """PPO training environment whose step() outcomes are real, verified
+    Mininet observations instead of an assumed reward table.
+
+    The Mininet network is created once (on the first reset()) and reused
+    for the whole training run -- recreating it every episode would be far
+    too slow. Every step restores the network to a clean baseline before
+    returning, so consecutive steps and episodes never interfere with each
+    other.
+    """
+
+    metadata = {"render_modes": []}
+
+    def __init__(self, episode_length: int = 8, reward_config: RewardConfig | None = None) -> None:
+        super().__init__()
+        self.action_space = spaces.Discrete(len(DefenseAction))
+        self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
+        self.episode_length = episode_length
+        self.reward_config = reward_config or RewardConfig()
+        self.encoder = SecurityContextEncoder()
+
+        self.net: Any = None
+        self.executor: MininetResponseExecutor | None = None
+        self.traffic_gen = TrafficGenerator()
+        self.monitor = PacketMonitor()
+        self.aggregator = FeatureAggregator()
+        self.detector = UnifiedRuleBasedDetector()
+
+        self._step = 0
+        self._scenario_index = 0
+        self._pending_scenario: str | None = None
+        self._pending_threat_event: ThreatEvent | None = None
+
+    # ─── Mininet lifecycle ──────────────────────────────────────────────────
+
+    def _ensure_network(self) -> None:
+        if self.net is not None:
+            return
+        self.net = create_mininet_network()
+        self.net.start()
+        self.executor = MininetResponseExecutor(self.net)
+
+    def close(self) -> None:
+        if self.executor is not None:
+            try:
+                self.executor.cleanup()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[RealMininetDefenseEnv] executor cleanup error: {exc}")
+        if self.net is not None:
+            try:
+                self.net.stop()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[RealMininetDefenseEnv] mininet stop error: {exc}")
+        self.executor = None
+        self.net = None
+
+    # ─── Real observation for one scenario ─────────────────────────────────
+
+    def _observe_scenario(self, scenario: str) -> ThreatEvent:
+        """Generate real traffic for one scenario, capture it, and classify
+        it with the same attack-type-agnostic detector the live demo uses.
+        """
+        if scenario == "normal":
+            session = self.monitor.start_capture(self.net, "sensor", 20)
+            self.traffic_gen.generate_normal_mininet_traffic(self.net)
+            cap_path = self.monitor.stop_capture(self.net, session, 3.0)
+        elif scenario == "dos_flood":
+            session = self.monitor.start_capture(self.net, "sensor", 150)
+            self.traffic_gen.generate_dos_mininet_traffic(self.net, duration_seconds=2)
+            cap_path = self.monitor.stop_capture(self.net, session, 3.0)
+        else:  # reconnaissance_port_scan
+            session = self.monitor.start_capture(self.net, "sensor", 20)
+            self.traffic_gen.generate_malicious_mininet_traffic(self.net, duration_seconds=3)
+            cap_path = self.monitor.stop_capture(self.net, session, 4.0)
+
+        packets = self.monitor.read_capture(self.net, "sensor", cap_path)
+        flows = self.aggregator.aggregate(packets)
+        if flows:
+            return self.detector.detect(flows[0].to_dict())
+        return self.detector.detect(
+            {"source_ip": ATTACKER_IP, "destination_ip": TARGET_IP,
+             "unique_destination_ports": 0, "packet_count": 0, "packets_per_second": 0.0}
+        )
+
+    # ─── Real action execution + verified outcome ──────────────────────────
+
+    def _execute_and_verify(self, action: DefenseAction, threat_event: ThreatEvent) -> dict[str, Any]:
+        """Actually perform the chosen action and verify its real effect."""
+        decision = DefenseDecision.create(
+            action=action,
+            target_ip=threat_event.destination_ip if threat_event.destination_ip != "unknown" else TARGET_IP,
+            source_ip=threat_event.source_ip if threat_event.source_ip != "unknown" else ATTACKER_IP,
+            reason="PPO real-Mininet fine-tuning step",
+            confidence=threat_event.confidence,
+            threat_score=threat_event.threat_score,
+            policy_name="RealMininetDefenseEnv",
+            context={},
+        )
+        result = self.executor.execute(decision)
+        outcome: dict[str, Any] = {"status": result.status}
+
+        if action == DefenseAction.ISOLATE and result.status == "success":
+            camera = self.net.get("camera")
+            after = camera.cmd(f"ping -c 1 -W 1 {decision.target_ip}")
+            outcome["connectivity_lost"] = "100% packet loss" in after
+        elif action == DefenseAction.DECOY and result.status == "success":
+            try:
+                attacker = self.net.get("attacker")
+                decoy_ports = result.details.get("decoy_ports") or [22]
+                probe = attacker.cmd(
+                    "python3 - <<'PY'\n"
+                    "import socket\n"
+                    "try:\n"
+                    f"    sock = socket.create_connection(('{decision.target_ip}', {decoy_ports[0]}), timeout=2)\n"
+                    "    sock.sendall(b'GET /status')\n"
+                    "    print('INTERACTION_OK:' + sock.recv(128).decode(errors='replace').strip())\n"
+                    "    sock.close()\n"
+                    "except Exception as exc:\n"
+                    "    print(f'INTERACTION_FAILED:{exc}')\n"
+                    "PY"
+                ).strip()
+                outcome["interaction_verified"] = "INTERACTION_OK" in probe
+            except Exception:  # noqa: BLE001
+                outcome["interaction_verified"] = False
+
+        # Always restore before the next step so every step starts clean.
+        try:
+            self.executor.restore(decision.target_ip)
+        except Exception:  # noqa: BLE001
+            pass
+        return outcome
+
+    # ─── Reward ─────────────────────────────────────────────────────────────
+
+    def calculate_reward(self, scenario: str, action: DefenseAction, outcome: dict[str, Any]) -> tuple[float, dict[str, float]]:
+        config = self.reward_config
+        components: dict[str, float] = {"response_cost": config.response_cost}
+        reward = config.response_cost
+        execution_ok = outcome.get("status") == "success"
+
+        if scenario == "normal":
+            if action == DefenseAction.ALLOW:
+                components["service_preserved"] = config.service_preserved
+                reward += config.service_preserved
+            else:
+                components["false_positive_intervention"] = config.false_positive_intervention
+                reward += config.false_positive_intervention
+                if action == DefenseAction.ISOLATE:
+                    components["unnecessary_isolation"] = config.unnecessary_isolation
+                    reward += config.unnecessary_isolation
+        elif scenario == "dos_flood":
+            if action == DefenseAction.ISOLATE:
+                if execution_ok and outcome.get("connectivity_lost"):
+                    components["attack_contained"] = config.attack_contained
+                    reward += config.attack_contained
+                else:
+                    components["response_failed"] = config.false_positive_intervention
+                    reward += config.false_positive_intervention
+            elif action == DefenseAction.DECOY:
+                components["service_disruption"] = config.service_disruption
+                reward += config.service_disruption
+            elif action == DefenseAction.ALLOW:
+                components["successful_compromise"] = config.successful_compromise
+                reward += config.successful_compromise
+        else:  # reconnaissance_port_scan
+            if action == DefenseAction.DECOY:
+                if execution_ok and outcome.get("interaction_verified"):
+                    components["attacker_diverted"] = config.attacker_diverted
+                    components["intelligence_gained"] = config.intelligence_gained
+                    reward += config.attacker_diverted + config.intelligence_gained
+                else:
+                    components["response_failed"] = config.false_positive_intervention
+                    reward += config.false_positive_intervention
+            elif action == DefenseAction.ISOLATE:
+                if execution_ok and outcome.get("connectivity_lost"):
+                    components["attack_contained"] = config.attack_contained
+                    components["service_disruption"] = config.service_disruption
+                    reward += config.attack_contained + config.service_disruption
+            elif action == DefenseAction.ALLOW:
+                components["successful_compromise"] = config.successful_compromise
+                reward += config.successful_compromise
+
+        return float(reward), components
+
+    # ─── Gym API ────────────────────────────────────────────────────────────
+
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
+        super().reset(seed=seed)
+        self._ensure_network()
+        self._step = 0
+        training_scenarios = TRAINING_SCENARIOS()
+        scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
+        threat_event = self._observe_scenario(scenario)
+        context = build_security_context(threat_event, device_criticality="high")
+        self._pending_scenario = scenario
+        self._pending_threat_event = threat_event
+        return self.encoder.encode(context), {"scenario": scenario}
+
+    def step(self, action: int):
+        """Evaluate `action` against the state actually returned by the
+        previous reset()/step() call -- not a freshly regenerated one, so
+        the action is judged against what the agent actually observed.
+        This also means each step costs exactly one real observation
+        (not two): the state it evaluates was already captured last call,
+        and only the *next* state is freshly observed here.
+        """
+        if action not in INDEX_TO_ACTION:
+            raise ValueError(f"Invalid defense action index: {action}")
+        scenario = self._pending_scenario
+        threat_event = self._pending_threat_event
+        selected_action = INDEX_TO_ACTION[action]
+
+        outcome = self._execute_and_verify(selected_action, threat_event)
+        reward, components = self.calculate_reward(scenario, selected_action, outcome)
+
+        self._step += 1
+        self._scenario_index += 1
+        terminated = self._step >= self.episode_length
+
+        training_scenarios = TRAINING_SCENARIOS()
+        next_scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
+        next_threat_event = self._observe_scenario(next_scenario)
+        next_context = build_security_context(next_threat_event, device_criticality="high")
+        self._pending_scenario = next_scenario
+        self._pending_threat_event = next_threat_event
+        observation = self.encoder.encode(next_context)
+
+        info = {"scenario": scenario, "action": selected_action.value, "outcome": outcome, "reward_components": components}
+        return observation, reward, terminated, False, info

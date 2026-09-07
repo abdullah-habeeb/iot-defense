@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from iot_defense.defense.context import build_security_context
+from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.policy import (
     RuleBasedDefensePolicy,
@@ -19,6 +19,10 @@ from iot_defense.defense.policy import (
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
 from iot_defense.observability.logger import StructuredLogger
+from iot_defense.observability.metrics import MetricsCollector
+from iot_defense.agents.decision_agent import DecisionAgent
+from iot_defense.agents.detection_agent import DetectionAgent
+from iot_defense.agents.monitoring_agent import MonitoringAgent
 
 
 # ─── Public phase names ────────────────────────────────────────────────────────
@@ -84,6 +88,8 @@ def _initial_state() -> dict[str, Any]:
         "policy_comparison": None,
         "selected_decision": None,
         "response_result": None,
+        "attack_mode": None,
+        "observability": None,
         "metrics": {
             "packets_observed": 0,
             "flows_analyzed": 0,
@@ -110,6 +116,23 @@ class DemoController:
         self.net: Any = None
         self.executor: Any = None
         self.event_logger = StructuredLogger(log_dir="/home/abdullah/iot-defense/data/logs")
+        self.metrics_collector = MetricsCollector()
+        # DecisionAgent owns real cross-event history for this run: every
+        # threat_event recorded through it becomes available as
+        # previous_relevant_events on later BDI contexts, which the
+        # dashboard's Security Context panel actually displays.
+        self.decision_agent = DecisionAgent()
+        # DetectionAgent wraps the original packet-level heuristic detector
+        # (protocol/port/direction/length thresholds) -- a different, coarser
+        # signal than the flow-based UnifiedRuleBasedDetector that makes the
+        # actual ALLOW/ALERT/DECOY/ISOLATE decision. It runs over every
+        # captured packet as a secondary, visible annotation, not as the
+        # authoritative detector.
+        self.detection_agent = DetectionAgent()
+        # MonitoringAgent normalizes every captured packet into a fixed
+        # schema before it's stored or aggregated -- real, defensive use on
+        # every packet the dashboard shows.
+        self.monitoring_agent = MonitoringAgent()
         # Persist initial state so /state always returns valid JSON
         self._persist()
 
@@ -208,14 +231,85 @@ class DemoController:
         }
         return comparison, rule_decision, stack_decision, ppo_decision
 
+    # ─── Packet observation ───────────────────────────────────────────────────
+
+    def _observe_packets(self, raw_packets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize and annotate every captured packet before it's stored.
+
+        MonitoringAgent normalizes each raw packet dict into a fixed schema
+        (real, defensive use on every packet). DetectionAgent then runs its
+        original packet-level heuristic over the normalized packet as a
+        secondary, visible signal alongside the flow-based detector that
+        actually drives the ALLOW/ALERT/DECOY/ISOLATE decision -- it is
+        never the authoritative detector, just an additional annotation.
+        """
+        observed: list[dict[str, Any]] = []
+        for packet in raw_packets:
+            normalized = self.monitoring_agent.observe(packet)
+            analysis = self.detection_agent.analyze(normalized)
+            normalized["packet_suspicious"] = bool(analysis.get("suspicious"))
+            normalized["packet_suspicion_score"] = analysis.get("score")
+            self.metrics_collector.record(
+                {"suspicious": analysis.get("suspicious"), "source": "packet_level_heuristic"}
+            )
+            observed.append(normalized)
+        return observed
+
+    # ─── Detection ────────────────────────────────────────────────────────────
+
+    def _classify_attack_traffic(self, flows: list[Any]) -> ThreatEvent:
+        """Classify captured attack traffic without knowing which attack (if
+        any) was actually triggered.
+
+        Runs the attack-type-agnostic UnifiedRuleBasedDetector against the
+        real captured flow -- it checks the flood signature and the scan
+        signature every time, regardless of what attack_mode requested, and
+        is therefore not "told the answer" in advance. Only if it
+        independently concludes reconnaissance is the trained Random Forest
+        model consulted, as a richer ML-based confirmation of that specific,
+        validated class; RF was never trained on flood traffic, so it is
+        deliberately never asked to judge it.
+        """
+        from iot_defense.detection.detector import UnifiedRuleBasedDetector
+
+        if not flows:
+            # No reliable signal was captured -- report no evidence of an
+            # attack rather than guessing, so the system fails safe.
+            features = {
+                "source_ip": "unknown",
+                "destination_ip": "10.0.0.10",
+                "unique_destination_ports": 0,
+                "packet_count": 0,
+                "packets_per_second": 0.0,
+            }
+        else:
+            features = flows[0].to_dict()
+
+        threat_event = UnifiedRuleBasedDetector().detect(features)
+
+        if threat_event.attack_type == "reconnaissance_port_scan":
+            try:
+                from iot_defense.ml.random_forest import RandomForestDetector
+                rf = RandomForestDetector("models/random_forest_detector.joblib")
+                threat_event = rf.detect(features)
+            except (FileNotFoundError, Exception):  # noqa: BLE001
+                pass  # keep the rule-based recon classification
+
+        return threat_event
+
     # ─── Main pipeline ────────────────────────────────────────────────────────
 
     async def _run_evaluate_and_respond(self, threat_event: ThreatEvent) -> None:
         """Decision → Response pipeline for a single threat event."""
         detect_start = time.perf_counter()
 
-        # Build BDI-style security context
-        context = build_security_context(threat_event, device_criticality="high")
+        # Build BDI-style security context. DecisionAgent tracks real event
+        # history across the whole run -- previous_relevant_events on this
+        # context genuinely reflects prior events (e.g. the baseline normal
+        # traffic) rather than always being empty.
+        context = self.decision_agent.build_context(threat_event, device_criticality="high")
+        self.decision_agent.record(threat_event)
+        self.metrics_collector.record({"suspicious": threat_event.attack_type != "normal", "source": "flow_detection"})
 
         # Evaluate all policies
         comparison, rule_decision, stack_decision, ppo_decision = self._build_policy_comparison(
@@ -325,12 +419,14 @@ class DemoController:
             "decoy_interactions": decoy_interactions,
         }
 
+        self.metrics_collector.record({"action": action.value.lower(), "suspicious": True})
         await self.update_state(
             {
                 "phase": post_phase,
                 "response_result": result_dict,
                 "metrics": new_metrics,
                 "nodes": self._set_node_status(node_updates),
+                "observability": self.metrics_collector.summary(),
             },
             timeline_message=tl_msg,
         )
@@ -344,13 +440,25 @@ class DemoController:
             }
         )
 
-    async def run_demo(self) -> None:
-        """Execute the full three-scenario IoT defense demonstration."""
+    async def run_demo(self, attack_mode: str = "reconnaissance") -> None:
+        """Execute the full three-scenario IoT defense demonstration.
+
+        attack_mode selects which registered attack Scenario B generates
+        and detects -- any key in iot_defense.attacks.registry.ATTACK_SCENARIOS.
+        Everything downstream of detection -- SecurityContext, the three
+        policies, response execution, isolation validation, and
+        restoration -- is already generic over attack type and needs no
+        branching here.
+        """
+        if attack_mode not in ATTACK_SCENARIOS:
+            raise ValueError(
+                f"Unsupported attack_mode: {attack_mode!r} (expected one of {tuple(ATTACK_SCENARIOS)})"
+            )
         try:
             # ── Phase 0: Start network ─────────────────────────────────────────
             await self.update_state(
-                {"phase": "STARTING_NETWORK"},
-                timeline_message="Initializing Mininet IoT network",
+                {"phase": "STARTING_NETWORK", "attack_mode": attack_mode},
+                timeline_message=f"Initializing Mininet IoT network (attack mode: {attack_mode})",
             )
 
             from iot_defense.network.topology import create_mininet_network
@@ -390,7 +498,7 @@ class DemoController:
             capture_session = await asyncio.to_thread(monitor.start_capture, self.net, "sensor", 20)
             traffic_gen.generate_normal_mininet_traffic(self.net)
             cap_path = await asyncio.to_thread(monitor.stop_capture, self.net, capture_session, 4.0)
-            raw_packets = monitor.read_capture(self.net, "sensor", cap_path)
+            raw_packets = self._observe_packets(monitor.read_capture(self.net, "sensor", cap_path))
 
             traffic_events = raw_packets[:20]
             flows = aggregator.aggregate(raw_packets)
@@ -433,9 +541,11 @@ class DemoController:
                     detector_name="RuleBasedDetector:baseline",
                 )
 
-            normal_context = build_security_context(normal_event)
+            normal_context = self.decision_agent.build_context(normal_event)
             rule_p = RuleBasedDefensePolicy()
             normal_decision = rule_p.decide(normal_context)
+            self.decision_agent.record(normal_event)
+            self.metrics_collector.record({"suspicious": False, "source": "flow_detection"})
 
             await self.update_state(
                 {
@@ -447,52 +557,39 @@ class DemoController:
                 timeline_message="Normal traffic confirmed — ALLOW policy applied",
             )
 
-            # ── Scenario B: Reconnaissance attack ──────────────────────────────
+            # ── Scenario B: Attack (per attack_mode, from the attack registry) ──
+            scenario = ATTACK_SCENARIOS[attack_mode]
+            attack_label = scenario.label
             await self.update_state(
                 {"phase": "THREAT_DETECTED", "threat_status": "SUSPICIOUS"},
-                timeline_message="Generating reconnaissance port-scan attack",
+                timeline_message=f"Generating {attack_label} attack",
             )
 
             # Attack traffic runs on the "attacker" host while capture runs on
             # "sensor" -- different host shells, so these can run concurrently
             # with no risk of overlapping .cmd() calls on the same host.
             # See the baseline capture above for why start/stop_capture are
-            # used instead of a fixed-duration sleep on either end.
-            atk_capture_session = await asyncio.to_thread(monitor.start_capture, self.net, "sensor", 25)
-            attack_result = traffic_gen.generate_malicious_mininet_traffic(self.net, duration_seconds=5)
-            atk_cap_path = await asyncio.to_thread(monitor.stop_capture, self.net, atk_capture_session, 6.0)
-            atk_packets = monitor.read_capture(self.net, "sensor", atk_cap_path)
+            # used instead of a fixed-duration sleep on either end. Each
+            # registered scenario carries its own packet_limit and capture
+            # timeout, sized for how much traffic that attack actually
+            # produces (e.g. a flood needs a higher limit and a tighter
+            # window than a scan).
+            atk_capture_session = await asyncio.to_thread(
+                monitor.start_capture, self.net, "sensor", scenario.capture_packet_limit
+            )
+            attack_result = scenario.generate_traffic(self.net)
+            atk_cap_path = await asyncio.to_thread(
+                monitor.stop_capture, self.net, atk_capture_session, scenario.capture_completion_timeout
+            )
+            atk_packets = self._observe_packets(monitor.read_capture(self.net, "sensor", atk_cap_path))
             atk_flows = aggregator.aggregate(atk_packets)
 
-            # Load RF model if available; otherwise build ThreatEvent from flow features
-            threat_event: ThreatEvent
-            try:
-                from iot_defense.ml.random_forest import RandomForestDetector
-                rf = RandomForestDetector("models/random_forest_detector.joblib")
-                if atk_flows:
-                    threat_event = rf.detect(atk_flows[0].to_dict())
-                else:
-                    raise FileNotFoundError("no flows")
-            except (FileNotFoundError, Exception):
-                # RF unavailable -- fall back to the project's actual rule-based
-                # detector class (the same one used as the ML baseline
-                # comparator), rather than an ad-hoc inline formula.
-                from iot_defense.detection.detector import RuleBasedReconDetector
-
-                rule_detector = RuleBasedReconDetector()
-                if atk_flows:
-                    f = atk_flows[0]
-                    threat_event = rule_detector.detect(f.to_dict())
-                else:
-                    threat_event = rule_detector.detect(
-                        {
-                            "source_ip": "10.0.0.100",
-                            "destination_ip": "10.0.0.10",
-                            "unique_destination_ports": 4,
-                            "packet_count": 12,
-                            "packets_per_second": 8.0,
-                        }
-                    )
+            # Detection is attack-type-agnostic from here: it classifies
+            # whatever was actually captured, not what attack_mode was
+            # requested. attack_mode only chose which traffic to generate
+            # above; the detector is never told which attack (if any) it
+            # should find.
+            threat_event: ThreatEvent = self._classify_attack_traffic(atk_flows)
 
             all_traffic = (traffic_events + atk_packets)[:20]
             await self.update_state(
@@ -506,7 +603,7 @@ class DemoController:
                     },
                 },
                 timeline_message=(
-                    f"Reconnaissance detected — {len(atk_packets)} attack packets captured, "
+                    f"{attack_label} detected — {len(atk_packets)} attack packets captured, "
                     f"threat_score={threat_event.threat_score:.2f}"
                 ),
             )
@@ -529,12 +626,18 @@ class DemoController:
             # particular threat, prove the isolation/restore mechanism itself
             # works live: isolate an uninvolved device, verify connectivity is
             # actually lost, restore it, verify connectivity actually returns.
+            # Ping *from* "camera", not "sensor" -- when the real response
+            # above isolates sensor itself (e.g. the DoS scenario), sensor's
+            # own interface is already down and it cannot send a ping at
+            # all, which previously made this check silently read as
+            # "failed" even though the real isolation had genuinely worked.
+            # Camera is never a target of either attack scenario.
             await self.update_state(
                 {"phase": "RESPONDING"},
                 timeline_message="Validating isolation capability on smart_plug (10.0.0.30)",
             )
             try:
-                sensor_host = self.net.get("sensor")
+                pinger_host = self.net.get("camera")
                 isolate_decision = DefenseDecision.create(
                     action=DefenseAction.ISOLATE,
                     target_ip="10.0.0.30",
@@ -560,9 +663,9 @@ class DemoController:
                     },
                     timeline_message=f"Isolation applied to smart_plug — {isolate_result.status}",
                 )
-                after_ping = sensor_host.cmd("ping -c 1 -W 1 10.0.0.30")
+                after_ping = pinger_host.cmd("ping -c 1 -W 1 10.0.0.30")
                 self.executor.restore("10.0.0.30")
-                after_restore_ping = sensor_host.cmd("ping -c 1 -W 1 10.0.0.30")
+                after_restore_ping = pinger_host.cmd("ping -c 1 -W 1 10.0.0.30")
                 connectivity_lost = "100% packet loss" in after_ping
                 connectivity_recovered = "0% packet loss" in after_restore_ping
                 await self.update_state(
@@ -634,9 +737,46 @@ class DemoController:
             self.cleanup()
 
 
+def _select_attack_mode() -> str:
+    """Resolve the attack mode from --attack, or prompt interactively if omitted."""
+    import argparse
+
+    attack_keys = list(ATTACK_SCENARIOS)
+
+    parser = argparse.ArgumentParser(description="Run the IoT defense live demo.")
+    parser.add_argument(
+        "--attack",
+        choices=attack_keys,
+        default=None,
+        help=(
+            "Attack scenario to run: "
+            + ", ".join(f"{key!r} ({ATTACK_SCENARIOS[key].label})" for key in attack_keys)
+            + ". Prompted interactively if omitted."
+        ),
+    )
+    args = parser.parse_args()
+    if args.attack is not None:
+        return args.attack
+
+    print("Select attack scenario:")
+    for index, key in enumerate(attack_keys, start=1):
+        scenario = ATTACK_SCENARIOS[key]
+        print(f"  [{index}] {scenario.label} -> expected response: {scenario.preferred_action.value}")
+    choice = input(f"Enter choice [1-{len(attack_keys)}] (default 1): ").strip()
+    try:
+        selected_index = int(choice) - 1
+        if 0 <= selected_index < len(attack_keys):
+            return attack_keys[selected_index]
+    except ValueError:
+        pass
+    return attack_keys[0]
+
+
 def main() -> None:
+    attack_mode = _select_attack_mode()
+    print(f"[DemoController] attack_mode={attack_mode}", flush=True)
     controller = DemoController()
-    asyncio.run(controller.run_demo())
+    asyncio.run(controller.run_demo(attack_mode=attack_mode))
 
 
 if __name__ == "__main__":

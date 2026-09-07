@@ -11,10 +11,18 @@ from typing import Any
 
 import pandas as pd
 
+from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.monitoring.monitor import PacketMonitor
 from iot_defense.network.topology import create_mininet_network
 from iot_defense.ml.schema import DATASET_COLUMNS, flow_to_dataset_row, validate_dataset
+
+# Registry key -> sub-scenario dispatch for get_scenario_type(). Each new
+# attack's dataset-generation logic is inherently bespoke (its own traffic
+# shape, sub-variations, and labeling condition), so this file still needs
+# one branch added per new attack -- what's generic here is only the bucket
+# *count*, which grows automatically as ATTACK_SCENARIOS grows.
+_ATTACK_KEYS = tuple(ATTACK_SCENARIOS.keys())
 
 
 def _start_tcp_listener(host: Any, port: int) -> str:
@@ -43,13 +51,45 @@ finally:
     except:
         pass
 """
+    # The heredoc terminator ("PY") must be alone on its own line for bash to
+    # recognize it -- appending " & echo $!" directly after it on the same
+    # line (as this previously did) makes the terminator invalid, so the
+    # shell waits forever for a line that is only "PY" and host.cmd() hangs
+    # indefinitely. Backgrounding happens on the opening line; $! is read
+    # with a separate command after the heredoc has properly closed.
+    #
+    # Mininet's host.cmd() detects a command's completion by watching for a
+    # sentinel byte in the *shell's own* output stream -- so a backgrounded
+    # process whose stdout/stderr are never redirected writes directly into
+    # that same stream. When this listener later exits (or bash prints its
+    # own job-completion notice), that output lands in the exact channel
+    # every later host.cmd() call on this host reads from -- including the
+    # tcpdump capture polling running on this same host -- corrupting
+    # whatever that later call was trying to read. Every other backgrounded
+    # command in this codebase (tcpdump in monitor.py) already redirects
+    # its output for this reason; this one didn't, which is why only
+    # listener-using scenarios were affected.
+    log_path = f"/tmp/tcp_listener_{port}.log"
     cmd = (
-        "python3 - <<'PY' &\n"
+        f"python3 - <<'PY' >{log_path} 2>&1 &\n"
         f"{script}\n"
-        "PY"
-        " & echo $!"
+        "PY\n"
+        "echo $!"
     )
-    return host.cmd(cmd).strip()
+    pid = host.cmd(cmd).strip()
+    # host.cmd() returns as soon as the listener process is backgrounded --
+    # not once it has actually bound and is ready to accept. Without
+    # confirming that, traffic sent immediately afterward can race the
+    # listener's own socket.bind()/listen() and simply be refused, which
+    # showed up as real dataset-generation runs silently capturing no
+    # traffic at all for every normal_tcp/normal_mixed scenario.
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        listening = host.cmd(f"ss -ltn 'sport = :{port}' 2>/dev/null")
+        if f":{port}" in listening:
+            break
+        time.sleep(0.05)
+    return pid
 
 
 def _stop_tcp_listener(host: Any, pid: str) -> None:
@@ -58,6 +98,15 @@ def _stop_tcp_listener(host: Any, pid: str) -> None:
 
 
 def _normal_traffic(host: Any, target_ip: str, traffic_plan: list[dict[str, Any]], delay: float) -> str:
+    """Send the planned traffic, one item at a time.
+
+    Each item runs in its own try/except and the TCP branch retries its
+    connect a few times with a short backoff: a single refused/failed
+    connection attempt (e.g. a listener that isn't quite ready yet) must
+    not silently abort every remaining item in the plan, which previously
+    meant one failed TCP connect could also kill unrelated queued UDP
+    traffic in the same normal_mixed run with no error surfaced anywhere.
+    """
     plan_literal = json.dumps(traffic_plan)
     return host.cmd(
         "python3 - <<'PY'\n"
@@ -67,16 +116,30 @@ def _normal_traffic(host: Any, target_ip: str, traffic_plan: list[dict[str, Any]
         "    protocol = socket.SOCK_DGRAM if item['proto'] == 'DGRAM' else socket.SOCK_STREAM\n"
         "    port = item['port']\n"
         "    payload = b'x' * item['size']\n"
-        "    sock = socket.socket(socket.AF_INET, protocol)\n"
-        "    if protocol == socket.SOCK_STREAM:\n"
-        "        sock.connect(('{target_ip}', port))\n"
-        "        sock.sendall(payload)\n"
-        "        sock.close()\n"
-        "    else:\n"
-        f"        for _ in range(item['count']):\n"
-        f"            sock.sendto(payload, ('{target_ip}', port))\n"
-        f"            time.sleep({delay})\n"
-        "        sock.close()\n"
+        "    try:\n"
+        "        if protocol == socket.SOCK_STREAM:\n"
+        "            sock = None\n"
+        "            for attempt in range(5):\n"
+        "                try:\n"
+        "                    sock = socket.socket(socket.AF_INET, protocol)\n"
+        "                    sock.settimeout(1.0)\n"
+        f"                    sock.connect(('{target_ip}', port))\n"
+        "                    break\n"
+        "                except OSError:\n"
+        "                    sock.close()\n"
+        "                    sock = None\n"
+        "                    time.sleep(0.2)\n"
+        "            if sock is not None:\n"
+        "                sock.sendall(payload)\n"
+        "                sock.close()\n"
+        "        else:\n"
+        "            sock = socket.socket(socket.AF_INET, protocol)\n"
+        f"            for _ in range(item['count']):\n"
+        f"                sock.sendto(payload, ('{target_ip}', port))\n"
+        f"                time.sleep({delay})\n"
+        "            sock.close()\n"
+        "    except Exception:\n"
+        "        pass\n"
         "print('normal_dataset_traffic_done')\n"
         "PY"
     )
@@ -103,19 +166,49 @@ def _reconnaissance_traffic(host: Any, target_ip: str, ports: list[int], interva
     )
 
 
+def _dos_traffic(host: Any, target_ip: str, port: int, duration: float) -> str:
+    """Bounded UDP flood at a single fixed port -- the opposite signature of
+    a port scan (very high rate, essentially no port diversity)."""
+    return host.cmd(
+        "python3 - <<'PY'\n"
+        "import socket, time\n"
+        "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+        "payload = b'x' * 64\n"
+        "start = time.time()\n"
+        f"while time.time() - start < {duration}:\n"
+        f"    sock.sendto(payload, ('{target_ip}', {port}))\n"
+        "sock.close()\n"
+        "print('dos_dataset_traffic_done')\n"
+        "PY"
+    )
+
+
 def get_scenario_type(run_number: int) -> str:
-    """Deterministically assign scenario type based on run number."""
-    if run_number % 2 == 0:
+    """Deterministically assign scenario type based on run number.
+
+    Bucket 0 is always normal traffic; each subsequent bucket is one
+    registered attack, in ATTACK_SCENARIOS order -- so the bucket count
+    grows automatically as new attacks are registered. Registering a new
+    attack key still requires adding its own dispatch branch below, since
+    each attack's sub-variations and traffic shape are attack-specific.
+    """
+    num_buckets = 1 + len(_ATTACK_KEYS)
+    bucket = run_number % num_buckets
+    if bucket == 0:
         # Normal (normal_udp, normal_tcp, normal_mixed)
-        sub_type = (run_number // 2) % 3
+        sub_type = (run_number // num_buckets) % 3
         if sub_type == 0: return 'normal_udp'
         if sub_type == 1: return 'normal_tcp'
         return 'normal_mixed'
-    else:
-        # Recon (reconnaissance_known, reconnaissance_unseen)
-        # 70/30 split for known/unseen
-        if (run_number // 2) % 10 < 7: return 'reconnaissance_known'
+
+    attack_key = _ATTACK_KEYS[bucket - 1]
+    if attack_key == "reconnaissance":
+        # 70/30 split for known/unseen port sets
+        if (run_number // num_buckets) % 10 < 7: return 'reconnaissance_known'
         return 'reconnaissance_unseen'
+    if attack_key == "dos":
+        return 'dos_flood'
+    raise ValueError(f"No dataset-generation dispatch registered for attack key: {attack_key!r}")
 
 def generate_dataset(
     *,
@@ -145,7 +238,11 @@ def generate_dataset(
         [24, 88, 8008, 8444, 10080, 10443],
         [26, 808, 3000, 5000, 8888, 9001, 9443],
     ]
-    
+
+    # DoS flood target ports -- always a single fixed port per run
+    dos_target_ports = [5683, 1883, 8080, 9999]
+
+
     rows: list[dict[str, Any]] = []
     aggregator = FeatureAggregator(window_seconds=3.0)
     
@@ -164,12 +261,18 @@ def generate_dataset(
             net = create_mininet_network()
             net.start()
             
-            # Start capture BEFORE traffic
+            # Start capture BEFORE traffic. start_capture() blocks only
+            # until tcpdump confirms it is actually listening (not a fixed
+            # guess), and later stop_capture() guarantees termination --
+            # polling for tcpdump's own completion marker with a bounded
+            # timeout, falling back to SIGTERM if it hasn't hit its packet
+            # limit yet -- instead of relying on a separate, unguarded
+            # `pkill tcpdump` call that leaves nothing running tcpdump
+            # forever if anything goes wrong before it.
             current_stage = "start_monitor"
             monitor = PacketMonitor(base_dir=f"/tmp/iot-defense-dataset/run-{run_number:04d}")
-            capture_path = monitor.capture_host_packets(net, target_name, packet_limit=500, capture_seconds=4)
-            time.sleep(0.5) # Give tcpdump a moment to initialize
-            
+            capture_session = monitor.start_capture(net, target_name, packet_limit=500)
+
             current_stage = "start_traffic"
             if scenario.startswith("normal"):
                 source_name, source_ip = (
@@ -182,10 +285,17 @@ def generate_dataset(
                 # Create protocol/port traffic plan based on scenario type
                 traffic_plan = []
                 
-                # Normal TCP listeners/traffic
+                # Normal TCP listeners/traffic. Deliberately all unprivileged
+                # (>1024) ports -- binding to 80/443 inside the Mininet host
+                # namespace was silently failing (permission/capability
+                # issue), which killed the listener immediately and made
+                # every connection attempt correctly refused no matter how
+                # much retry logic wrapped the connect. The literal port
+                # number carries no meaning for FlowFeatures-based training
+                # data, so there's no reason to risk privileged ports here.
                 if scenario in ['normal_tcp', 'normal_mixed']:
                     for _ in range(rng.randint(1, 2)):
-                        port = rng.choice([80, 443, 8080, 10001])
+                        port = rng.choice([8080, 8443, 8888, 10001])
                         traffic_plan.append({'proto': 'STREAM', 'port': port, 'count': 1, 'size': rng.randint(64, 256)})
                         pid = _start_tcp_listener(net.get(target_name), port)
                         listener_pids.append(pid)
@@ -198,18 +308,20 @@ def generate_dataset(
                 
                 delay = rng.choice([0.01, 0.05, 0.1, 0.5])
                 _normal_traffic(source, target_ip, traffic_plan, delay)
-            else:
+            elif scenario.startswith("reconnaissance"):
                 # Recon traffic
                 source = net.get("attacker")
                 ports = rng.choice(recon_known_port_sets if scenario == 'reconnaissance_known' else recon_unseen_port_sets)
                 interval = rng.choice([0.01, 0.05, 0.1])
                 _reconnaissance_traffic(source, target_ip, ports, interval)
-                
-            time.sleep(1.0)
-            net.get(target_name).cmd("pkill tcpdump || true")
-            time.sleep(0.5)
-            
+            else:
+                # DoS flood traffic
+                source = net.get("attacker")
+                dos_port = rng.choice(dos_target_ports)
+                _dos_traffic(source, target_ip, dos_port, duration=2.0)
+
             current_stage = "process_capture"
+            capture_path = monitor.stop_capture(net, capture_session, completion_timeout=4.0)
             events = monitor.read_capture(net, target_name, capture_path)
             features = aggregator.aggregate(events)
             
@@ -217,18 +329,20 @@ def generate_dataset(
             run_rows = 0
             for feature in features:
                 if feature.destination_ip == target_ip:
-                    # In normal, we trust the source IP. In recon, we look for attacker IP.
+                    # In normal, we trust the source IP. In recon/dos, we look for attacker IP.
                     is_recon = (scenario.startswith("reconnaissance") and feature.source_ip == "10.0.0.100")
+                    is_dos = (scenario == "dos_flood" and feature.source_ip == "10.0.0.100")
                     is_normal = (scenario.startswith("normal") and feature.source_ip in {"10.0.0.30", "10.0.0.20"})
-                    
-                    if is_recon or is_normal:
+
+                    if is_recon or is_dos or is_normal:
+                        label = 2 if is_dos else (1 if is_recon else 0)
                         rows.append(
                             flow_to_dataset_row(
                                 feature,
                                 flow_id=f"run-{run_number:04d}-flow-{len(rows):04d}",
                                 run_id=f"run-{run_number:04d}",
                                 scenario_id=f"{scenario}-{run_number:04d}",
-                                label=1 if is_recon else 0,
+                                label=label,
                             )
                         )
                         run_rows += 1

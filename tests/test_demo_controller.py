@@ -9,6 +9,18 @@ import os
 import pytest
 
 from iot_defense.demo.controller import DemoController, _initial_state
+from iot_defense.detection.flow_features import FlowFeatures
+
+
+def _flow(**overrides):
+    base = dict(
+        source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="TCP",
+        duration=1.0, packet_count=1, packets_per_second=1.0, bytes_total=64,
+        average_packet_size=64.0, unique_destination_ports=0, unique_source_ports=0,
+        tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=0, icmp_packet_count=0,
+    )
+    base.update(overrides)
+    return FlowFeatures(**base)
 
 
 @pytest.fixture()
@@ -100,6 +112,45 @@ class TestNodeStatus:
         # Unknown node names should be silently skipped
         nodes = ctrl._set_node_status({"nonexistent": "ONLINE"})
         assert "nonexistent" not in nodes
+
+
+class TestAttackClassificationIsAttackTypeAgnostic:
+    """_classify_attack_traffic must classify from traffic shape alone --
+    it is never told which attack scenario (if any) was requested."""
+
+    def test_flood_shaped_traffic_is_classified_as_dos(self, ctrl):
+        flow = _flow(protocol="UDP", packet_count=300, packets_per_second=80.0,
+                      unique_destination_ports=1, udp_packet_count=300)
+        event = ctrl._classify_attack_traffic([flow])
+        assert event.attack_type == "dos_flood"
+
+    def test_scan_shaped_traffic_is_classified_as_reconnaissance(self, ctrl):
+        flow = _flow(protocol="TCP", packet_count=13, packets_per_second=42.6,
+                      unique_destination_ports=4, tcp_syn_count=13, tcp_ack_count=13)
+        event = ctrl._classify_attack_traffic([flow])
+        assert event.attack_type == "reconnaissance_port_scan"
+
+    def test_benign_shaped_traffic_is_classified_as_normal(self, ctrl):
+        flow = _flow(protocol="ICMP", packet_count=2, packets_per_second=1.0,
+                      unique_destination_ports=0, icmp_packet_count=2)
+        event = ctrl._classify_attack_traffic([flow])
+        assert event.attack_type == "normal"
+
+    def test_empty_capture_fails_safe_to_normal_rather_than_guessing(self, ctrl):
+        event = ctrl._classify_attack_traffic([])
+        assert event.attack_type == "normal"
+
+    def test_classification_does_not_depend_on_flow_order_or_labeling(self, ctrl):
+        """Two independently-shaped captures must classify independently --
+        proves there is no hidden attack-mode state influencing the result."""
+        dos_flow = _flow(protocol="UDP", packet_count=300, packets_per_second=80.0,
+                          unique_destination_ports=1, udp_packet_count=300)
+        recon_flow = _flow(protocol="TCP", packet_count=13, packets_per_second=42.6,
+                            unique_destination_ports=4, tcp_syn_count=13, tcp_ack_count=13)
+        first = ctrl._classify_attack_traffic([dos_flow])
+        second = ctrl._classify_attack_traffic([recon_flow])
+        assert first.attack_type == "dos_flood"
+        assert second.attack_type == "reconnaissance_port_scan"
 
 
 class TestInitialStateFactory:

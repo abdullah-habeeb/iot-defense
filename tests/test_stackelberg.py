@@ -108,6 +108,21 @@ def test_defender_utility_uses_the_actual_best_response():
     assert solution.selected_action == DefenseAction.ALERT
 
 
+def test_stackelberg_selects_isolate_for_dos_flood():
+    """A flood offers no useful deception target, so the configured payoff
+    table should favor immediate containment over decoy or allow."""
+    policy = StackelbergDefensePolicy()
+    dos = policy.decide(build_security_context(event("dos_flood", 0.92, 0.9)))
+    assert dos.action == DefenseAction.ISOLATE
+    assert dos.context["stackelberg_reasoning"]["observed_threat"] == "DOS_FLOOD"
+
+
+def test_dos_flood_has_all_four_candidate_evaluations():
+    solution = StackelbergGame().solve("DOS_FLOOD")
+    assert len(solution.candidates) == 4
+    assert solution.selected_action == DefenseAction.ISOLATE
+
+
 def test_observed_threat_is_separate_from_attacker_response():
     decision = StackelbergDefensePolicy().decide(
         build_security_context(event("reconnaissance_port_scan", 0.9, 0.88))

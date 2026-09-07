@@ -12,6 +12,11 @@ from iot_defense.defense.context import SecurityContext
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.stackelberg import StackelbergGame
 
+# ATTACK_SCENARIOS is imported lazily inside __init__/decide below, not at
+# module level: this module is eagerly imported by iot_defense.defense's
+# own package __init__, which the registry itself pulls in while building
+# ATTACK_SCENARIOS -- a top-level import here would deadlock that cycle.
+
 
 def _load_decision_policy_config() -> dict[str, Any]:
     config_path = Path(__file__).resolve().parents[2] / "config" / "policies.yaml"
@@ -39,20 +44,42 @@ class DefensePolicy(ABC):
 class RuleBasedDefensePolicy(DefensePolicy):
     """Baseline configurable policy for producing explainable defense decisions."""
 
+    # The two originally hand-written attacks kept their existing config-key
+    # names (recon_decoy_*, dos_isolate_*) for backward compatibility with
+    # config/policies.yaml; any newly registered attack without an entry
+    # here falls back to a generic "<key>_score_min"/"<key>_confidence_min"
+    # config key, or its registry defaults if that isn't configured either.
+    _LEGACY_CONFIG_KEYS = {
+        "reconnaissance": ("recon_decoy_score_min", "recon_decoy_confidence_min"),
+        "dos": ("dos_isolate_score_min", "dos_isolate_confidence_min"),
+    }
+
     def __init__(
         self,
         low_threat_score_max: float | None = None,
-        recon_decoy_score_min: float | None = None,
-        recon_decoy_confidence_min: float | None = None,
         severe_threat_score_min: float | None = None,
         severe_confidence_min: float | None = None,
+        action_thresholds: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+        self._attack_scenarios = ATTACK_SCENARIOS
         config = _load_decision_policy_config()
         self.low_threat_score_max = float(config.get("low_threat_score_max", low_threat_score_max if low_threat_score_max is not None else 0.2))
-        self.recon_decoy_score_min = float(config.get("recon_decoy_score_min", recon_decoy_score_min if recon_decoy_score_min is not None else 0.8))
-        self.recon_decoy_confidence_min = float(config.get("recon_decoy_confidence_min", recon_decoy_confidence_min if recon_decoy_confidence_min is not None else 0.8))
         self.severe_threat_score_min = float(config.get("severe_threat_score_min", severe_threat_score_min if severe_threat_score_min is not None else 0.95))
         self.severe_confidence_min = float(config.get("severe_confidence_min", severe_confidence_min if severe_confidence_min is not None else 0.95))
+
+        if action_thresholds is not None:
+            self.action_thresholds = dict(action_thresholds)
+        else:
+            self.action_thresholds = {}
+            for key, scenario in ATTACK_SCENARIOS.items():
+                score_key, confidence_key = self._LEGACY_CONFIG_KEYS.get(
+                    key, (f"{key}_score_min", f"{key}_confidence_min")
+                )
+                score_min = float(config.get(score_key, scenario.action_score_min))
+                confidence_min = float(config.get(confidence_key, scenario.action_confidence_min))
+                self.action_thresholds[key] = (score_min, confidence_min)
 
     def decide(self, context: SecurityContext) -> DefenseDecision:
         beliefs = context.beliefs
@@ -72,22 +99,29 @@ class RuleBasedDefensePolicy(DefensePolicy):
                 "Threat score and confidence exceed severe thresholds; "
                 "containment is prioritized to reduce potential impact."
             )
-        elif (
-            attack_type == "reconnaissance_port_scan"
-            and threat_score >= self.recon_decoy_score_min
-            and confidence >= self.recon_decoy_confidence_min
-        ):
-            action = DefenseAction.DECOY
-            reason = (
-                "Reconnaissance activity detected; deception is preferred to gather "
-                "intelligence while avoiding immediate disruption of target services."
-            )
         else:
-            action = DefenseAction.ALERT
-            reason = (
-                "Suspicious activity observed but severity remains below isolation and "
-                "deception thresholds; alerting is the least disruptive response."
+            matched_scenario = next(
+                (
+                    scenario
+                    for key, scenario in self._attack_scenarios.items()
+                    if scenario.attack_type == attack_type
+                    and threat_score >= self.action_thresholds[key][0]
+                    and confidence >= self.action_thresholds[key][1]
+                ),
+                None,
             )
+            if matched_scenario is not None:
+                action = matched_scenario.preferred_action
+                reason = (
+                    f"{matched_scenario.label} activity detected with threat score and confidence "
+                    f"above its action thresholds; {action.value} is the configured preferred response."
+                )
+            else:
+                action = DefenseAction.ALERT
+                reason = (
+                    "Suspicious activity observed but severity remains below isolation and "
+                    "deception thresholds; alerting is the least disruptive response."
+                )
 
         return DefenseDecision.create(
             action=action,

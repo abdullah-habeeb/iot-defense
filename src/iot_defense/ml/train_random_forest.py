@@ -28,7 +28,7 @@ def train_and_evaluate(
     if missing:
         raise ValueError(f"Dataset is missing columns: {missing}")
     anomalies = validate_dataset(data)
-    unseen_mask = data["scenario_id"].astype(str).str.startswith("unseen_")
+    unseen_mask = data["scenario_id"].astype(str).str.startswith("reconnaissance_unseen")
     unseen = data[unseen_mask].copy()
     ordinary = data[~unseen_mask].copy()
     train, validation, test = split_by_run(ordinary, seed=seed)

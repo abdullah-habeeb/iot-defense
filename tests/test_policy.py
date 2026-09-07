@@ -82,10 +82,22 @@ def test_severe_threat_maps_to_isolate():
     assert decision.action == DefenseAction.ISOLATE
 
 
+def test_dos_flood_maps_to_isolate():
+    """Unlike reconnaissance (decoy), a flood should trigger immediate
+    containment -- there's no useful deception target for a flood."""
+    agent = DecisionAgent(policy=RuleBasedDefensePolicy())
+    decision = agent.decide(
+        _event(
+            attack_type="dos_flood",
+            threat_score=0.92,
+            confidence=0.9,
+        )
+    )
+    assert decision.action == DefenseAction.ISOLATE
+
+
 def test_low_risk_suspicious_maps_to_alert():
     policy = RuleBasedDefensePolicy(
-        recon_decoy_score_min=0.8,
-        recon_decoy_confidence_min=0.8,
         severe_threat_score_min=0.95,
         severe_confidence_min=0.95,
     )
