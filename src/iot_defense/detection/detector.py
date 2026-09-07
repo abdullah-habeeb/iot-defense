@@ -187,6 +187,87 @@ class RuleBasedBruteForceDetector(Detector):
         )
 
 
+class RuleBasedExfiltrationDetector(Detector):
+    """A simple detector for data-exfiltration behavior.
+
+    The direction is reversed from every other detector here: the
+    compromised device is the packet *source*, and the attacker-controlled
+    sink is the packet *destination* -- so a flow's own source_ip/
+    destination_ip, taken from the raw capture, are the OPPOSITE of "device
+    under attack" / "external attacker" for this one attack type. The
+    signature itself is also distinct: low packet_count and low port
+    diversity (like brute-force), but with average_packet_size well above
+    anything else this system generates (small heartbeats/probes), which
+    is what actually flags a leak rather than some other low-volume flow.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        max_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(
+            config.get("exfiltration_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2)
+        )
+        self.min_packet_count = int(
+            config.get("exfiltration_min_packet_count", min_packet_count if min_packet_count is not None else 3)
+        )
+        self.max_packet_count = int(
+            config.get("exfiltration_max_packet_count", max_packet_count if max_packet_count is not None else 25)
+        )
+        self.min_average_packet_size = float(
+            config.get("exfiltration_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 600.0)
+        )
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+
+        is_threat = (
+            unique_ports <= self.max_unique_ports
+            and self.min_packet_count <= packet_count <= self.max_packet_count
+            and average_packet_size >= self.min_average_packet_size
+        )
+
+        if is_threat:
+            # Swap source/destination relative to the raw captured packet
+            # direction: every downstream consumer (SecurityContext,
+            # policies, the response executor) treats
+            # ThreatEvent.destination_ip as "the device to act on" -- for
+            # exfiltration that's the flow's own source_ip (the
+            # compromised device), not its destination_ip (the attacker's
+            # sink). Swapping here keeps that contract true for this one
+            # attack type without changing any shared downstream code.
+            source_ip = str(features.get("destination_ip", "unknown"))
+            destination_ip = str(features.get("source_ip", "unknown"))
+            attack_type = "data_exfiltration"
+            threat_score = 0.85
+            confidence = 0.8
+            reason = "few large outbound transfers to a single destination, consistent with data exfiltration"
+        else:
+            source_ip = str(features.get("source_ip", "unknown"))
+            destination_ip = str(features.get("destination_ip", "unknown"))
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet exfiltration criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedExfiltrationDetector",
+        )
+
+
 class UnifiedRuleBasedDetector(Detector):
     """Classify captured flow features without being told which attack (if
     any) is actually happening.

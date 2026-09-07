@@ -83,9 +83,29 @@ def build_security_context(
         intention = "protect_legitimate_iot_service"
     elif beliefs.threat_score >= 0.95 and beliefs.confidence >= 0.95:
         intention = "contain_malicious_activity"
-    elif beliefs.threat_type == "reconnaissance_port_scan":
-        intention = "gather_attacker_intelligence_when_appropriate"
     else:
-        intention = "minimize_unnecessary_disruption"
+        # Registry-driven (not a hardcoded per-attack elif chain): every
+        # registered attack's own `intention` field is the single source
+        # of truth here, matching what defense/ppo_env.py's synthetic
+        # training templates use for the same attack_type. Before this,
+        # every attack whose detector never reaches the severe threshold
+        # above (recon aside, which had its own explicit branch) silently
+        # fell through to "minimize_unnecessary_disruption" at live
+        # inference time regardless of what it was actually trained
+        # against -- a real train/inference mismatch that surfaced as a
+        # live PPO decision disagreeing with the other two policies on
+        # data_exfiltration (dos_flood and brute_force happened not to
+        # visibly flip, but were equally affected).
+        #
+        # Imported here, not at module level, to avoid a circular import:
+        # the registry itself imports iot_defense.defense.decision, whose
+        # package __init__ eagerly imports this module.
+        from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+        matched = next(
+            (scenario for scenario in ATTACK_SCENARIOS.values() if scenario.attack_type == beliefs.threat_type),
+            None,
+        )
+        intention = matched.intention if matched is not None else "minimize_unnecessary_disruption"
 
     return SecurityContext(beliefs=beliefs, desires=Desires(), intention=intention)

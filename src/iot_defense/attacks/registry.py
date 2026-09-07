@@ -71,8 +71,12 @@ class AttackScenario:
     call, so config-driven thresholds are re-read each time)."""
 
     generate_traffic: Callable[[Any], Any]
-    """(net) -> raw traffic-generator result. Always targets the sensor at
-    10.0.0.10, matching every existing and planned attack's target."""
+    """(net) -> raw traffic-generator result. Involves the sensor at
+    10.0.0.10 in every attack, but not always as the traffic *target* --
+    exfiltration reverses direction (the sensor is the compromised
+    traffic *source*, the attacker-controlled host is the destination),
+    matching how RuleBasedExfiltrationDetector swaps source_ip/
+    destination_ip on the resulting ThreatEvent."""
 
     capture_packet_limit: int
     capture_duration_seconds: float
@@ -100,6 +104,7 @@ def _build_registry() -> dict[str, AttackScenario]:
     from iot_defense.detection.detector import (
         RuleBasedBruteForceDetector,
         RuleBasedDosDetector,
+        RuleBasedExfiltrationDetector,
         RuleBasedReconDetector,
     )
     from iot_defense.simulation.traffic import TrafficGenerator
@@ -166,6 +171,28 @@ def _build_registry() -> dict[str, AttackScenario]:
             ppo_example_features={"packets_per_second": 6.0, "unique_destination_ports": 1},
             ppo_threat_score=0.75,
             ppo_confidence=0.75,
+        ),
+        "exfiltration": AttackScenario(
+            key="exfiltration",
+            label="Data exfiltration",
+            attack_type="data_exfiltration",
+            observed_threat_key="DATA_EXFILTRATION",
+            build_detector=RuleBasedExfiltrationDetector,
+            generate_traffic=lambda net: traffic.generate_exfiltration_mininet_traffic(net, duration_seconds=5),
+            capture_packet_limit=30,
+            capture_duration_seconds=5.0,
+            capture_completion_timeout=6.0,
+            # Once data is actively leaving, deception offers nothing --
+            # the real device is already compromised, so redirecting to a
+            # decoy doesn't stop the leak. ISOLATE is the sensible default,
+            # and the Stackelberg payoff table below independently agrees.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.7,
+            action_confidence_min=0.7,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 1.0, "unique_destination_ports": 1},
+            ppo_threat_score=0.85,
+            ppo_confidence=0.8,
         ),
     }
 
