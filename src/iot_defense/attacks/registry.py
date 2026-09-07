@@ -15,13 +15,18 @@ demo/controller.py) reads from ATTACK_SCENARIOS instead of hardcoding
 per-attack logic.
 
 UnifiedRuleBasedDetector checks scenarios in registry order and returns the
-first one whose detector fires. Today's registered attacks have mutually
-exclusive rule signatures (a flood needs very few destination ports at a
-very high rate; a scan needs many ports; brute-force needs one port at a
-rate bounded well below the flood's threshold), so order doesn't change
-what gets detected -- but a future attack whose signature could overlap
-with an existing one should still be registered with that in mind, since
-registration order is the tiebreak.
+first one whose detector fires -- registration order is a real tiebreak,
+not a formality, because these signatures are NOT all naturally disjoint.
+Port diversity alone separates a scan (many ports) from everything else
+(one port); rate alone separates a flood (very high, raw burst) from the
+rest. But brute-force and exfiltration overlap on both axes they check --
+same port-diversity bound, and their packet_count windows intersect
+([12, inf) vs [3, 25]) -- so RuleBasedBruteForceDetector (checked first)
+carries an explicit average_packet_size upper bound specifically to stay
+out of exfiltration's territory (tens of bytes vs 1200+), not because the
+two signatures happened to fall apart on their own. Adding a future attack
+whose signature could overlap with an existing one needs the same kind of
+explicit exclusion, not just a hopeful ordering choice.
 
 Registration order here also fixes ml/schema.py's LABEL_NAMES integer
 mapping (1=reconnaissance, 2=dos, ...) and defense/ppo_env.py's
