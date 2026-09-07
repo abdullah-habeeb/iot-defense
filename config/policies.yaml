@@ -18,6 +18,10 @@ policy:
     dos_min_packets_per_second: 20.0
     dos_max_unique_destination_ports: 2
     dos_min_packet_count: 20
+    brute_force_max_unique_destination_ports: 2
+    brute_force_min_packet_count: 12
+    brute_force_min_packets_per_second: 1.0
+    brute_force_max_packets_per_second: 15.0
   decision:
     low_threat_score_max: 0.2
     recon_decoy_score_min: 0.8
@@ -26,6 +30,8 @@ policy:
     severe_confidence_min: 0.95
     dos_isolate_score_min: 0.7
     dos_isolate_confidence_min: 0.7
+    brute_force_score_min: 0.65
+    brute_force_confidence_min: 0.65
   stackelberg:
     payoffs:
       NORMAL:
@@ -67,6 +73,24 @@ policy:
         ISOLATE:
           CONTINUE: {attacker: -7.0, defender: 9.0}
           RETREAT: {attacker: -8.0, defender: 6.0}
+      BRUTE_FORCE:
+        ALLOW:
+          CONTINUE: {attacker: 9.0, defender: -8.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          # Alerting alone barely slows an automated credential-stuffing
+          # tool -- it isn't a human who notices and stops.
+          CONTINUE: {attacker: 5.0, defender: -1.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: 1.0, defender: 2.0}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+        ISOLATE:
+          # Best available today, even though it's more disruptive than the
+          # rate-limiting response this attack really calls for -- Phase 3
+          # adds THROTTLE and a payoff column to match.
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
   ppo:
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"

@@ -115,15 +115,19 @@ function renderHeader(state) {
 
   const attackBadge = $('attack-mode-badge');
   if (attackBadge) {
-    const mode = state.attack_mode;
-    if (mode === 'dos') {
-      attackBadge.textContent = 'ATTACK: DDOS FLOOD';
+    // One entry per registered attack mode. rgb must match the paired
+    // --accent-* variable (CSS custom properties can't be read back as
+    // rgb() components for the background tint, so it's spelled out here).
+    const ATTACK_BADGE_STYLES = {
+      dos: { label: 'ATTACK: DDOS FLOOD', accent: '--accent-red', rgb: '239,68,68' },
+      reconnaissance: { label: 'ATTACK: RECONNAISSANCE', accent: '--accent-amber', rgb: '245,158,11' },
+      brute_force: { label: 'ATTACK: BRUTE-FORCE', accent: '--accent-purple', rgb: '168,85,247' },
+    };
+    const style = ATTACK_BADGE_STYLES[state.attack_mode];
+    if (style) {
+      attackBadge.textContent = style.label;
       attackBadge.style.display = '';
-      attackBadge.style.cssText += ';border-color:var(--accent-red);color:var(--accent-red);background:rgba(239,68,68,0.08)';
-    } else if (mode === 'reconnaissance') {
-      attackBadge.textContent = 'ATTACK: RECONNAISSANCE';
-      attackBadge.style.display = '';
-      attackBadge.style.cssText += ';border-color:var(--accent-amber);color:var(--accent-amber);background:rgba(245,158,11,0.08)';
+      attackBadge.style.cssText += `;border-color:var(${style.accent});color:var(${style.accent});background:rgba(${style.rgb},0.08)`;
     } else {
       attackBadge.style.display = 'none';
     }

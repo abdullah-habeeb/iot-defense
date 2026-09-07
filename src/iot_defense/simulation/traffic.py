@@ -71,6 +71,51 @@ class TrafficGenerator:
         command = f"python3 - <<'PY'\nimport socket, time\nstart = time.time()\nports = [22, 80, 8080, 443]\nwhile time.time() - start < {duration_seconds}:\n    for port in ports:\n        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n        s.settimeout(0.25)\n        try:\n            s.connect(('10.0.0.10', port))\n        except OSError:\n            pass\n        finally:\n            s.close()\n    time.sleep(0.1)\nprint('attack_done')\nPY"
         return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
 
+    def generate_brute_force_mininet_traffic(self, net: Any, duration_seconds: int = 6) -> dict[str, Any]:
+        """Generate a bounded credential-stuffing / brute-force attack.
+
+        Repeated real TCP connect attempts against a single fixed "login"
+        port -- unlike the port-scan above (many destination ports at a
+        moderate rate) and unlike the flood below (one port at a raw,
+        undifferentiated packet-rate burst), this holds to one port *and*
+        a moderate, sustained connect-attempt rate: each attempt is a real
+        connect/close cycle with a pause in between, not a tight loop, so
+        the resulting packets_per_second stays well under the flood
+        detector's threshold even though total packet_count over the
+        window is much higher than a brief reconnaissance probe.
+
+        The connect timeout (0.15s) and inter-attempt pause (0.1s) are
+        deliberately short: a live run measured a real, unloaded RST
+        turnaround close to the *worst case* timeout when this used a 0.3s
+        timeout + 0.3s pause, which produced barely enough packets to clear
+        RuleBasedBruteForceDetector's min_packet_count and misclassified
+        the run as normal. These tighter values give real margin above
+        that threshold even under similar latency. Entirely confined to
+        the Mininet lab and bounded by duration_seconds.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 2222  # simulated device login/management service
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "start = time.time()\n"
+            f"while time.time() - start < {duration_seconds}:\n"
+            "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+            "    sock.settimeout(0.15)\n"
+            "    try:\n"
+            f"        sock.connect(('{target_ip}', {target_port}))\n"
+            "        sock.sendall(b'USER admin\\r\\nPASS wrong\\r\\n')\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "    finally:\n"
+            "        sock.close()\n"
+            "    time.sleep(0.1)\n"
+            "print('brute_force_done')\n"
+            "PY"
+        )
+        return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
     def generate_dos_mininet_traffic(self, net: Any, duration_seconds: int = 5) -> dict[str, Any]:
         """Generate a bounded UDP flood attack over the simulated IoT network.
 

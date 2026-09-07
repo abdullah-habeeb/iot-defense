@@ -5,6 +5,8 @@ from iot_defense.defense.decision import DefenseAction
 from iot_defense.defense.policy import RuleBasedDefensePolicy
 from iot_defense.defense.ppo_env import (
     ACTION_TO_INDEX,
+    OBSERVATION_SIZE,
+    TRAINING_SCENARIOS,
     DefenseDecisionEnv,
     SecurityContextEncoder,
     context_for_scenario,
@@ -18,7 +20,7 @@ def test_context_encoding_is_normalized_and_deterministic():
     encoder = SecurityContextEncoder()
     first = encoder.encode(context)
     second = encoder.encode(context)
-    assert first.shape == (17,)
+    assert first.shape == (OBSERVATION_SIZE(),)
     assert first.dtype == np.float32
     assert np.array_equal(first, second)
     assert np.all(first >= 0.0)
@@ -28,7 +30,7 @@ def test_context_encoding_is_normalized_and_deterministic():
 def test_dos_flood_context_encodes_distinct_one_hot_flag():
     recon = SecurityContextEncoder().encode(context_for_scenario("reconnaissance_port_scan"))
     dos = SecurityContextEncoder().encode(context_for_scenario("dos_flood"))
-    assert dos.shape == (17,)
+    assert dos.shape == (OBSERVATION_SIZE(),)
     # The two attack-type scenarios must not collapse to the same encoding.
     assert not np.array_equal(recon, dos)
 
@@ -45,11 +47,11 @@ def test_action_mapping_matches_defense_actions():
 def test_environment_reset_step_reward_and_termination():
     environment = DefenseDecisionEnv(episode_length=2)
     observation, info = environment.reset(seed=7)
-    assert observation.shape == (17,)
+    assert observation.shape == (OBSERVATION_SIZE(),)
     assert info["scenario"] == "normal"
 
     next_observation, reward, terminated, truncated, step_info = environment.step(ACTION_TO_INDEX[DefenseAction.ALLOW])
-    assert next_observation.shape == (17,)
+    assert next_observation.shape == (OBSERVATION_SIZE(),)
     assert reward == 2.5
     assert terminated is False
     assert truncated is False
@@ -81,15 +83,27 @@ def test_dos_flood_reward_favors_isolation_over_decoy_and_allow():
     assert isolate_reward > decoy_reward > allow_reward
 
 
-def test_environment_cycles_through_all_three_scenarios():
-    environment = DefenseDecisionEnv(episode_length=3)
+def test_brute_force_reward_favors_isolation_over_allow():
+    """Brute-force's preferred_action is ISOLATE (until Phase 3 adds
+    THROTTLE) -- letting repeated login attempts through must always score
+    worse than containing them."""
+    environment = DefenseDecisionEnv()
+    brute_force = context_for_scenario("brute_force")
+    isolate_reward, _ = environment.calculate_reward(brute_force, DefenseAction.ISOLATE)
+    allow_reward, _ = environment.calculate_reward(brute_force, DefenseAction.ALLOW)
+    assert isolate_reward > allow_reward
+
+
+def test_environment_cycles_through_all_registered_scenarios():
+    training_scenarios = TRAINING_SCENARIOS()
+    environment = DefenseDecisionEnv(episode_length=len(training_scenarios))
     _, info = environment.reset(seed=7)
     assert info["scenario"] == "normal"
     seen = {info["scenario"]}
-    for _ in range(3):
+    for _ in range(len(training_scenarios)):
         _, _, _, _, step_info = environment.step(ACTION_TO_INDEX[DefenseAction.ALERT])
         seen.add(step_info["scenario"])
-    assert seen == {"normal", "reconnaissance_port_scan", "dos_flood"}
+    assert seen == set(training_scenarios)
 
 
 def test_ppo_policy_fallback_is_explicit_when_model_is_absent(tmp_path):
@@ -121,7 +135,7 @@ def test_ppo_policy_rejects_missing_model_without_fallback(tmp_path):
 def test_ppo_action_output_is_valid():
     class FakeModel:
         def predict(self, observation, deterministic=True):
-            assert observation.shape == (17,)
+            assert observation.shape == (OBSERVATION_SIZE(),)
             return ACTION_TO_INDEX[DefenseAction.DECOY], None
 
     policy = PPODefensePolicy("unused", fallback=RuleBasedDefensePolicy())

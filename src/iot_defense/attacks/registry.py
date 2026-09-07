@@ -15,11 +15,13 @@ demo/controller.py) reads from ATTACK_SCENARIOS instead of hardcoding
 per-attack logic.
 
 UnifiedRuleBasedDetector checks scenarios in registry order and returns the
-first one whose detector fires. Today's two attacks have mutually exclusive
-rule signatures (a flood needs very few destination ports, a scan needs
-many), so order doesn't change what gets detected -- but a future attack
-whose signature could overlap with an existing one should still be
-registered with that in mind, since registration order is the tiebreak.
+first one whose detector fires. Today's registered attacks have mutually
+exclusive rule signatures (a flood needs very few destination ports at a
+very high rate; a scan needs many ports; brute-force needs one port at a
+rate bounded well below the flood's threshold), so order doesn't change
+what gets detected -- but a future attack whose signature could overlap
+with an existing one should still be registered with that in mind, since
+registration order is the tiebreak.
 
 Registration order here also fixes ml/schema.py's LABEL_NAMES integer
 mapping (1=reconnaissance, 2=dos, ...) and defense/ppo_env.py's
@@ -95,7 +97,11 @@ def _build_registry() -> dict[str, AttackScenario]:
     # Imported here, not at module level, to avoid a circular import: these
     # modules import iot_defense.attacks.registry themselves.
     from iot_defense.defense.decision import DefenseAction
-    from iot_defense.detection.detector import RuleBasedDosDetector, RuleBasedReconDetector
+    from iot_defense.detection.detector import (
+        RuleBasedBruteForceDetector,
+        RuleBasedDosDetector,
+        RuleBasedReconDetector,
+    )
     from iot_defense.simulation.traffic import TrafficGenerator
 
     traffic = TrafficGenerator()
@@ -136,6 +142,30 @@ def _build_registry() -> dict[str, AttackScenario]:
             ppo_example_features={"packets_per_second": 80.0, "unique_destination_ports": 1},
             ppo_threat_score=0.92,
             ppo_confidence=0.9,
+        ),
+        "brute_force": AttackScenario(
+            key="brute_force",
+            label="Brute-force / credential stuffing",
+            attack_type="brute_force",
+            observed_threat_key="BRUTE_FORCE",
+            build_detector=RuleBasedBruteForceDetector,
+            generate_traffic=lambda net: traffic.generate_brute_force_mininet_traffic(net, duration_seconds=6),
+            capture_packet_limit=100,
+            capture_duration_seconds=6.0,
+            capture_completion_timeout=7.0,
+            # ISOLATE is heavier-handed than credential-stuffing calls for --
+            # rate-limiting the repeated attempts (THROTTLE, added in Phase 3)
+            # is the intended long-term response. Until THROTTLE exists,
+            # ISOLATE is the most defensible action already available, and
+            # the Stackelberg payoff table below independently arrives at
+            # the same choice.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.65,
+            action_confidence_min=0.65,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 6.0, "unique_destination_ports": 1},
+            ppo_threat_score=0.75,
+            ppo_confidence=0.75,
         ),
     }
 
