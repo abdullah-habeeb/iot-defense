@@ -115,19 +115,31 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
     def _observe_scenario(self, scenario: str) -> ThreatEvent:
         """Generate real traffic for one scenario, capture it, and classify
         it with the same attack-type-agnostic detector the live demo uses.
+
+        Registry-driven for every non-normal scenario: this used to
+        hardcode exactly two attacks (dos_flood, else-reconnaissance),
+        left over from before brute-force/exfiltration existed. Left
+        unfixed, it would have silently generated reconnaissance traffic
+        while *labeling* it brute_force/data_exfiltration in training data
+        the moment this env was first actually used -- caught and fixed
+        here, before that first real use, not after.
         """
         if scenario == "normal":
             session = self.monitor.start_capture(self.net, "sensor", 20)
             self.traffic_gen.generate_normal_mininet_traffic(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, 3.0)
-        elif scenario == "dos_flood":
-            session = self.monitor.start_capture(self.net, "sensor", 150)
-            self.traffic_gen.generate_dos_mininet_traffic(self.net, duration_seconds=2)
-            cap_path = self.monitor.stop_capture(self.net, session, 3.0)
-        else:  # reconnaissance_port_scan
-            session = self.monitor.start_capture(self.net, "sensor", 20)
-            self.traffic_gen.generate_malicious_mininet_traffic(self.net, duration_seconds=3)
-            cap_path = self.monitor.stop_capture(self.net, session, 4.0)
+        else:
+            from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+            attack = next(
+                (scenario_ for scenario_ in ATTACK_SCENARIOS.values() if scenario_.attack_type == scenario),
+                None,
+            )
+            if attack is None:
+                raise ValueError(f"No registered attack scenario for training scenario: {scenario!r}")
+            session = self.monitor.start_capture(self.net, "sensor", attack.capture_packet_limit)
+            attack.generate_traffic(self.net)
+            cap_path = self.monitor.stop_capture(self.net, session, attack.capture_completion_timeout)
 
         packets = self.monitor.read_capture(self.net, "sensor", cap_path)
         flows = self.aggregator.aggregate(packets)
@@ -178,6 +190,13 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
                 outcome["interaction_verified"] = "INTERACTION_OK" in probe
             except Exception:  # noqa: BLE001
                 outcome["interaction_verified"] = False
+        elif action == DefenseAction.THROTTLE and result.status == "success":
+            try:
+                target_host = self.executor._host_for_ip(decision.target_ip)
+                rule_check = target_host.cmd(f"iptables -L INPUT -n | grep -c {decision.target_ip}")
+                outcome["rule_installed"] = rule_check.strip() not in ("", "0")
+            except Exception:  # noqa: BLE001
+                outcome["rule_installed"] = False
 
         # Always restore before the next step so every step starts clean.
         try:
@@ -188,7 +207,33 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
 
     # ─── Reward ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _preferred_action_verified(preferred_action: DefenseAction, outcome: dict[str, Any], execution_ok: bool) -> bool:
+        """Whether the *specific, real* outcome this preferred action needs
+        to actually claim success was itself verified -- not just that
+        the executor call didn't raise. Mirrors the per-action outcome
+        keys _execute_and_verify() sets: a real ping check for ISOLATE, a
+        real redirected connection for DECOY, a real installed-rule check
+        for THROTTLE."""
+        if not execution_ok:
+            return False
+        if preferred_action == DefenseAction.ISOLATE:
+            return bool(outcome.get("connectivity_lost"))
+        if preferred_action == DefenseAction.DECOY:
+            return bool(outcome.get("interaction_verified"))
+        if preferred_action == DefenseAction.THROTTLE:
+            return bool(outcome.get("rule_installed"))
+        return execution_ok
+
     def calculate_reward(self, scenario: str, action: DefenseAction, outcome: dict[str, Any]) -> tuple[float, dict[str, float]]:
+        """Registry-driven, mirroring ppo_env.DefenseDecisionEnv's synthetic
+        calculate_reward(): every attack's reward comes from its own
+        registered preferred_action, so a newly registered attack needs no
+        code change here -- only _execute_and_verify() needs a branch if
+        its preferred action introduces a genuinely new kind of outcome to
+        verify (matching the pattern already used for ISOLATE/DECOY/
+        THROTTLE above).
+        """
         config = self.reward_config
         components: dict[str, float] = {"response_cost": config.response_cost}
         reward = config.response_cost
@@ -204,37 +249,32 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
                 if action == DefenseAction.ISOLATE:
                     components["unnecessary_isolation"] = config.unnecessary_isolation
                     reward += config.unnecessary_isolation
-        elif scenario == "dos_flood":
-            if action == DefenseAction.ISOLATE:
-                if execution_ok and outcome.get("connectivity_lost"):
-                    components["attack_contained"] = config.attack_contained
-                    reward += config.attack_contained
-                else:
-                    components["response_failed"] = config.false_positive_intervention
-                    reward += config.false_positive_intervention
-            elif action == DefenseAction.DECOY:
-                components["service_disruption"] = config.service_disruption
-                reward += config.service_disruption
-            elif action == DefenseAction.ALLOW:
-                components["successful_compromise"] = config.successful_compromise
-                reward += config.successful_compromise
-        else:  # reconnaissance_port_scan
-            if action == DefenseAction.DECOY:
-                if execution_ok and outcome.get("interaction_verified"):
+            return float(reward), components
+
+        from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+        attack = next((s for s in ATTACK_SCENARIOS.values() if s.attack_type == scenario), None)
+        if attack is None:
+            raise ValueError(f"Unsupported threat type for reward calculation: {scenario!r}")
+
+        if action == attack.preferred_action:
+            if self._preferred_action_verified(attack.preferred_action, outcome, execution_ok):
+                if attack.preferred_action == DefenseAction.DECOY:
                     components["attacker_diverted"] = config.attacker_diverted
                     components["intelligence_gained"] = config.intelligence_gained
                     reward += config.attacker_diverted + config.intelligence_gained
                 else:
-                    components["response_failed"] = config.false_positive_intervention
-                    reward += config.false_positive_intervention
-            elif action == DefenseAction.ISOLATE:
-                if execution_ok and outcome.get("connectivity_lost"):
                     components["attack_contained"] = config.attack_contained
-                    components["service_disruption"] = config.service_disruption
-                    reward += config.attack_contained + config.service_disruption
-            elif action == DefenseAction.ALLOW:
-                components["successful_compromise"] = config.successful_compromise
-                reward += config.successful_compromise
+                    reward += config.attack_contained
+            else:
+                components["response_failed"] = config.false_positive_intervention
+                reward += config.false_positive_intervention
+        elif action == DefenseAction.ALLOW:
+            components["successful_compromise"] = config.successful_compromise
+            reward += config.successful_compromise
+        else:
+            components["service_disruption"] = config.service_disruption
+            reward += config.service_disruption
 
         return float(reward), components
 
