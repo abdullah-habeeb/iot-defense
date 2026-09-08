@@ -12,14 +12,16 @@ an exhaustive one.
 
 SAFE BY DEFAULT: saves to a separate file (models/ppo_defense_real.zip) and
 never overwrites the currently-deployed models/ppo_defense.zip. Promote it
-manually only after verifying it still behaves sensibly across all three
+manually only after verifying it still behaves sensibly across all five
 scenarios.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from stable_baselines3 import PPO
@@ -43,13 +45,20 @@ def fine_tune(
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         model.save(str(output))
-        return {
+        metadata = {
             "base_model": str(base_model_path),
             "output_model": str(output.with_suffix(".zip")),
             "timesteps": total_timesteps,
             "episode_length": env.episode_length,
             "training_seconds": round(elapsed, 1),
+            "trained_at_utc": datetime.now(timezone.utc).isoformat(),
         }
+        # Matches ml/random_forest.py's save_model_metadata() convention:
+        # every trained model in this project gets a human-readable
+        # metadata file alongside it, so how/when/from-what a model was
+        # produced is never only in a terminal scrollback.
+        output.with_suffix(".metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        return metadata
     finally:
         env.close()
 
