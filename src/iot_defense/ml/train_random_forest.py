@@ -10,10 +10,16 @@ from typing import Any
 
 import pandas as pd
 
-from iot_defense.detection.detector import RuleBasedReconDetector
+from iot_defense.detection.detector import UnifiedRuleBasedDetector
 from iot_defense.ml.evaluation import classification_metrics, split_by_run
 from iot_defense.ml.random_forest import build_random_forest_pipeline, save_model_metadata
-from iot_defense.ml.schema import DATASET_COLUMNS, FEATURE_COLUMNS, validate_dataset
+from iot_defense.ml.schema import DATASET_COLUMNS, FEATURE_COLUMNS, LABEL_NAMES, validate_dataset
+
+# Reverse of ml.schema.LABEL_NAMES: attack_type string -> integer label, so
+# the rule-based comparison baseline can be scored on the exact same
+# multi-class labels the Random Forest is, rather than a separate binary
+# "is this reconnaissance or not" question.
+_LABEL_NAME_TO_INT = {name: label for label, name in LABEL_NAMES.items()}
 
 
 def train_and_evaluate(
@@ -37,16 +43,16 @@ def train_and_evaluate(
 
     validation_predictions = pipeline.predict(validation[list(FEATURE_COLUMNS)])
     test_predictions = pipeline.predict(test[list(FEATURE_COLUMNS)])
-    rule_detector = RuleBasedReconDetector()
+    rule_detector = UnifiedRuleBasedDetector()
     rule_predictions = []
     for row in test.to_dict("records"):
         event = rule_detector.detect(row)
-        rule_predictions.append(int(event.attack_type == "reconnaissance_port_scan"))
+        rule_predictions.append(_LABEL_NAME_TO_INT.get(event.attack_type, 0))
     unseen_predictions = pipeline.predict(unseen[list(FEATURE_COLUMNS)]) if not unseen.empty else []
     unseen_rule_predictions = []
     for row in unseen.to_dict("records"):
         event = rule_detector.detect(row)
-        unseen_rule_predictions.append(int(event.attack_type == "reconnaissance_port_scan"))
+        unseen_rule_predictions.append(_LABEL_NAME_TO_INT.get(event.attack_type, 0))
 
     import joblib
 

@@ -8,6 +8,8 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import GroupShuffleSplit
 
+from iot_defense.ml.schema import LABEL_NAMES
+
 
 def split_by_run(
     data: pd.DataFrame,
@@ -62,7 +64,11 @@ def classification_metrics(y_true: Any, y_pred: Any) -> dict[str, Any]:
             "false_negative_rate": float(fn / (fn + tp)) if fn + tp else 0.0,
         }
 
-    labels = sorted(present | {0, 1, 2})
+    # Force every registered label into the report even if a particular
+    # split happens to contain zero instances of it, so output shape stays
+    # stable across splits/runs -- generic over however many classes are
+    # currently registered (LABEL_NAMES), not a hardcoded {0, 1, 2}.
+    labels = sorted(present | set(LABEL_NAMES.keys()))
     matrix = confusion_matrix(y_true, y_pred, labels=labels)
     per_class_precision = precision_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
     per_class_recall = recall_score(y_true, y_pred, labels=labels, average=None, zero_division=0)
