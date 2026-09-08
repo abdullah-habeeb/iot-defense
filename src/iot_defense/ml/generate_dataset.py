@@ -415,8 +415,18 @@ def generate_dataset(
             # sending out to the attacker as destination -- so it needs
             # its own direction-aware condition rather than sharing the
             # single "destination_ip == target_ip" gate the others use.
+            #
+            # A single stray packet (packet_count < 2, duration == 0) is
+            # capture noise, not a real representative flow -- a real run
+            # produced exactly this once (one packet labeled brute_force,
+            # found reviewing the 130-run dataset), and training on it
+            # would teach the model a signature no real traffic actually
+            # has. Excluded from labeling entirely rather than kept and
+            # hoped to average out.
             run_rows = 0
             for feature in features:
+                if feature.packet_count < 2:
+                    continue
                 is_recon = (
                     scenario.startswith("reconnaissance")
                     and feature.destination_ip == target_ip
