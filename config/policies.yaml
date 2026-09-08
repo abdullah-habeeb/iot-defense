@@ -6,6 +6,7 @@ policy:
     - "alert"
     - "isolate"
     - "decoy"
+    - "throttle"
   isolation_timeout_seconds: 15
   logging:
     level: "INFO"
@@ -62,6 +63,12 @@ policy:
         ISOLATE:
           CONTINUE: {attacker: -5.0, defender: 1.0}
           RETREAT: {attacker: -6.0, defender: 0.0}
+        THROTTLE:
+          # A mild, unnecessary inconvenience for legitimate traffic --
+          # worse than ALLOW, but less disruptive than DECOY/ISOLATE since
+          # the connection still works, just slower.
+          CONTINUE: {attacker: -1.0, defender: 4.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
       RECONNAISSANCE_PORT_SCAN:
         ALLOW:
           CONTINUE: {attacker: 8.0, defender: -5.0}
@@ -75,6 +82,11 @@ policy:
         ISOLATE:
           CONTINUE: {attacker: 1.0, defender: 3.0}
           RETREAT: {attacker: -6.0, defender: 5.0}
+        THROTTLE:
+          # Slows the scan but gathers no intelligence the way DECOY does
+          # -- a real mitigation, just a strictly worse one here.
+          CONTINUE: {attacker: 0.0, defender: 4.0}
+          RETREAT: {attacker: -3.0, defender: 5.0}
       DOS_FLOOD:
         ALLOW:
           CONTINUE: {attacker: 9.0, defender: -8.0}
@@ -88,6 +100,13 @@ policy:
         ISOLATE:
           CONTINUE: {attacker: -7.0, defender: 9.0}
           RETREAT: {attacker: -8.0, defender: 6.0}
+        THROTTLE:
+          # A flood is volumetric, not something a rate cap defeats the
+          # way it defeats a guess-rate-limited attack like brute-force --
+          # real mitigation (reduces effective attack bandwidth) but
+          # nowhere near as decisive as full containment.
+          CONTINUE: {attacker: -2.0, defender: 5.0}
+          RETREAT: {attacker: -3.0, defender: 4.0}
       BRUTE_FORCE:
         ALLOW:
           CONTINUE: {attacker: 9.0, defender: -8.0}
@@ -101,11 +120,20 @@ policy:
           CONTINUE: {attacker: 1.0, defender: 2.0}
           RETREAT: {attacker: -3.0, defender: 4.0}
         ISOLATE:
-          # Best available today, even though it's more disruptive than the
-          # rate-limiting response this attack really calls for -- Phase 3
-          # adds THROTTLE and a payoff column to match.
+          # Contains the attack completely, but more disruptive than this
+          # attack calls for -- it also blocks the device's legitimate
+          # use, not just the attacker's guesses.
           CONTINUE: {attacker: -6.0, defender: 7.0}
           RETREAT: {attacker: -7.0, defender: 6.0}
+        THROTTLE:
+          # The best response of any attack here: rate-limiting directly
+          # defeats a brute-force attack's actual mechanism (it needs a
+          # high guess rate to succeed) while the device stays reachable
+          # for a legitimate user -- strictly better than ISOLATE, which
+          # achieves the same containment at the cost of also blocking
+          # legitimate access.
+          CONTINUE: {attacker: -7.0, defender: 8.5}
+          RETREAT: {attacker: -8.0, defender: 7.5}
       DATA_EXFILTRATION:
         ALLOW:
           # Worst outcome of any attack here: a full, ongoing data breach
@@ -135,6 +163,13 @@ policy:
           # no partial-success ambiguity.
           CONTINUE: {attacker: -8.0, defender: 10.0}
           RETREAT: {attacker: -9.0, defender: 8.0}
+        THROTTLE:
+          # Slows the leak but doesn't stop it -- unlike brute-force,
+          # where cutting the rate defeats the attack outright, any
+          # ongoing exfiltration is still a breach in progress, just a
+          # slower one. Meaningfully worse than ISOLATE here.
+          CONTINUE: {attacker: 1.0, defender: 3.0}
+          RETREAT: {attacker: -2.0, defender: 4.0}
   ppo:
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"

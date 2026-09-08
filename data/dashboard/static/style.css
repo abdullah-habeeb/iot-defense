@@ -38,6 +38,7 @@
   --status-offline:   #4a5878;
   --status-attacked:  #ef4444;
   --status-isolated:  #f59e0b;
+  --status-throttled: #3b82f6;
   --status-decoy:     #a855f7;
   --status-restored:  #06b6d4;
   --status-normal:    #22c55e;
@@ -198,6 +199,13 @@ body {
   border-color: var(--accent-purple);
   color: var(--accent-purple);
 }
+.phase-badge.throttled {
+  /* Teal, not the same blue as .phase-badge.active, to stay visually
+     distinct from the generic "in progress" phases. */
+  border-color: var(--accent-teal);
+  color: var(--accent-teal);
+  background: rgba(20, 184, 166, 0.08);
+}
 .phase-badge.restored {
   border-color: var(--accent-green);
   color: var(--accent-green);
@@ -294,6 +302,7 @@ body {
 .topo-node-bg.online   { stroke: var(--status-online); fill: rgba(34,197,94,0.06); }
 .topo-node-bg.attacked { stroke: var(--status-attacked); fill: rgba(239,68,68,0.08); }
 .topo-node-bg.isolated { stroke: var(--status-isolated); fill: rgba(245,158,11,0.08); }
+.topo-node-bg.throttled { stroke: var(--status-throttled); fill: rgba(59,130,246,0.08); }
 .topo-node-bg.decoy    { stroke: var(--status-decoy); fill: rgba(168,85,247,0.08); }
 .topo-node-bg.restored { stroke: var(--status-restored); fill: rgba(6,182,212,0.06); }
 
@@ -550,6 +559,7 @@ body {
 .action-ALERT   { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: var(--accent-amber); }
 .action-DECOY   { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: var(--accent-purple); }
 .action-ISOLATE { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.3);  color: var(--accent-red); }
+.action-THROTTLE { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: var(--accent-blue); }
 
 .policy-detail {
   font-size: 0.72rem;
@@ -702,6 +712,7 @@ body {
 .tl-dot.phase-deciding { background: var(--accent-amber); }
 .tl-dot.phase-decoy    { background: var(--accent-purple); }
 .tl-dot.phase-isolated { background: var(--accent-orange); }
+.tl-dot.phase-throttled { background: var(--accent-blue); }
 .tl-dot.phase-restored { background: var(--accent-green); }
 .tl-dot.phase-complete { background: var(--accent-cyan); }
 .tl-dot.phase-error    { background: var(--accent-red); }

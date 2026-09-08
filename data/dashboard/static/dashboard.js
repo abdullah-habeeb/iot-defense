@@ -64,17 +64,18 @@ const PHASE_CLASS = {
   IDLE: '', STARTING_NETWORK: 'active', BASELINE: 'active',
   OBSERVING: 'active', THREAT_DETECTED: 'threat', DECIDING: 'threat',
   RESPONDING: 'threat', DECOY_ACTIVE: 'decoy', ISOLATED: 'threat',
+  THROTTLED: 'throttled',
   RESTORING: 'active', RESTORED: 'restored', COMPLETE: 'restored',
   ERROR: 'threat', CLEANUP: '',
 };
 
 // ── Pipeline phases ───────────────────────────────────────────
 const PIPE_STEPS = [
-  { id: 'pipe-network',  done: ['BASELINE','OBSERVING','THREAT_DETECTED','DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-observe',  done: ['THREAT_DETECTED','DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-detect',   done: ['DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-context',  done: ['RESPONDING','DECOY_ACTIVE','ISOLATED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-decision', done: ['DECOY_ACTIVE','ISOLATED','RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-network',  done: ['BASELINE','OBSERVING','THREAT_DETECTED','DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-observe',  done: ['THREAT_DETECTED','DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-detect',   done: ['DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-context',  done: ['RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-decision', done: ['DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
   { id: 'pipe-response', done: ['RESTORING','RESTORED','COMPLETE'] },
   { id: 'pipe-recovery', done: ['COMPLETE'] },
 ];
@@ -88,6 +89,7 @@ const PIPE_ACTIVE = {
   'RESPONDING': 'pipe-decision',
   'DECOY_ACTIVE': 'pipe-response',
   'ISOLATED': 'pipe-response',
+  'THROTTLED': 'pipe-response',
   'RESTORING': 'pipe-recovery',
   'RESTORED': 'pipe-recovery',
   'COMPLETE': 'pipe-recovery',
@@ -151,6 +153,7 @@ const STATUS_CSS = {
   'OBSERVING':    'online',
   'ATTACKED':     'attacked',
   'ISOLATED':     'isolated',
+  'THROTTLED':    'throttled',
   'DECOY ACTIVE': 'decoy',
   'RESTORED':     'restored',
   'OFFLINE':      '',
@@ -161,6 +164,7 @@ const STATUS_LINK = {
   'OBSERVING':    'active',
   'ATTACKED':     'attacked',
   'ISOLATED':     'isolated',
+  'THROTTLED':    'throttled',
   'DECOY ACTIVE': 'decoy',
   'RESTORED':     'restored',
   'OFFLINE':      '',
@@ -578,6 +582,19 @@ function renderResponse(state) {
       </div>`;
   }
 
+  // THROTTLE details
+  if (action === 'THROTTLE' && details.operation === 'throttle') {
+    detailHtml = `
+      <div class="response-detail-card" style="border-color:rgba(59,130,246,0.3)">
+        <div class="rdc-title" style="color:var(--accent-blue)">🐢 Rate-Limit Operation (real tc qdisc)</div>
+        <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Interface</span><span class="rdc-val">${escHtml(safe(details.interface))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Rate</span><span class="rdc-val">${escHtml(safe(details.rate))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Burst</span><span class="rdc-val">${escHtml(safe(details.burst))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Latency</span><span class="rdc-val">${escHtml(safe(details.latency))}</span></div>
+      </div>`;
+  }
+
   // RESTORE details
   if (details.operation === 'restore') {
     detailHtml = `
@@ -586,6 +603,7 @@ function renderResponse(state) {
         <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Interface</span><span class="rdc-val">${escHtml(safe(details.interface))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Status</span><span class="rdc-val">${escHtml(safe(details.state || details.status))}</span></div>
+        ${details.throttle_removed ? '<div class="rdc-row"><span class="rdc-key">Rate Limit</span><span class="rdc-val">Removed</span></div>' : ''}
       </div>`;
   }
 
@@ -619,7 +637,7 @@ const SEEN_ENTRIES = new Set();
 const PHASE_DOT_CLASS = {
   THREAT_DETECTED: 'phase-threat', DECIDING: 'phase-deciding',
   RESPONDING: 'phase-deciding', DECOY_ACTIVE: 'phase-decoy',
-  ISOLATED: 'phase-isolated', RESTORING: 'phase-deciding',
+  ISOLATED: 'phase-isolated', THROTTLED: 'phase-throttled', RESTORING: 'phase-deciding',
   RESTORED: 'phase-restored', COMPLETE: 'phase-complete', ERROR: 'phase-error',
 };
 

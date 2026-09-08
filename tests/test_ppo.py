@@ -41,6 +41,7 @@ def test_action_mapping_matches_defense_actions():
         DefenseAction.ALERT: 1,
         DefenseAction.ISOLATE: 2,
         DefenseAction.DECOY: 3,
+        DefenseAction.THROTTLE: 4,
     }
 
 

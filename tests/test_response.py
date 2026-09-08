@@ -21,7 +21,8 @@ class FakeProcess:
 
 
 class FakeInterface:
-    name = "sensor-eth0"
+    def __init__(self, name):
+        self.name = name
 
 
 class FakeHost:
@@ -35,7 +36,7 @@ class FakeHost:
         return self._ip
 
     def defaultIntf(self):
-        return FakeInterface()
+        return FakeInterface(f"{self.name}-eth0")
 
     def cmd(self, command):
         self.commands.append(command)
@@ -108,6 +109,65 @@ def test_isolation_request_validates_known_mininet_ip(tmp_path):
     failed = executor.execute(unsafe)
     assert failed.status == "failed"
     assert "Refusing" in failed.message
+
+
+def test_throttle_installs_tc_qdisc_and_restore_removes_it(tmp_path):
+    executor = MininetResponseExecutor(FakeNetwork(), log_path=tmp_path / "responses.jsonl")
+    result = executor.execute(decision(DefenseAction.THROTTLE))
+    sensor = executor.net.hosts[0]
+
+    assert result.status == "success"
+    assert result.details["operation"] == "throttle"
+    assert sensor.commands == ["tc qdisc add dev sensor-eth0 root tbf rate 64kbit burst 1600 latency 50ms"]
+
+    restored = executor.restore("10.0.0.10")
+    assert restored["state"] == "up"
+    assert restored["throttle_removed"] is True
+    assert sensor.commands[-2:] == [
+        "ip link set dev sensor-eth0 up",
+        "tc qdisc del dev sensor-eth0 root",
+    ]
+
+
+def test_throttle_is_idempotent_when_already_throttled(tmp_path):
+    executor = MininetResponseExecutor(FakeNetwork(), log_path=tmp_path / "responses.jsonl")
+    sensor = executor.net.hosts[0]
+
+    first = executor.throttle("10.0.0.10")
+    second = executor.throttle("10.0.0.10")
+
+    assert first["operation"] == "throttle"
+    assert second["status"] == "already_throttled"
+    assert sensor.commands.count("tc qdisc add dev sensor-eth0 root tbf rate 64kbit burst 1600 latency 50ms") == 1
+
+
+def test_restore_without_prior_throttle_or_isolate_does_not_remove_a_qdisc(tmp_path):
+    """restore() must stay a safe no-op-ish call when nothing was actually
+    throttled or isolated -- it should still bring the interface up (the
+    existing isolate-focused safety net), but never issue `tc qdisc del`
+    for a target that was never throttled."""
+    executor = MininetResponseExecutor(FakeNetwork(), log_path=tmp_path / "responses.jsonl")
+    sensor = executor.net.hosts[0]
+
+    result = executor.restore("10.0.0.10")
+
+    assert result["throttle_removed"] is False
+    assert sensor.commands == ["ip link set dev sensor-eth0 up"]
+
+
+def test_cleanup_restores_both_isolated_and_throttled_hosts(tmp_path):
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    sensor, attacker = network.hosts[0], network.hosts[1]
+
+    executor.isolate("10.0.0.10")
+    executor.throttle("10.0.0.100")
+    executor.cleanup()
+
+    assert "ip link set dev sensor-eth0 up" in sensor.commands
+    assert "tc qdisc del dev attacker-eth0 root" in attacker.commands
+    assert executor._isolated == {}
+    assert executor._throttled == {}
 
 
 def test_decoy_lifecycle_and_executor_mapping(tmp_path):
