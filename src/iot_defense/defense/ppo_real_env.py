@@ -141,7 +141,20 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             attack.generate_traffic(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, attack.capture_completion_timeout)
 
-        packets = self.monitor.read_capture(self.net, "sensor", cap_path)
+        try:
+            packets = self.monitor.read_capture(self.net, "sensor", cap_path)
+        except Exception:  # noqa: BLE001
+            # A capture can genuinely come back empty/corrupt under real
+            # timing (the same intermittent "No data could be read!"
+            # failure mode generate_dataset.py already tolerates by
+            # skipping the run and continuing) -- read_capture() itself
+            # already retries once, so a second failure here means this
+            # is a real dry step, not a transient race. A single bad
+            # capture must degrade to "no signal", not crash the whole
+            # training loop: with dozens of steps per run, even a ~10%
+            # per-capture failure rate would make an unguarded crash here
+            # almost certain to end any real run before it finished.
+            packets = []
         flows = self.aggregator.aggregate(packets)
         if flows:
             return self.detector.detect(flows[0].to_dict())
