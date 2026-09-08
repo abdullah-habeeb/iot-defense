@@ -70,3 +70,43 @@ def test_failed_execution_never_scores_as_well_as_verified_success():
     verified, _ = env.calculate_reward("dos_flood", DefenseAction.ISOLATE, {"status": "success", "connectivity_lost": True})
     failed, _ = env.calculate_reward("dos_flood", DefenseAction.ISOLATE, {"status": "failed", "connectivity_lost": False})
     assert verified > failed
+
+
+def test_brute_force_rewards_verified_throttle_over_unverified():
+    """THROTTLE's own verified outcome (a real installed iptables rule)
+    must matter, the same way ISOLATE's real ping check and DECOY's real
+    interaction check already do."""
+    env = _env()
+    verified, _ = env.calculate_reward("brute_force", DefenseAction.THROTTLE, {"status": "success", "rule_installed": True})
+    unverified, _ = env.calculate_reward("brute_force", DefenseAction.THROTTLE, {"status": "success", "rule_installed": False})
+    assert verified > unverified
+
+
+def test_brute_force_rewards_throttle_over_isolate_and_allow():
+    """brute_force's registered preferred_action is THROTTLE (not
+    ISOLATE) -- the real-Mininet reward must reflect that, not just the
+    synthetic training env."""
+    env = _env()
+    throttle, _ = env.calculate_reward("brute_force", DefenseAction.THROTTLE, {"status": "success", "rule_installed": True})
+    isolate, _ = env.calculate_reward("brute_force", DefenseAction.ISOLATE, {"status": "success"})
+    allow, _ = env.calculate_reward("brute_force", DefenseAction.ALLOW, {"status": "success"})
+    assert throttle > isolate > allow
+
+
+def test_data_exfiltration_rewards_verified_isolation_over_allow():
+    env = _env()
+    isolate, _ = env.calculate_reward(
+        "data_exfiltration", DefenseAction.ISOLATE, {"status": "success", "connectivity_lost": True}
+    )
+    allow, _ = env.calculate_reward("data_exfiltration", DefenseAction.ALLOW, {"status": "success"})
+    assert isolate > allow
+
+
+def test_unregistered_scenario_raises_instead_of_silently_scoring():
+    env = _env()
+    try:
+        env.calculate_reward("not_a_real_attack", DefenseAction.ALLOW, {"status": "success"})
+    except ValueError as error:
+        assert "not_a_real_attack" in str(error)
+    else:
+        raise AssertionError("Unsupported scenario should raise, not silently score")
