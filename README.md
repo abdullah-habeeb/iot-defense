@@ -1,17 +1,18 @@
 # IoT Defense
 
 ## Purpose
-This project implements a modular, agent-based cyber-defense framework for residential IoT networks. The initial foundation is intentionally scoped to a working vertical slice that demonstrates the end-to-end flow:
+This project implements a modular, agent-based cyber-defense framework for residential IoT networks, demonstrating the end-to-end flow:
 
 Mininet IoT Network -> Monitoring Agent -> Feature Extraction -> Detection Agent -> Decision Agent -> Response / Deception -> Observability / Metrics.
 
 ## Current architecture
-- Mininet network simulation
+- Mininet network simulation (5 hosts: sensor, camera, smart plug, attacker, decoy)
 - Monitoring agent for packet observations
-- Feature extraction pipeline
-- Rule-based detection layer
-- Decision agent for response selection
-- Response/deception handlers
+- Feature extraction pipeline (12 behavioural `FlowFeatures` columns)
+- **Attack scenario registry** (`src/iot_defense/attacks/registry.py`) — a single `AttackScenario` definition per attack type. Every dependent module (detection, decision policy, the Stackelberg payoff lookup, PPO's observation encoding, dataset generation, the demo controller) derives its per-attack behaviour from this one registry instead of hardcoding it separately in each place.
+- Attack-type-agnostic rule-based detection layer (`UnifiedRuleBasedDetector`) — classifies captured traffic purely from its shape (rate, port diversity, payload size), never from which attack was requested
+- Decision agent comparing three independent policies (rule-based, Stackelberg game-theoretic, PPO reinforcement-learned) for response selection
+- Response/deception handlers, all executing real changes inside the Mininet network (real interface isolation, real decoy redirection, real connection-rate limiting)
 - Logging and metrics collection
 
 ## Environment
@@ -20,40 +21,60 @@ Mininet IoT Network -> Monitoring Agent -> Feature Extraction -> Detection Agent
 - Mininet 2.3.0
 - Open vSwitch 3.3.9
 
-## Current implementation status
-The prototype now includes a validated Mininet traffic-to-response vertical slice, configurable Stackelberg policy reasoning, and a small CPU-only PPO policy trained on a standalone decision simulator. PPO does not train against Mininet traffic and does not execute responses; the live runner compares RuleBased, Stackelberg, and PPO decisions while retaining the existing response path.
+## Attack types
+Four attack types are currently registered, selectable at demo start via `--attack <key>`:
 
-The PPO environment uses a deterministic normalized security-context observation and a four-action mapping: `ALLOW=0`, `ALERT=1`, `ISOLATE=2`, and `DECOY=3`. Reward coefficients are modelling assumptions, not objective security values. Train a short model with:
+| Key | Label | Signature | Preferred response |
+|---|---|---|---|
+| `reconnaissance` | Port scan | Many destination ports, moderate rate | `DECOY` |
+| `dos` | DDoS flood | Single port, very high packet rate | `ISOLATE` |
+| `brute_force` | Credential stuffing | Single port, moderate sustained rate, many attempts | `THROTTLE` |
+| `exfiltration` | Data exfiltration | Reversed direction (device → attacker), few packets, large payloads | `ISOLATE` |
 
-```bash
-python -m iot_defense.simulation.train_ppo --timesteps 512 --output models/ppo_defense
-```
+Adding a new attack means adding one `AttackScenario` entry to the registry, plus its own traffic generator and rule-based detector — not touching every dependent file by hand.
 
-The generated model is ignored by Git. `PPODefensePolicy` fails clearly when it is absent unless an explicit fallback policy is provided. The trained policy should not be interpreted as learning real-world attacker behaviour or general autonomous cyber defense.
+## Defense actions
+Five actions are available to all three decision policies: `ALLOW`, `ALERT`, `ISOLATE`, `DECOY`, `THROTTLE`. `THROTTLE` rate-limits new incoming connection attempts to a target via a real `iptables hashlimit` rule — not a bandwidth cap (an earlier `tc qdisc`-based approach was built, measured against real traffic, and found to have no real effect: a single SYN packet is too small for byte-rate shaping to meaningfully delay, and egress shaping doesn't touch incoming traffic at all). Verified against real Mininet traffic: an unthrottled attacker completed 56/56 connection attempts in a 3-second window; the same traffic under a 2/sec hashlimit completed only 7.
+
+## PPO reinforcement-learned policy
+The PPO environment uses a deterministic normalized security-context observation and a five-action mapping: `ALLOW=0`, `ALERT=1`, `ISOLATE=2`, `DECOY=3`, `THROTTLE=4`. Reward coefficients are modelling assumptions, not objective security values.
+
+Two training passes exist:
+
+1. **Synthetic base training** — fast, deterministic, never touches Mininet:
+   ```bash
+   python -m iot_defense.simulation.train_ppo --timesteps 3000 --output models/ppo_defense
+   ```
+2. **Real-Mininet fine-tuning** — loads the synthetic model as a warm start and continues training against `RealMininetDefenseEnv`, where every step's reward comes from an actually-executed, actually-verified Mininet outcome (a real ping check for `ISOLATE`, a real redirected connection for `DECOY`, a real installed-rule check for `THROTTLE`) rather than an assumed reward table. Each step costs several real seconds, so this is intentionally bounded (tens of timesteps, not thousands):
+   ```bash
+   sudo .venv/bin/python3 -m iot_defense.simulation.train_ppo_real \
+       --base-model models/ppo_defense --output models/ppo_defense_real --timesteps 64
+   ```
+   Saves to a separate file by default and never silently overwrites the deployed model — promote it manually (copy over `models/ppo_defense.zip`) only after verifying it behaves sensibly across all five scenarios.
+
+The generated models are ignored by Git. `PPODefensePolicy` fails clearly when a model is absent unless an explicit fallback policy is provided. The trained policy should not be interpreted as learning real-world attacker behaviour or general autonomous cyber defense — it is a bounded, controlled-environment demonstration.
 
 ## Controlled ML detection experiment
-Phase 6B adds a reproducible controlled dataset and Random Forest detector. Generate labelled rows from fresh Mininet runs with:
+A reproducible controlled dataset and Random Forest detector, now genuinely 5-class (normal + all four registered attacks). Generate labelled rows from fresh Mininet runs with:
 
 ```bash
-sudo -E env PYTHONPATH="/home/abdullah/iot-defense/.venv/lib/python3.12/site-packages:/home/abdullah/iot-defense/src" \
-	/usr/bin/python3 -m iot_defense.ml.generate_dataset --runs 20 --seed 7 \
-	--output data/ml/controlled_flows.csv
+sudo .venv/bin/python3 -m iot_defense.ml.generate_dataset --runs 130 --seed 42 \
+    --output data/ml/controlled_flows_5class.csv
 ```
 
 Train and evaluate on run-held-out groups with:
 
 ```bash
-python -m iot_defense.ml.train_random_forest \
-	--dataset data/ml/controlled_flows.csv \
-	--model models/random_forest_detector.joblib --seed 7
+sudo .venv/bin/python3 -m iot_defense.ml.train_random_forest \
+    --dataset data/ml/controlled_flows_5class.csv \
+    --model models/random_forest_detector.joblib --seed 7
 ```
 
-The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run identifiers, timestamps, metadata, and labels remain audit fields. The current experiment is a small synthetic Mininet study covering normal traffic and bounded reconnaissance scans, so its held-out metrics must not be generalized to arbitrary IoT traffic.
+The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run identifiers, timestamps, metadata, and labels remain audit fields. The rule-based comparison baseline reported alongside RF's own metrics uses the same `UnifiedRuleBasedDetector` the live demo calls, scored on the identical 5-class labels — not a separate binary question. This remains a small, controlled Mininet study; its held-out metrics must not be generalized to arbitrary IoT traffic. In the live demo, the trained RF model is consulted only as a confirmation step when the rule-based detector independently concludes reconnaissance — the one signature with the fuzziest rule-based boundary of the four; the other three have each been proven reliable across many live Mininet runs.
 
 ## Planned future components
-- Random Forest / SVM detection models
-- Broader learned detection and evaluation datasets
-- PPO policy evaluation against measured scenarios
+- A genuinely new detection dimension (e.g. inter-arrival timing regularity) to support attacks that aren't a traffic-volume pattern at all, such as malware C2 beaconing
+- ARP spoofing / MITM detection (needs tracking IP-to-MAC mappings over time, not flow statistics — architecturally distinct from every attack currently registered)
 - Richer honeypot and deception flows
 - Enhanced evaluation metrics and dashboards
 
@@ -75,37 +96,37 @@ source .venv/bin/activate
 ```bash
 cd /home/abdullah/iot-defense
 source .venv/bin/activate
-PYTHONPATH=src uvicorn iot_defense.dashboard.server:app --host 127.0.0.1 --port 8000
+PYTHONPATH=src uvicorn iot_defense.dashboard.server:app --host 0.0.0.0 --port 8000
 ```
-Then open **http://127.0.0.1:8000** in a browser.
+Then open **http://<host>:8000** in a browser.
 
 ### Run the live demo (requires Mininet, typically sudo)
 ```bash
 cd /home/abdullah/iot-defense
-source .venv/bin/activate
-sudo -E env PYTHONPATH="$(pwd)/.venv/lib/python3.12/site-packages:$(pwd)/src"     "$(pwd)/.venv/bin/python" -m iot_defense.demo.controller
+sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <reconnaissance|dos|brute_force|exfiltration>
 ```
-The dashboard server and the demo process share `data/dashboard/state.json` and the controller's SSE event queue when run together as one process; run the dashboard server itself with the demo controller instantiated once (as `server.py` does) so browser clients observe the same controller instance.
+Omit `--attack` to be prompted interactively. The dashboard server and the demo process share `data/dashboard/state.json` and the controller's SSE event queue when run together as one process; run the dashboard server itself with the demo controller instantiated once (as `server.py` does) so browser clients observe the same controller instance.
 
 ### Dashboard sections
-Header (phase, connection status, clock) · pipeline flow strip · network topology (5-node SVG: sensor, camera, smart plug, attacker, decoy) · live packet feed · threat detection panel with flow features · BDI-style security context (beliefs / desires / intention) · policy comparison (Rule-Based, Stackelberg, PPO) with selected action · response & containment (decoy / isolation / restoration detail) · event timeline · metrics.
+Header (phase, connection status, attack-mode badge, clock) · pipeline flow strip · network topology (5-node SVG: sensor, camera, smart plug, attacker, decoy) · live packet feed · threat detection panel with flow features · BDI-style security context (beliefs / desires / intention) · policy comparison (Rule-Based, Stackelberg, PPO) with selected action, generic over however many actions are registered · response & containment (decoy / isolation / rate-limit / restoration detail) · event timeline · metrics.
 
 ### Live demo sequence
 1. `STARTING_NETWORK` — Mininet topology comes up, all 5 nodes go `ONLINE`.
 2. `BASELINE` / `OBSERVING` — benign traffic is generated and captured; a normal `ThreatEvent` is built and `ALLOW`ed.
-3. `THREAT_DETECTED` / `DECIDING` — a bounded reconnaissance port-scan is generated and captured; Rule-Based, Stackelberg, and PPO policies are each evaluated against the same `SecurityContext`.
-4. `RESPONDING` → `DECOY_ACTIVE` or `ISOLATED` — the selected action is actually executed inside Mininet (decoy redirect or interface isolation).
+3. `THREAT_DETECTED` / `DECIDING` — the selected attack's real traffic is generated and captured; Rule-Based, Stackelberg, and PPO policies are each evaluated against the same `SecurityContext`, without being told which attack was requested.
+4. `RESPONDING` → `DECOY_ACTIVE` / `ISOLATED` / `THROTTLED` — the selected action is actually executed inside Mininet (decoy redirect, interface isolation, or connection-rate limiting).
 5. `RESTORING` → `RESTORED` — connectivity is verified and restored.
-6. `COMPLETE` → `CLEANUP` — Mininet and any redirect/isolation state are torn down.
+6. `COMPLETE` → `CLEANUP` — Mininet and any redirect/isolation/rate-limit state are torn down.
 
 ### Cleanup
-The controller's `cleanup()` tears down the response executor (removing any iptables redirect rules and restoring isolated interfaces) and stops the Mininet network on completion or on error. If a run is interrupted, `sudo mn -c` clears any leftover Mininet state.
+The controller's `cleanup()` tears down the response executor (removing any iptables redirect/rate-limit rules and restoring isolated interfaces) and stops the Mininet network on completion or on error. If a run is interrupted, `sudo mn -c` clears any leftover Mininet state.
 
 ### Known limitations
 - The dashboard is read-only by design — scenarios are triggered from the terminal via `DemoController`, not from browser buttons, to avoid duplicating attack/defense logic in JavaScript.
-- The Random Forest detector reflects a preliminary evaluation on a small controlled Mininet dataset (see "Controlled ML detection experiment" above) and should not be generalized to arbitrary IoT traffic.
-- The PPO policy is trained in a lightweight simulated decision environment, not against live Mininet traffic; it does not execute responses directly.
+- The Random Forest detector reflects a preliminary evaluation on a small controlled Mininet dataset (~125 rows across 5 classes; see "Controlled ML detection experiment" above) and should not be generalized to arbitrary IoT traffic.
+- The PPO policy's base training is a lightweight synthetic decision simulator, not live Mininet traffic. A bounded real-Mininet fine-tuning pass exists and has been run (see "PPO reinforcement-learned policy" above), but it is a short, warm-started refinement on top of the synthetic policy, not training from scratch against real traffic.
 - Stackelberg utilities are configured/modelled values (see `config/policies.yaml`), not measured real-world costs.
+- Only two attack signatures (reconnaissance, credential-stuffing) are genuinely distinguished by connection *rate/pattern*; the flood and exfiltration signatures rely more heavily on volume and direction. A malware C2 beaconing attack or similar timing-based signature is not currently detectable — it would need a new flow feature (inter-arrival timing regularity) this project doesn't compute yet.
 
 ## Virtual environment
 ```bash
