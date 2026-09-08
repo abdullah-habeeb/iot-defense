@@ -115,17 +115,23 @@ def test_throttle_installs_tc_qdisc_and_restore_removes_it(tmp_path):
     executor = MininetResponseExecutor(FakeNetwork(), log_path=tmp_path / "responses.jsonl")
     result = executor.execute(decision(DefenseAction.THROTTLE))
     sensor = executor.net.hosts[0]
+    expected_add_rule = (
+        "iptables -A INPUT -p tcp --syn -d 10.0.0.10 -m hashlimit "
+        "--hashlimit-above 3/sec --hashlimit-burst 3 --hashlimit-mode dstip "
+        "--hashlimit-name throttle_sensor -j DROP"
+    )
+    expected_delete_rule = expected_add_rule.replace("-A INPUT", "-D INPUT", 1)
 
     assert result.status == "success"
     assert result.details["operation"] == "throttle"
-    assert sensor.commands == ["tc qdisc add dev sensor-eth0 root tbf rate 64kbit burst 1600 latency 50ms"]
+    assert sensor.commands == [expected_add_rule]
 
     restored = executor.restore("10.0.0.10")
     assert restored["state"] == "up"
     assert restored["throttle_removed"] is True
     assert sensor.commands[-2:] == [
         "ip link set dev sensor-eth0 up",
-        "tc qdisc del dev sensor-eth0 root",
+        expected_delete_rule,
     ]
 
 
@@ -138,14 +144,14 @@ def test_throttle_is_idempotent_when_already_throttled(tmp_path):
 
     assert first["operation"] == "throttle"
     assert second["status"] == "already_throttled"
-    assert sensor.commands.count("tc qdisc add dev sensor-eth0 root tbf rate 64kbit burst 1600 latency 50ms") == 1
+    assert sum(1 for cmd in sensor.commands if cmd.startswith("iptables -A INPUT")) == 1
 
 
-def test_restore_without_prior_throttle_or_isolate_does_not_remove_a_qdisc(tmp_path):
+def test_restore_without_prior_throttle_or_isolate_does_not_remove_a_rule(tmp_path):
     """restore() must stay a safe no-op-ish call when nothing was actually
     throttled or isolated -- it should still bring the interface up (the
-    existing isolate-focused safety net), but never issue `tc qdisc del`
-    for a target that was never throttled."""
+    existing isolate-focused safety net), but never issue an iptables
+    delete for a target that was never throttled."""
     executor = MininetResponseExecutor(FakeNetwork(), log_path=tmp_path / "responses.jsonl")
     sensor = executor.net.hosts[0]
 
@@ -165,7 +171,7 @@ def test_cleanup_restores_both_isolated_and_throttled_hosts(tmp_path):
     executor.cleanup()
 
     assert "ip link set dev sensor-eth0 up" in sensor.commands
-    assert "tc qdisc del dev attacker-eth0 root" in attacker.commands
+    assert any(cmd.startswith("iptables -D INPUT") for cmd in attacker.commands)
     assert executor._isolated == {}
     assert executor._throttled == {}
 

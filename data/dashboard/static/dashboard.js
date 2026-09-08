@@ -586,12 +586,11 @@ function renderResponse(state) {
   if (action === 'THROTTLE' && details.operation === 'throttle') {
     detailHtml = `
       <div class="response-detail-card" style="border-color:rgba(59,130,246,0.3)">
-        <div class="rdc-title" style="color:var(--accent-blue)">🐢 Rate-Limit Operation (real tc qdisc)</div>
+        <div class="rdc-title" style="color:var(--accent-blue)">🐢 Rate-Limit Operation (real iptables hashlimit)</div>
         <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
-        <div class="rdc-row"><span class="rdc-key">Interface</span><span class="rdc-val">${escHtml(safe(details.interface))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Rate</span><span class="rdc-val">${escHtml(safe(details.rate))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Burst</span><span class="rdc-val">${escHtml(safe(details.burst))}</span></div>
-        <div class="rdc-row"><span class="rdc-key">Latency</span><span class="rdc-val">${escHtml(safe(details.latency))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Mechanism</span><span class="rdc-val">${escHtml(safe(details.mechanism))}</span></div>
       </div>`;
   }
 
