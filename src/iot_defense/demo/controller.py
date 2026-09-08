@@ -413,8 +413,8 @@ class DemoController:
             decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
             throttle_details = result_dict.get("details", {})
             tl_msg = (
-                f"Bandwidth rate-limited on {selected.target_ip} "
-                f"({throttle_details.get('rate', '?')}, real tc qdisc)"
+                f"Connection attempts to {selected.target_ip} rate-limited "
+                f"({throttle_details.get('rate', '?')}, real iptables hashlimit)"
             )
         else:
             post_phase = "OBSERVING"

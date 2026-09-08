@@ -59,11 +59,19 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, episode_length: int = 8, reward_config: RewardConfig | None = None) -> None:
+    def __init__(self, episode_length: int | None = None, reward_config: RewardConfig | None = None) -> None:
         super().__init__()
         self.action_space = spaces.Discrete(len(DefenseAction))
         self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
-        self.episode_length = episode_length
+        # Self-sizes to the scenario count, not a fixed number: a fixed
+        # episode_length smaller than len(TRAINING_SCENARIOS()) means
+        # whichever scenario cycles in last is only ever shown as the
+        # terminal observation, never actually acted on -- so it gets no
+        # training signal at all, no matter how long training runs. This
+        # was a real, confirmed bug in ppo_env.DefenseDecisionEnv (fixed
+        # in Phase 3); applying the same fix here pre-emptively, before
+        # this env's first real use, rather than waiting to rediscover it.
+        self.episode_length = episode_length if episode_length is not None else len(TRAINING_SCENARIOS())
         self.reward_config = reward_config or RewardConfig()
         self.encoder = SecurityContextEncoder()
 
