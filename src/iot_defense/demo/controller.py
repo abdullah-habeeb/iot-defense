@@ -264,13 +264,18 @@ class DemoController:
         any) was actually triggered.
 
         Runs the attack-type-agnostic UnifiedRuleBasedDetector against the
-        real captured flow -- it checks the flood signature and the scan
-        signature every time, regardless of what attack_mode requested, and
-        is therefore not "told the answer" in advance. Only if it
-        independently concludes reconnaissance is the trained Random Forest
-        model consulted, as a richer ML-based confirmation of that specific,
-        validated class; RF was never trained on flood traffic, so it is
-        deliberately never asked to judge it.
+        real captured flow -- it checks every registered attack's
+        signature every time, regardless of what attack_mode requested,
+        and is therefore not "told the answer" in advance. Only if it
+        independently concludes reconnaissance is the trained Random
+        Forest model consulted, as a richer ML-based confirmation of that
+        specific, validated class. RF is now genuinely trained across all
+        five classes (Phase 4), not just recon-vs-normal -- but it's still
+        deliberately consulted only for recon: that's the one signature
+        with the fuzziest rule-based boundary (a moderate rate spread
+        across several ports, not a clean threshold), where the other
+        four attacks' rule-based detectors have each been proven reliable
+        across many live Mininet runs this project already has behind it.
         """
         from iot_defense.detection.detector import UnifiedRuleBasedDetector
 

@@ -31,7 +31,7 @@ def fine_tune(
     base_model_path: str | Path = "models/ppo_defense",
     output_path: str | Path = "models/ppo_defense_real",
     total_timesteps: int = 64,
-    episode_length: int = 8,
+    episode_length: int | None = None,
 ) -> dict[str, float | int | str]:
     env = RealMininetDefenseEnv(episode_length=episode_length)
     try:
@@ -47,7 +47,7 @@ def fine_tune(
             "base_model": str(base_model_path),
             "output_model": str(output.with_suffix(".zip")),
             "timesteps": total_timesteps,
-            "episode_length": episode_length,
+            "episode_length": env.episode_length,
             "training_seconds": round(elapsed, 1),
         }
     finally:
@@ -59,7 +59,11 @@ def main() -> None:
     parser.add_argument("--base-model", default="models/ppo_defense")
     parser.add_argument("--output", default="models/ppo_defense_real")
     parser.add_argument("--timesteps", type=int, default=64)
-    parser.add_argument("--episode-length", type=int, default=8)
+    # Defaults to None (self-sizes to the current registered scenario
+    # count -- see RealMininetDefenseEnv.__init__) rather than a fixed
+    # number, so this CLI default can't silently fall out of sync the
+    # same way the class default itself once did.
+    parser.add_argument("--episode-length", type=int, default=None)
     args = parser.parse_args()
     result = fine_tune(
         base_model_path=args.base_model,
