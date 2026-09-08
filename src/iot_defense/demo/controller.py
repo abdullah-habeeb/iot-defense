@@ -36,6 +36,7 @@ PHASES = (
     "RESPONDING",
     "DECOY_ACTIVE",
     "ISOLATED",
+    "THROTTLED",
     "RESTORING",
     "RESTORED",
     "COMPLETE",
@@ -96,6 +97,7 @@ def _initial_state() -> dict[str, Any]:
             "threats_detected": 0,
             "decoy_interactions": 0,
             "isolations": 0,
+            "throttles": 0,
             "restorations": 0,
             "detection_latency_ms": None,
             "response_latency_ms": None,
@@ -405,6 +407,15 @@ class DemoController:
             node_updates = {"sensor": "ISOLATED"}
             decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
             tl_msg = f"Isolation applied to {selected.target_ip}"
+        elif action == DefenseAction.THROTTLE:
+            post_phase = "THROTTLED"
+            node_updates = {"sensor": "THROTTLED"}
+            decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
+            throttle_details = result_dict.get("details", {})
+            tl_msg = (
+                f"Bandwidth rate-limited on {selected.target_ip} "
+                f"({throttle_details.get('rate', '?')}, real tc qdisc)"
+            )
         else:
             post_phase = "OBSERVING"
             node_updates = {}
@@ -416,6 +427,7 @@ class DemoController:
             "response_latency_ms": round(response_latency_ms, 2),
             "threats_detected": self.state["metrics"]["threats_detected"] + 1,
             "isolations": self.state["metrics"]["isolations"] + (1 if action == DefenseAction.ISOLATE else 0),
+            "throttles": self.state["metrics"].get("throttles", 0) + (1 if action == DefenseAction.THROTTLE else 0),
             "decoy_interactions": decoy_interactions,
         }
 
@@ -698,7 +710,9 @@ class DemoController:
                 timeline_message="Initiating restoration — reversing isolation/decoy",
             )
 
-            # Only try restore if something was isolated
+            # Only try restore if something was isolated or throttled --
+            # executor.restore() itself checks both and undoes whichever
+            # (if either) actually applies to this target.
             try:
                 restore_details = self.executor.restore(threat_event.destination_ip)
             except Exception:  # noqa: BLE001

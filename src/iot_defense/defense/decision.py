@@ -15,6 +15,7 @@ class DefenseAction(str, Enum):
     ALERT = "ALERT"
     ISOLATE = "ISOLATE"
     DECOY = "DECOY"
+    THROTTLE = "THROTTLE"
 
 
 @dataclass(slots=True)

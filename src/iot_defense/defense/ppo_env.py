@@ -136,11 +136,25 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, episode_length: int = 4, reward_config: RewardConfig | None = None) -> None:
+    def __init__(self, episode_length: int | None = None, reward_config: RewardConfig | None = None) -> None:
         super().__init__()
         self.action_space = spaces.Discrete(len(DefenseAction))
         self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
-        self.episode_length = episode_length
+        # Defaults to exactly the number of registered scenarios, not a
+        # fixed number: with episode_length < len(TRAINING_SCENARIOS()),
+        # step() cycles _scenario_index past the episode boundary before
+        # the agent ever gets to *act* on the later scenarios in that
+        # cycle -- they're only ever shown as the terminal observation
+        # right before the episode ends, so calculate_reward() is never
+        # called for them and the policy never receives a training signal
+        # for those states. This was silently true from the day episode
+        # length happened to equal scenario count (a hardcoded 4 for 4
+        # scenarios); adding THROTTLE surfaced it as a real, confirmed
+        # non-convergence for the *scenario* cycled in last place
+        # (data_exfiltration) even after 20000 training timesteps -- more
+        # training could never have fixed it, since that scenario was
+        # structurally never trained on at all.
+        self.episode_length = episode_length if episode_length is not None else len(TRAINING_SCENARIOS())
         self.reward_config = reward_config or RewardConfig()
         self.encoder = SecurityContextEncoder()
         self._step = 0

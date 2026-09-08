@@ -117,6 +117,7 @@ class MininetResponseExecutor:
         self.logger = ResponseLogger(log_path)
         self.decoy = decoy or DecoyService()
         self._isolated: dict[str, tuple[Any, str]] = {}
+        self._throttled: dict[str, tuple[Any, str]] = {}
         self._redirect_rules: list[tuple[Any, str]] = []
 
     def execute(self, decision: DefenseDecision) -> ResponseResult:
@@ -136,6 +137,9 @@ class MininetResponseExecutor:
             elif decision.action == DefenseAction.DECOY:
                 details = self.redirect_to_decoy(decision)
                 message = "Controlled decoy service was started inside Mininet."
+            elif decision.action == DefenseAction.THROTTLE:
+                details = self.throttle(decision.target_ip)
+                message = "Target Mininet host bandwidth was rate-limited."
             else:  # pragma: no cover - Enum prevents this through normal construction
                 raise ValueError(f"Unsupported defense action: {decision.action}")
             result = ResponseResult.from_timing(
@@ -171,12 +175,56 @@ class MininetResponseExecutor:
         self._isolated[target_ip] = (host, interface)
         return {"operation": "isolate", "host": host.name, "interface": interface, "state": "down"}
 
+    def throttle(
+        self, target_ip: str, rate: str = "64kbit", burst: str = "1600", latency: str = "50ms"
+    ) -> dict[str, Any]:
+        """Rate-limit a host's default interface with a real Linux token
+        bucket filter (tc qdisc ... tbf) -- a genuine, measurable bandwidth
+        cap enforced by the kernel, not a simulated status flag. Unlike
+        isolate(), the host stays connected: packets beyond the configured
+        rate are queued and delayed (up to `latency`), not dropped outright,
+        so legitimate traffic still gets through, just much more slowly --
+        the proportionate response to a repeated-attempt attack like
+        brute-force, where cutting the guess rate defeats the attack
+        without also blocking a legitimate user who mistyped a password.
+        """
+        host = self._host_for_ip(target_ip)
+        if target_ip in self._throttled:
+            return {"operation": "throttle", "status": "already_throttled", "host": host.name}
+        interface = host.defaultIntf().name
+        command_output = host.cmd(f"tc qdisc add dev {interface} root tbf rate {rate} burst {burst} latency {latency}")
+        if command_output.strip():
+            raise RuntimeError(f"Unable to install traffic-control rate limit: {command_output.strip()}")
+        self._throttled[target_ip] = (host, interface)
+        return {
+            "operation": "throttle",
+            "host": host.name,
+            "interface": interface,
+            "rate": rate,
+            "burst": burst,
+            "latency": latency,
+        }
+
     def restore(self, target_ip: str) -> dict[str, Any]:
         host = self._host_for_ip(target_ip)
         isolated = self._isolated.pop(target_ip, None)
-        interface = isolated[1] if isolated else host.defaultIntf().name
+        throttled = self._throttled.pop(target_ip, None)
+        if isolated is not None:
+            interface = isolated[1]
+        elif throttled is not None:
+            interface = throttled[1]
+        else:
+            interface = host.defaultIntf().name
         host.cmd(f"ip link set dev {interface} up")
-        return {"operation": "restore", "host": host.name, "interface": interface, "state": "up"}
+        if throttled is not None:
+            host.cmd(f"tc qdisc del dev {interface} root")
+        return {
+            "operation": "restore",
+            "host": host.name,
+            "interface": interface,
+            "state": "up",
+            "throttle_removed": throttled is not None,
+        }
 
     def redirect_to_decoy(self, decision: DefenseDecision) -> dict[str, Any]:
         self._host_for_ip(decision.target_ip)
@@ -230,5 +278,7 @@ class MininetResponseExecutor:
             host.cmd(delete_rule)
         self._redirect_rules.clear()
         for target_ip in list(self._isolated):
+            self.restore(target_ip)
+        for target_ip in list(self._throttled):
             self.restore(target_ip)
         self.decoy.stop()

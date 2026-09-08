@@ -163,13 +163,14 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_packet_limit=100,
             capture_duration_seconds=6.0,
             capture_completion_timeout=7.0,
-            # ISOLATE is heavier-handed than credential-stuffing calls for --
-            # rate-limiting the repeated attempts (THROTTLE, added in Phase 3)
-            # is the intended long-term response. Until THROTTLE exists,
-            # ISOLATE is the most defensible action already available, and
-            # the Stackelberg payoff table below independently arrives at
-            # the same choice.
-            preferred_action=DefenseAction.ISOLATE,
+            # Rate-limiting the repeated attempts defeats a brute-force
+            # attack's actual mechanism (it needs a high guess rate to
+            # succeed) while leaving the device reachable for a legitimate
+            # user -- strictly better than fully isolating it, which
+            # achieves the same containment at the cost of also blocking
+            # legitimate access. The Stackelberg payoff table below
+            # independently arrives at the same choice.
+            preferred_action=DefenseAction.THROTTLE,
             action_score_min=0.65,
             action_confidence_min=0.65,
             intention="contain_malicious_activity",
