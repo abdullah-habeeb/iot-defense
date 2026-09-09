@@ -36,6 +36,17 @@ policy:
     exfiltration_min_packet_count: 3
     exfiltration_max_packet_count: 25
     exfiltration_min_average_packet_size: 600.0
+    exploit_max_unique_destination_ports: 1
+    exploit_min_packet_count: 2
+    exploit_max_packet_count: 8
+    # Real observed values from data/ml/controlled_flows_5class.csv put
+    # normal traffic's average_packet_size at 68-119 bytes and
+    # exfiltration's at 1200+; this 250-550 band sits with real margin
+    # inside that gap -- packet_count/port-count alone can't separate a
+    # single oversized request from an ordinary low-volume heartbeat, so
+    # payload size is this detector's real discriminator.
+    exploit_min_average_packet_size: 250.0
+    exploit_max_average_packet_size: 550.0
   decision:
     low_threat_score_max: 0.2
     recon_decoy_score_min: 0.8
@@ -48,6 +59,8 @@ policy:
     brute_force_confidence_min: 0.65
     exfiltration_score_min: 0.7
     exfiltration_confidence_min: 0.7
+    exploit_score_min: 0.7
+    exploit_confidence_min: 0.7
   stackelberg:
     payoffs:
       NORMAL:
@@ -170,6 +183,40 @@ policy:
           # slower one. Meaningfully worse than ISOLATE here.
           CONTINUE: {attacker: 1.0, defender: 3.0}
           RETREAT: {attacker: -2.0, defender: 4.0}
+      EXPLOIT_PAYLOAD_INJECTION:
+        ALLOW:
+          # A live exploit attempt reaching the real device risks genuine
+          # compromise -- worse than a mere scan, though less certain
+          # than an already-confirmed, ongoing breach like exfiltration,
+          # since whether this particular payload would actually succeed
+          # is unknown.
+          CONTINUE: {attacker: 9.0, defender: -7.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          # A single-shot payload doesn't wait on a human to notice --
+          # logging it changes nothing about whether it already landed.
+          CONTINUE: {attacker: 5.0, defender: -2.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          # Best response of any attack here: redirecting captures the
+          # actual payload for analysis -- real intelligence on an
+          # unconfirmed exploit -- while the real device never processes
+          # it, unlike reconnaissance's decoy, which only observes a scan
+          # already known to be harmless probing.
+          CONTINUE: {attacker: -4.0, defender: 5.0}
+          RETREAT: {attacker: -3.0, defender: 9.0}
+        ISOLATE:
+          # Contains it completely, but a full isolation over one
+          # unconfirmed payload is heavier than the uncertainty warrants,
+          # and forfeits the chance to learn what the payload actually
+          # does.
+          CONTINUE: {attacker: -6.0, defender: 6.0}
+          RETREAT: {attacker: -7.0, defender: 5.0}
+        THROTTLE:
+          # Rate has nothing to do with a single malformed request -- a
+          # real but essentially irrelevant mitigation here.
+          CONTINUE: {attacker: -1.0, defender: 1.0}
+          RETREAT: {attacker: -2.0, defender: 2.0}
   ppo:
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"

@@ -285,6 +285,83 @@ class RuleBasedExfiltrationDetector(Detector):
         )
 
 
+class RuleBasedExploitDetector(Detector):
+    """A simple detector for a single-port, few-shot exploit/injection
+    attempt -- an oversized or malformed request sent to the device's
+    management port, as opposed to brute-force's many small attempts.
+
+    Sits in the traffic-shape territory every other detector's rate/count
+    thresholds leave open: packet_count and unique_destination_ports here
+    overlap heavily with ordinary low-volume traffic (a single heartbeat
+    connect looks much the same on those two axes alone), so this detector
+    leans on average_packet_size as the real discriminator, not volume.
+    Real observed values from data/ml/controlled_flows_5class.csv put
+    normal traffic's average_packet_size at 68-119 bytes and exfiltration's
+    at 1200+; min/max_average_packet_size (250/550 by default) sit with
+    real margin inside that gap -- above anything normal traffic actually
+    produces and below exfiltration's own floor -- rather than picked
+    without reference to observed data.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        max_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(
+            config.get("exploit_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 1)
+        )
+        self.min_packet_count = int(
+            config.get("exploit_min_packet_count", min_packet_count if min_packet_count is not None else 2)
+        )
+        self.max_packet_count = int(
+            config.get("exploit_max_packet_count", max_packet_count if max_packet_count is not None else 8)
+        )
+        self.min_average_packet_size = float(
+            config.get("exploit_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 250.0)
+        )
+        self.max_average_packet_size = float(
+            config.get("exploit_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 550.0)
+        )
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+
+        is_threat = (
+            unique_ports <= self.max_unique_ports
+            and self.min_packet_count <= packet_count <= self.max_packet_count
+            and self.min_average_packet_size <= average_packet_size <= self.max_average_packet_size
+        )
+
+        if is_threat:
+            attack_type = "exploit_payload_injection"
+            threat_score = 0.8
+            confidence = 0.78
+            reason = "a small number of oversized requests to a single service port, consistent with an exploit or command-injection attempt"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet exploit-payload criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedExploitDetector",
+        )
+
+
 class UnifiedRuleBasedDetector(Detector):
     """Classify captured flow features without being told which attack (if
     any) is actually happening.

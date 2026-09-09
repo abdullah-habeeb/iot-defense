@@ -173,3 +173,46 @@ class TrafficGenerator:
             "PY"
         )
         return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}
+
+    def generate_exploit_mininet_traffic(self, net: Any, duration_seconds: int = 4) -> dict[str, Any]:
+        """Generate a bounded exploit-payload-injection attempt.
+
+        A small number of real TCP connections (at most 4) against the
+        device's management port, each carrying one oversized payload --
+        unlike every other attack here, this one's defining signature is
+        payload *size*, not packet count or rate: brute-force is many
+        small attempts, a flood is a raw high-rate burst, reconnaissance
+        spreads across ports. This is the opposite of all three -- one
+        port, very few connections, each unusually large, modelling a
+        single-shot exploit/injection attempt rather than a sustained
+        campaign.
+
+        UDP, not TCP -- a real live run showed why: nothing listens on the
+        sensor's management port outside of an active DECOY response, so a
+        TCP connect() is refused before sendall() ever runs and only bare
+        ~74-byte SYN/RST packets get captured, never the actual payload.
+        UDP's sendto() puts the full packet on the wire regardless of
+        whether anything is listening, exactly like generate_dos_mininet_
+        traffic and generate_exfiltration_mininet_traffic already rely on.
+        Entirely confined to the Mininet lab and bounded by
+        duration_seconds.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 9200
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'A' * 400\n"
+            "start = time.time()\n"
+            "attempts = 0\n"
+            f"while time.time() - start < {duration_seconds} and attempts < 4:\n"
+            f"    sock.sendto(payload, ('{target_ip}', {target_port}))\n"
+            "    attempts += 1\n"
+            "    time.sleep(0.8)\n"
+            "sock.close()\n"
+            "print('exploit_done')\n"
+            "PY"
+        )
+        return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}

@@ -94,6 +94,18 @@ def flow_for_label(label_name: str) -> FlowFeatures:
             average_packet_size=1200.0, unique_destination_ports=1, unique_source_ports=1,
             tcp_syn_count=8, tcp_ack_count=8, udp_packet_count=0, icmp_packet_count=0,
         )
+    if label_name == "exploit_payload_injection":
+        # Few connections, single port, but a notably larger payload than
+        # any normal heartbeat -- matching RuleBasedExploitDetector's own
+        # thresholds (250-550 byte average, well clear of normal traffic's
+        # real observed max of ~119 bytes and exfiltration's real floor of
+        # 600+).
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="TCP",
+            duration=3.0, packet_count=4, packets_per_second=1.5, bytes_total=1400,
+            average_packet_size=350.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=4, tcp_ack_count=4, udp_packet_count=0, icmp_packet_count=0,
+        )
     raise ValueError(f"no fixture defined for label {label_name!r}")
 
 

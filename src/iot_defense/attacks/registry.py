@@ -110,6 +110,7 @@ def _build_registry() -> dict[str, AttackScenario]:
         RuleBasedBruteForceDetector,
         RuleBasedDosDetector,
         RuleBasedExfiltrationDetector,
+        RuleBasedExploitDetector,
         RuleBasedReconDetector,
     )
     from iot_defense.simulation.traffic import TrafficGenerator
@@ -199,6 +200,33 @@ def _build_registry() -> dict[str, AttackScenario]:
             ppo_example_features={"packets_per_second": 1.0, "unique_destination_ports": 1},
             ppo_threat_score=0.85,
             ppo_confidence=0.8,
+        ),
+        "exploit": AttackScenario(
+            key="exploit",
+            label="Exploit payload injection",
+            attack_type="exploit_payload_injection",
+            observed_threat_key="EXPLOIT_PAYLOAD_INJECTION",
+            build_detector=RuleBasedExploitDetector,
+            generate_traffic=lambda net: traffic.generate_exploit_mininet_traffic(net, duration_seconds=4),
+            capture_packet_limit=20,
+            capture_duration_seconds=4.0,
+            capture_completion_timeout=5.0,
+            # DECOY's second scenario: unlike reconnaissance's decoy (which
+            # only observes a scan in progress), redirecting this traffic
+            # captures the actual oversized/malformed payload for analysis
+            # while the real device never processes it -- and unlike
+            # brute-force/exfiltration/dos, containing it outright (ISOLATE)
+            # forfeits that intelligence for what is, at this point, still
+            # an unconfirmed single-shot attempt rather than a sustained,
+            # already-proven attack. The Stackelberg payoff table below
+            # independently arrives at the same choice.
+            preferred_action=DefenseAction.DECOY,
+            action_score_min=0.7,
+            action_confidence_min=0.7,
+            intention="gather_attacker_intelligence_when_appropriate",
+            ppo_example_features={"packets_per_second": 1.5, "unique_destination_ports": 1},
+            ppo_threat_score=0.8,
+            ppo_confidence=0.78,
         ),
     }
 
