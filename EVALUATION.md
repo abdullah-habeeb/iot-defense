@@ -1,13 +1,11 @@
 # Evaluation
 
 This document reports how the 3-policy defense system (rule-based, Stackelberg, PPO) compares
-against two simpler baselines, on real Mininet traffic, using a repeatable benchmark harness --
-not individual anecdotal demo runs. It also situates the system against published work on the
-same general problem, honestly: no paper found shares this project's exact dataset or
-environment, so that comparison is qualitative context, not a claimed head-to-head number.
-
-A comparison against a real signature-based IDS (Suricata, run offline against the same captured
-traffic) is planned but not yet run -- see "Suricata comparison" under Limitations.
+against two simpler baselines and a real signature-based IDS (Suricata), on real Mininet traffic,
+using a repeatable benchmark harness -- not individual anecdotal demo runs. It also situates the
+system against published work on the same general problem, honestly: no paper found shares this
+project's exact dataset or environment, so that comparison is qualitative context, not a claimed
+head-to-head number.
 
 ## Methodology
 
@@ -16,7 +14,8 @@ condition (`normal` plus every attack in `attacks/registry.py` -- 6 conditions t
 generic over however many are registered). Each trial:
 
 1. Starts real traffic for the condition (the same generators the live demo and dataset
-   generation use) and captures it with `tcpdump`.
+   generation use) and captures it with `tcpdump`, preserving the raw pcap for later offline
+   analysis.
 2. Classifies the capture with the real, attack-type-agnostic `UnifiedRuleBasedDetector`.
 3. Evaluates five arms against the **identical** resulting security context:
    - **Rule-based**, **Stackelberg**, and **PPO** -- the project's three real decision policies.
@@ -29,9 +28,9 @@ generic over however many are registered). Each trial:
    for every arm, not only the ones already exercised live in earlier phases.
 
 One real trial produces every arm's result; no arm requires a separate live run. This report
-covers `trials_per_condition=8` -- 48 real Mininet trials, 240 recorded outcomes -- generated on
-2026-09-09, results at `data/evaluation/results.jsonl` (gitignored; regenerate with
-`sudo .venv/bin/python3 -m iot_defense.evaluation.harness --trials-per-condition 8`).
+covers `trials_per_condition=20` -- **120 real Mininet trials, 600 recorded outcomes** --
+generated on 2026-09-10, results at `data/evaluation/results.jsonl` (gitignored; regenerate with
+`sudo .venv/bin/python3 -m iot_defense.evaluation.harness --trials-per-condition 20`).
 
 **Metrics**:
 - *Detection accuracy* -- did the shared detector correctly classify the captured traffic. This
@@ -45,15 +44,26 @@ covers `trials_per_condition=8` -- 48 real Mininet trials, 240 recorded outcomes
   didn't error"). This is the headline comparison metric: it is 0 whenever the wrong action was
   chosen, and only counts a real, checked success.
 
+A second, independent arm was added after the internal comparison was already running: offline
+Suricata analysis of the same 120 pcaps (`src/iot_defense/evaluation/suricata_eval.py`), against
+two rulesets -- ET-Open (real-world community threat signatures, fetched via `suricata-update`)
+and a small lab-tailored ruleset (`config/suricata/lab.rules`, written to encode the same shape
+knowledge `detection/detector.py`'s own rule-based detectors use, so Suricata is judged on a fair
+signature-matching version of that knowledge too, not only on a strawman of unrelated real-world
+malware signatures). *Detector*, not *response*, is the axis Suricata is compared on: Suricata
+identifies traffic, it does not select or execute a containment action, so its comparison metrics
+are accuracy/true-positive-rate/false-positive-rate against ground truth, not verified-response
+rate.
+
 ## Results
 
 | Arm | Detection accuracy | Verified response rate | Matches preferred action (attacks only) | Mean detection latency |
 |---|---|---|---|---|
-| Rule-based (ours) | 97.9% | 83.3% | 97.5% | 6850 ms |
-| Stackelberg (ours, deployed) | 97.9% | 83.3% | 97.5% | 6850 ms |
-| PPO (ours) | 97.9% | 83.3% | 97.5% | 6850 ms |
-| NaiveBlockAllBaseline | 97.9% | 41.7% | 40.0% | 6850 ms |
-| AlwaysAllowBaseline | 97.9% | 16.7% | 0.0% | 6850 ms |
+| Rule-based (ours) | 97.5% | 85.8% | 97.0% | 6198 ms |
+| Stackelberg (ours, deployed) | 97.5% | 85.8% | 97.0% | 6198 ms |
+| PPO (ours) | 97.5% | 85.8% | 97.0% | 6198 ms |
+| NaiveBlockAllBaseline | 97.5% | 44.2% | 40.0% | 6198 ms |
+| AlwaysAllowBaseline | 97.5% | 16.7% | 0.0% | 6198 ms |
 
 Per-condition breakdown for Stackelberg, the policy the live demo actually deploys:
 
@@ -61,10 +71,18 @@ Per-condition breakdown for Stackelberg, the policy the live demo actually deplo
 |---|---|---|
 | `normal` | 100.0% | 100.0% |
 | `reconnaissance_port_scan` | 100.0% | 100.0% |
-| `dos_flood` | 100.0% | 75.0% |
-| `brute_force` | 100.0% | 62.5% |
-| `data_exfiltration` | 100.0% | 75.0% |
-| `exploit_payload_injection` | 87.5% | 87.5% |
+| `dos_flood` | 100.0% | 85.0% |
+| `brute_force` | 100.0% | 65.0% |
+| `data_exfiltration` | 100.0% | 80.0% |
+| `exploit_payload_injection` | 85.0% | 85.0% |
+
+External detection comparison (Suricata, offline analysis of the same 120 pcaps):
+
+| Detector | Accuracy | True positive rate | False positive rate |
+|---|---|---|---|
+| Suricata + ET-Open (real-world community rules) | 62.5% | 59.0% | 20.0% |
+| Suricata + lab-tailored rules (this project's own signatures) | 64.2% | 57.0% | 0.0% |
+| This project's `UnifiedRuleBasedDetector` | 97.5% | -- | 0.0% (0/20 `normal` trials misclassified) |
 
 ## Discussion
 
@@ -74,30 +92,61 @@ shared inputs, and this dataset's context vectors were not adversarial enough to
 decision mechanisms disagree. The three policies were already independently confirmed to agree
 on all 6 registered scenarios before this evaluation (each policy re-verified against the live
 Mininet outcome, not just against each other) -- what this evaluation adds is confirming that
-agreement holds under repeated real execution, not just single spot-checks.
+agreement holds under repeated real execution at scale (120 trials), not just single spot-checks.
 
 **The real differentiator is the baselines, not the three policies against each other.** Our
-system's 83.3% verified-response rate is roughly **2x** NaiveBlockAllBaseline's 41.7% and **5x**
-AlwaysAllowBaseline's 16.7%. The per-condition breakdown shows exactly where that gap comes from:
-NaiveBlockAllBaseline's fixed ISOLATE response happens to be correct for `dos_flood` and
-`data_exfiltration` (both genuinely prefer ISOLATE), so it scores reasonably there -- but it
-cannot differentiate `reconnaissance`, `brute_force`, or `exploit_payload_injection`, where the
-registry-driven preferred response is DECOY or THROTTLE, not ISOLATE. That is precisely the
-value a per-attack-type response is meant to add over a single fixed reaction to any alert.
+system's 85.8% verified-response rate is roughly **2x** NaiveBlockAllBaseline's 44.2% and **5x**
+AlwaysAllowBaseline's 16.7% -- consistent with the smaller (48-trial) run this evaluation started
+with, and holding at more than double the sample size. The per-condition breakdown shows exactly
+where that gap comes from: NaiveBlockAllBaseline's fixed ISOLATE response happens to be correct
+for `dos_flood` and `data_exfiltration` (both genuinely prefer ISOLATE), so it scores reasonably
+there -- but it cannot differentiate `reconnaissance`, `brute_force`, or
+`exploit_payload_injection`, where the registry-driven preferred response is DECOY or THROTTLE,
+not ISOLATE. That is precisely the value a per-attack-type response is meant to add over a single
+fixed reaction to any alert.
 
-**The gap between "matches preferred action" (97.5%) and "verified response rate" (83.3%) is
-execution reliability, not decision quality.** Our policies pick the objectively correct action
-97.5% of the time on attack trials; the ~14-point drop to the verified rate reflects real
-Mininet-level timing variance in the independent verification checks themselves (a single ping,
-interaction probe, or rule-check racing real network/kernel timing under repeated cycling on one
-shared lab network) -- not incorrect decisions. This is an honest property of the measurement,
-not smoothed over: `brute_force`'s 62.5% verified rate against its 100% detection accuracy is the
-clearest example, and is discussed further under Limitations.
+**Suricata's own rule-based detection -- both rulesets -- lands well below this project's own
+`UnifiedRuleBasedDetector`** (62-64% accuracy vs. 97.5%), which is worth being precise about
+*why*, not just reporting the gap. This project's detector is a single, small, purpose-built
+5-class classifier over 12 behavioural flow features, run once against the one flow already known
+to matter for a given trial. Suricata is a general packet-inspection engine running two rulesets
+that were never built around this project's specific traffic; ET-Open's ~68,000 signatures target
+real-world malware and CVEs, and even the lab-tailored ruleset had to be reverse-engineered from
+the same traffic-shape knowledge this project's own detector already encodes. This is not "our
+detector beats a production IDS" in any general sense -- it is a small, task-specific classifier
+outperforming a general-purpose engine at a narrow task it was never specialized for, which is an
+expected and unsurprising result, reported for completeness rather than as a strong claim.
 
-**`exploit_payload_injection` is this evaluation's weakest detection condition** (87.5%, one miss
-in 8 trials). This matches the honest limitation already documented in README.md: its rule-based
-detector separates a single oversized request from ordinary low-volume traffic almost entirely by
-`average_packet_size`, the narrowest real margin of any currently registered detector.
+**Suricata's own false-positive rates diverge in an informative way**: ET-Open alerted on 20% of
+`normal` trials (a real-world ruleset reacting to something in ordinary Mininet housekeeping
+traffic -- ARP, IPv6 neighbour discovery -- that looks superficially unusual to signatures tuned
+for the open internet), while the lab-tailored ruleset had 0% false positives, since it was
+written with this exact traffic in mind. Neither number should be read as "Suricata is bad at
+this" -- both reflect a ruleset evaluated well outside the traffic distribution it was designed
+or tuned for.
+
+**The gap between "matches preferred action" (97.0%) and "verified response rate" (85.8%) is
+mostly execution reliability, not decision quality** -- with one real, confirmed exception found
+by this evaluation. Our policies pick the objectively correct action 97% of the time on attack
+trials; most of the drop to the verified rate reflects genuine Mininet-level timing variance in
+the independent verification checks themselves (a single ping, interaction probe, or rule-check
+racing real network/kernel timing under repeated cycling on one shared lab network). `brute_force`
+is a partial exception: investigating why its lab-tailored Suricata signature never fired led to
+discovering that `simulation/traffic.py`'s `generate_brute_force_mininet_traffic()` never actually
+delivers its documented "USER admin" login payload onto the wire in a live Mininet run -- the TCP
+`connect()` to the sensor's simulated login port is refused (nothing listens there outside an
+active DECOY response), so `sendall()` never executes, and only bare SYN/RST packets are ever
+captured. This has been true since brute-force was added and was never caught, because this
+project's own `RuleBasedBruteForceDetector` is purely shape-based (rate, port, packet count) and
+never needed the payload content to work correctly -- it's a real gap, found only because this
+evaluation's Suricata comparison needed content to actually be present, not something the
+project's own detection accuracy was ever affected by. **Reported, not fixed, in this pass** --
+see Limitations.
+
+**`exploit_payload_injection` is this evaluation's weakest internal-detection condition** (85.0%,
+3 misses in 20 trials). This matches the honest limitation already documented in README.md: its
+rule-based detector separates a single oversized request from ordinary low-volume traffic almost
+entirely by `average_packet_size`, the narrowest real margin of any currently registered detector.
 
 ## Related work
 
@@ -111,14 +160,15 @@ to match or beat:
 - Signature-based IDS baseline choice (Suricata over Snort): a real experimental comparison found
   Suricata generally ahead of Snort on detection accuracy, scalability, and resource efficiency
   (e.g. 100% vs. 85.7%/66.7% on two DNS-tunneling variants), which is why Suricata was chosen as
-  this project's planned external baseline rather than Snort ([A Realistic Experimental
-  Comparison of the Suricata and Snort Intrusion-Detection
+  this project's external baseline rather than Snort ([A Realistic Experimental Comparison of the
+  Suricata and Snort Intrusion-Detection
   Systems](https://calhoun.nps.edu/server/api/core/bitstreams/6e9ec886-297c-4913-8cc6-80a4c44609a5/content)).
 - Signature-based IoT botnet detection: prior work evaluating Snort/Suricata against IoT botnet
-  datasets (ISOT, IoT-23, Bot-IoT) documents the same structural limitation this project's own
-  README calls out for its rule-based layer -- signature/threshold detectors miss traffic that
-  does not match a known pattern, motivating a layered approach rather than a single detector
-  ([Collaborative device-level botnet detection for Internet of
+  datasets (ISOT, IoT-23, Bot-IoT) documents the same structural limitation observed in this
+  evaluation's own Suricata results and already called out for this project's rule-based layer in
+  README.md -- signature/threshold detectors miss traffic that does not match a known pattern,
+  motivating a layered approach rather than a single detector ([Collaborative device-level botnet
+  detection for Internet of
   Things](https://www.sciencedirect.com/science/article/pii/S0167404823000822)).
 - Deception/game-theoretic response, context for the DECOY arm: a stochastic-game honeypot
   moving-target-defense study reports real engagement gains from deception over static defense
@@ -136,28 +186,48 @@ to match or beat:
 
 ## Limitations
 
-- **Suricata comparison not yet run.** Suricata is not installed in this environment
-  (`sudo apt install suricata` is outside this session's scoped sudo access) -- installing it and
-  running `suricata_eval.py` (planned: offline `-r <pcap>` analysis of the pcaps already saved in
-  `data/evaluation/`, against both Suricata's default ruleset and a small lab-tailored one) is
-  the next step once that dependency is cleared.
-- **Sample size is real but modest.** 8 trials per condition is enough to see a clear, repeated
-  pattern (the baseline gap held consistently across three separate runs during this evaluation's
-  own development, at 2, 3, and 8 trials per condition), not enough for tight statistical
-  confidence intervals. Scaling to more trials is a straightforward re-run, not a redesign.
+- **`brute_force`'s traffic generator never sends its documented payload (found, not fixed).**
+  See Discussion above -- `generate_brute_force_mininet_traffic()`'s TCP connect is refused before
+  any data is sent, so a real captured brute-force flow has never actually contained
+  "USER admin\r\nPASS wrong\r\n" in this project's history. This does not affect this project's
+  own detection or response accuracy (both are shape-based), but it does mean any *content-based*
+  signature -- Suricata's or otherwise -- can never fire on it as currently generated. Fixing this
+  (most plausibly, a lightweight listener on the simulated login port, mirroring `DecoyService`'s
+  own pattern) is a real, scoped next step, deliberately not taken in this pass since this
+  evaluation's own scope was the comparison, not a traffic-generator redesign.
+- **Suricata's directory-replay (batch) mode does not reset detection state between pcap files.**
+  Found via direct reproduction: a `threshold`-based rule that reliably fired against one pcap in
+  isolation silently didn't when that same pcap was processed as part of a 120-file batch sharing
+  a destination IP with unrelated captures. `suricata_eval.py` runs ET-Open in batch mode (its
+  ~68,000-rule compile cost is the dominant cost, worth paying once) but the lab ruleset per-pcap
+  (a fresh process and fresh state for each file -- cheap, since the ruleset itself is tiny).
+- **The `dos_flood` lab-tailored signature showed genuine run-to-run non-determinism even in
+  per-pcap isolation** -- the exact same Suricata invocation against the exact same single pcap
+  alerted on some runs and not others during this evaluation's own debugging. The underlying cause
+  was not fully isolated (candidates include worker-thread/flow-manager initialization timing
+  specific to very short, bursty replay files); reported honestly rather than averaged away by
+  quietly re-running until a "clean" number appeared. The `lab` ruleset's reported 57% true
+  positive rate should be read with this specific caveat, not as a precise, fully reproducible
+  figure the way this project's own internal harness numbers are.
+- **Sample size is real but modest.** 20 trials per condition is enough to see a clear, stable,
+  repeated pattern (the baseline gap held consistently across four separate runs during this
+  evaluation's own development, at 2, 3, 8, and 20 trials per condition), not enough for tight
+  statistical confidence intervals. Scaling further is a straightforward re-run, not a redesign.
 - **Single lab environment.** All trials ran in the same 5-host Mininet topology on one VM.
   Results should not be generalized to arbitrary IoT networks or attacker behavior, consistent
   with every other "controlled study" caveat already documented in this project.
-- **Detection is shared, not compared.** Every arm in this evaluation receives the same detection
-  result -- the comparison measures response selection and execution, not detection accuracy
-  across systems. A genuine detection-accuracy comparison is what the planned Suricata arm adds.
-- **This evaluation exposed and fixed four real bugs in the production response-execution code**
-  (a leaked shell notification corrupting an unrelated command, an overly broad failure check in
-  `throttle()`, single-flow detection blindness to background noise, and `restore()` never
-  tearing down decoy state between actions) -- all four are described in their respective commit
-  messages and are now covered by regression tests. They were only found because this evaluation
+- **Internal detection is shared, not compared, across the five internal arms.** Every arm in the
+  main comparison receives the same detection result -- that comparison measures response
+  selection and execution, not detection accuracy. The Suricata arm is what adds a genuine,
+  independent detection-accuracy comparison.
+- **This evaluation exposed and fixed five real bugs in the production code**, across three
+  separate rounds of scaling up (a leaked shell notification corrupting an unrelated command, an
+  overly broad failure check in `throttle()`, single-flow detection blindness to background noise,
+  `restore()` never tearing down decoy state between actions, and a pcap-filename path-matching
+  bug in the Suricata analysis code itself) -- all five are described in their respective commit
+  messages and are now covered by regression tests. Four were only found because this evaluation
   is the first code path in the project to execute multiple distinct real responses back-to-back
-  on one long-lived Mininet network; the live demo and PPO's real-Mininet fine-tune each only
-  ever execute one action before their network is torn down. This is reported here because it is
-  itself a genuine finding about this evaluation methodology's value, not only about the system
-  under test.
+  on one long-lived Mininet network; the live demo and PPO's real-Mininet fine-tune each only ever
+  execute one action before their network is torn down. The `brute_force` payload gap above is a
+  sixth, found but not yet fixed. This is reported here because it is itself a genuine finding
+  about this evaluation methodology's value, not only about the system under test.
