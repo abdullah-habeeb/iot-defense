@@ -157,7 +157,7 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             packets = []
         flows = self.aggregator.aggregate(packets)
         if flows:
-            return self.detector.detect(flows[0].to_dict())
+            return self.detector.detect_flows(flows)
         return self.detector.detect(
             {"source_ip": ATTACKER_IP, "destination_ip": TARGET_IP,
              "unique_destination_ports": 0, "packet_count": 0, "packets_per_second": 0.0}

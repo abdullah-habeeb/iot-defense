@@ -289,10 +289,16 @@ class DemoController:
                 "packet_count": 0,
                 "packets_per_second": 0.0,
             }
+            threat_event = UnifiedRuleBasedDetector().detect(features)
         else:
-            features = flows[0].to_dict()
-
-        threat_event = UnifiedRuleBasedDetector().detect(features)
+            # detect_flows(), not flows[0]: a capture window can contain
+            # incidental background noise (ARP, IPv6 neighbour discovery)
+            # ahead of the real attack traffic in capture order, especially
+            # after a response has already isolated/restored the network
+            # once this run -- scanning every flow instead of trusting
+            # position avoids missing the real signal behind it.
+            threat_event = UnifiedRuleBasedDetector().detect_flows(flows)
+            features = threat_event.features
 
         if threat_event.attack_type == "reconnaissance_port_scan":
             try:

@@ -212,9 +212,23 @@ class MininetResponseExecutor:
             f"--hashlimit-above {rate} --hashlimit-burst {burst} --hashlimit-mode dstip "
             f"--hashlimit-name {rule_name} -j DROP"
         )
-        command_output = host.cmd(add_rule)
-        if command_output.strip():
-            raise RuntimeError(f"Unable to install traffic-control rate limit: {command_output.strip()}")
+        command_output = host.cmd(add_rule).strip()
+        # Checking for "iptables" in the output, not just any non-empty
+        # output, is deliberate: Mininet's host.cmd() reads from the same
+        # pty channel a backgrounded process's own shell job-control
+        # notification can land in ("[1]+  Terminated  tcpdump ...", or
+        # its own exit summary "N packets captured") if that process was
+        # still being torn down when this command ran -- confirmed via a
+        # real repro where a throttle() call right after a SIGTERM'd
+        # packet capture raised on "98 packets captured", not an actual
+        # iptables error. monitoring/monitor.py's start_capture() now
+        # disowns its background job specifically to prevent that, but
+        # treating only iptables' own error text as a real failure (its
+        # error output always starts with "iptables") keeps this command
+        # robust even against a stray source of leaked output this fix
+        # didn't anticipate.
+        if command_output and "iptables" in command_output.lower():
+            raise RuntimeError(f"Unable to install traffic-control rate limit: {command_output}")
         delete_rule = add_rule.replace("-A INPUT", "-D INPUT", 1)
         self._throttled[target_ip] = (host, delete_rule)
         return {

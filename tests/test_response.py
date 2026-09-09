@@ -198,3 +198,53 @@ def test_missing_or_external_targets_fail_safely(tmp_path):
 
     with pytest.raises(MininetSafetyError):
         executor._host_for_ip("10.0.2.15")
+
+
+class _StrayOutputHost(FakeHost):
+    """A host whose cmd() returns canned text for the iptables add-rule
+    command specifically, standing in for the real leaked shell output a
+    live run produced (see executor.py's throttle() comment)."""
+
+    def __init__(self, name, ip, add_rule_output):
+        super().__init__(name, ip)
+        self._add_rule_output = add_rule_output
+
+    def cmd(self, command):
+        self.commands.append(command)
+        if command.startswith("iptables -A INPUT"):
+            return self._add_rule_output
+        if command.startswith("ss -ltn"):
+            return ":2222"
+        return ""
+
+
+def test_throttle_ignores_leaked_non_iptables_output(tmp_path):
+    """Regression test: a real live run once raised "Unable to install
+    traffic-control rate limit: 98 packets captured" -- tcpdump's own exit
+    summary, leaked into the shell channel by a prior SIGTERM'd capture,
+    misread as an iptables failure even though the rule installed fine.
+    Non-iptables stray text must not be treated as a real failure."""
+    network = FakeNetwork()
+    network.hosts[0] = _StrayOutputHost("sensor", "10.0.0.10", "98 packets captured")
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.THROTTLE))
+
+    assert result.status == "success"
+    assert result.details["operation"] == "throttle"
+
+
+def test_throttle_still_raises_on_a_real_iptables_error(tmp_path):
+    """The discriminating check in the test above must not swallow a
+    genuine failure -- real iptables errors are always prefixed
+    "iptables"."""
+    network = FakeNetwork()
+    network.hosts[0] = _StrayOutputHost(
+        "sensor", "10.0.0.10", "iptables: No chain/target/match by that name."
+    )
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.THROTTLE))
+
+    assert result.status == "failed"
+    assert "iptables" in result.message.lower()
