@@ -90,11 +90,28 @@ def summarize_by_condition(rows: list[dict[str, Any]], arm: str) -> dict[str, di
     return result
 
 
+_SURICATA_RULESET_LABELS = {
+    "et_open": "Suricata + ET-Open (real-world community rules)",
+    "lab": "Suricata + lab-tailored rules (this project's own signatures)",
+}
+
+
+def load_suricata_summary(path: str | Path) -> dict[str, Any] | None:
+    """Suricata analysis is optional -- returns None if the summary file
+    (written by suricata_eval.py) doesn't exist, so callers can render a
+    report with or without it rather than failing outright."""
+    summary_path = Path(path)
+    if not summary_path.exists():
+        return None
+    return json.loads(summary_path.read_text(encoding="utf-8"))
+
+
 def render_markdown(
     rows: list[dict[str, Any]],
     arm_summary: dict[str, dict[str, Any]],
     condition_summary: dict[str, dict[str, Any]],
     source_path: str | Path,
+    suricata_summary: dict[str, Any] | None = None,
 ) -> str:
     n_trials = len({r["trial"] for r in rows})
     n_conditions = len({r["condition"] for r in rows})
@@ -130,6 +147,27 @@ def render_markdown(
     ]
     for cond, s in condition_summary.items():
         lines.append(f"| `{cond}` | {s['detection_accuracy'] * 100:.1f}% | {s['response_verified_rate'] * 100:.1f}% |")
+
+    if suricata_summary:
+        lines += [
+            "",
+            "## External detection comparison (Suricata, offline pcap analysis)",
+            "",
+            f"{suricata_summary.get('total_pcaps', 0)} pcaps analyzed -- see EVALUATION.md for methodology and honest",
+            "caveats about run-to-run variance in this section specifically.",
+            "",
+            "| Detector | Accuracy | True positive rate | False positive rate |",
+            "|---|---|---|---|",
+        ]
+        for ruleset_name, label in _SURICATA_RULESET_LABELS.items():
+            s = suricata_summary.get(ruleset_name)
+            if not s:
+                continue
+            lines.append(
+                f"| {label} | {s['accuracy'] * 100:.1f}% | "
+                f"{s['true_positive_rate'] * 100:.1f}% | {s['false_positive_rate'] * 100:.1f}% |"
+            )
+
     lines.append("")
     return "\n".join(lines)
 
@@ -139,15 +177,18 @@ def generate_report(
     results_path: str | Path = "data/evaluation/results.jsonl",
     json_output_path: str | Path = "data/evaluation/summary.json",
     markdown_output_path: str | Path = "data/evaluation/summary.md",
+    suricata_summary_path: str | Path = "data/evaluation/suricata_summary.json",
 ) -> dict[str, Any]:
     rows = load_results(results_path)
     arm_summary = summarize_by_arm(rows)
     condition_summary = summarize_by_condition(rows, "stackelberg")
+    suricata_summary = load_suricata_summary(suricata_summary_path)
     summary = {
         "source": str(results_path),
         "total_rows": len(rows),
         "by_arm": arm_summary,
         "by_condition_stackelberg": condition_summary,
+        "suricata": suricata_summary,
     }
 
     json_output = Path(json_output_path)
@@ -156,7 +197,9 @@ def generate_report(
 
     markdown_output = Path(markdown_output_path)
     markdown_output.parent.mkdir(parents=True, exist_ok=True)
-    markdown_output.write_text(render_markdown(rows, arm_summary, condition_summary, results_path), encoding="utf-8")
+    markdown_output.write_text(
+        render_markdown(rows, arm_summary, condition_summary, results_path, suricata_summary), encoding="utf-8"
+    )
 
     return summary
 
@@ -166,11 +209,13 @@ def main() -> None:
     parser.add_argument("--results", default="data/evaluation/results.jsonl")
     parser.add_argument("--json-output", default="data/evaluation/summary.json")
     parser.add_argument("--markdown-output", default="data/evaluation/summary.md")
+    parser.add_argument("--suricata-summary", default="data/evaluation/suricata_summary.json")
     args = parser.parse_args()
     summary = generate_report(
         results_path=args.results,
         json_output_path=args.json_output,
         markdown_output_path=args.markdown_output,
+        suricata_summary_path=args.suricata_summary,
     )
     print(json.dumps(summary, indent=2))
 
