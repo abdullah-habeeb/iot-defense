@@ -30,7 +30,6 @@ class FakeHost:
         self.name = name
         self._ip = ip
         self.commands = []
-        self.process = FakeProcess()
 
     def IP(self):
         return self._ip
@@ -45,7 +44,11 @@ class FakeHost:
         return ""
 
     def popen(self, *args, **kwargs):
-        return self.process
+        # A fresh FakeProcess per call, matching real subprocess.Popen()
+        # semantics -- a shared, single instance would carry a prior call's
+        # "terminated" state into a later, genuinely-fresh process, which
+        # is exactly what real Mininet's own host.popen() never does.
+        return FakeProcess()
 
 
 class FakeNetwork:
@@ -187,6 +190,53 @@ def test_decoy_lifecycle_and_executor_mapping(tmp_path):
     assert result.details["decoy_ip"] == "10.0.0.200"
     assert decoy.process is not None
     assert decoy.stop()["status"] == "stopped"
+
+
+def test_restore_removes_decoy_redirect_and_stops_the_service(tmp_path):
+    """Regression test: restore() used to only clear _isolated/_throttled --
+    a decoy redirect installed by execute(DECOY) was left in place, and the
+    decoy service kept running, until cleanup() ran at the very end of a
+    network's whole lifetime. Confirmed via a real evaluation-harness run
+    that called DECOY repeatedly on one long-lived network: redirect rules
+    from an earlier call were still installed when a later call tried to
+    add new ones, and the decoy service's already-bound ports made its
+    next start() attempt fail. restore() must tear both down per-target,
+    the same way it already does for isolate/throttle."""
+    network = FakeNetwork()
+    decoy = DecoyService(log_path=tmp_path / "decoy.jsonl", ports=(2222,))
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl", decoy=decoy)
+    source_host = executor.net.hosts[1]  # attacker, the decision's source_ip
+
+    executor.execute(decision(DefenseAction.DECOY))
+    assert executor._redirect_rules["10.0.0.10"]
+    assert decoy.process is not None
+    added_rules = [c for c in source_host.commands if c.startswith("iptables -t nat -A")]
+    assert added_rules
+
+    restored = executor.restore("10.0.0.10")
+
+    assert restored["decoy_removed"] is True
+    assert executor._redirect_rules == {}
+    assert decoy.process is None  # the service was stopped, not left running
+    removed_rules = [c for c in source_host.commands if c.startswith("iptables -t nat -D")]
+    assert len(removed_rules) == len(added_rules)
+
+
+def test_repeated_decoy_calls_on_the_same_target_do_not_accumulate_rules(tmp_path):
+    """A second DECOY execution against the same target, after a proper
+    restore() in between, must not find leftover rules from the first --
+    this is the exact scenario the evaluation harness hit for real."""
+    network = FakeNetwork()
+    decoy = DecoyService(log_path=tmp_path / "decoy.jsonl", ports=(2222,))
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl", decoy=decoy)
+
+    first = executor.execute(decision(DefenseAction.DECOY))
+    executor.restore("10.0.0.10")
+    second = executor.execute(decision(DefenseAction.DECOY))
+
+    assert first.status == "success"
+    assert second.status == "success"
+    assert len(executor._redirect_rules["10.0.0.10"]) == len(decoy.ports)
 
 
 def test_missing_or_external_targets_fail_safely(tmp_path):

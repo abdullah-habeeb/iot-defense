@@ -118,7 +118,11 @@ class MininetResponseExecutor:
         self.decoy = decoy or DecoyService()
         self._isolated: dict[str, tuple[Any, str]] = {}
         self._throttled: dict[str, tuple[Any, str]] = {}
-        self._redirect_rules: list[tuple[Any, str]] = []
+        # Keyed by target_ip, not a flat list: restore() needs to remove
+        # exactly *this* target's redirect rules, not every rule ever
+        # installed for any target during this executor's lifetime (see
+        # restore()'s own docstring for the real bug this fixes).
+        self._redirect_rules: dict[str, list[tuple[Any, str]]] = {}
 
     def execute(self, decision: DefenseDecision) -> ResponseResult:
         """Execute the already-selected action without re-evaluating threat data."""
@@ -240,20 +244,48 @@ class MininetResponseExecutor:
         }
 
     def restore(self, target_ip: str) -> dict[str, Any]:
+        """Undo whatever response is currently active against target_ip --
+        isolation, throttling, and any decoy redirect, all three, not just
+        whichever one restore() originally handled.
+
+        Before this, restore() only ever cleared _isolated/_throttled;
+        decoy's NAT redirect rules and the decoy service itself were torn
+        down solely by cleanup(), called once at the very end of a
+        network's lifetime. Every prior real-Mininet exercise of DECOY
+        (the live demo, dataset generation, PPO's real-Mininet fine-tune)
+        only ever called it once or twice before the whole network was
+        torn down anyway, so the gap was invisible. The evaluation
+        harness is the first code path to call DECOY repeatedly on one
+        long-lived network -- confirmed via a real run where redirect
+        rules from an earlier trial's decoy call were still installed
+        when a later trial tried to add new ones, and the decoy service's
+        own already-bound ports made its next start() attempt fail.
+        """
         host = self._host_for_ip(target_ip)
         isolated = self._isolated.pop(target_ip, None)
         throttled = self._throttled.pop(target_ip, None)
+        redirect_rules = self._redirect_rules.pop(target_ip, None)
         interface = isolated[1] if isolated is not None else host.defaultIntf().name
         host.cmd(f"ip link set dev {interface} up")
         if throttled is not None:
             _, delete_rule = throttled
             host.cmd(delete_rule)
+        decoy_removed = False
+        if redirect_rules:
+            for rule_host, delete_rule in reversed(redirect_rules):
+                rule_host.cmd(delete_rule)
+            decoy_removed = True
+            # The decoy service is shared infrastructure, not per-target --
+            # only stop it once nothing is being redirected to it any more.
+            if not self._redirect_rules:
+                self.decoy.stop()
         return {
             "operation": "restore",
             "host": host.name,
             "interface": interface,
             "state": "up",
             "throttle_removed": throttled is not None,
+            "decoy_removed": decoy_removed,
         }
 
     def redirect_to_decoy(self, decision: DefenseDecision) -> dict[str, Any]:
@@ -262,16 +294,19 @@ class MininetResponseExecutor:
         decoy_host = self._decoy_host()
         decoy_details = self.decoy.start(decoy_host)
         rules = []
+        target_rules = self._redirect_rules.setdefault(decision.target_ip, [])
         for port in self.decoy.ports:
             add_rule = (
                 f"iptables -t nat -A OUTPUT -p tcp -d {decision.target_ip} "
                 f"--dport {port} -j DNAT --to-destination {decoy_host.IP()}"
             )
-            command_output = source_host.cmd(add_rule)
-            if command_output.strip():
-                raise RuntimeError(f"Unable to install simulated decoy redirect: {command_output.strip()}")
+            command_output = source_host.cmd(add_rule).strip()
+            # See throttle()'s matching comment: only text that actually
+            # looks like an iptables error is treated as a real failure.
+            if command_output and "iptables" in command_output.lower():
+                raise RuntimeError(f"Unable to install simulated decoy redirect: {command_output}")
             delete_rule = add_rule.replace(" -A ", " -D ", 1)
-            self._redirect_rules.append((source_host, delete_rule))
+            target_rules.append((source_host, delete_rule))
             rules.append({"port": port, "operation": "OUTPUT_DNAT", "target": decoy_host.IP()})
         return {
             "operation": "decoy",
@@ -304,11 +339,12 @@ class MininetResponseExecutor:
         raise MininetSafetyError("No configured Mininet decoy host is available.")
 
     def cleanup(self) -> None:
-        for host, delete_rule in reversed(self._redirect_rules):
-            host.cmd(delete_rule)
-        self._redirect_rules.clear()
-        for target_ip in list(self._isolated):
-            self.restore(target_ip)
-        for target_ip in list(self._throttled):
+        """Restore every target with any active response state -- isolated,
+        throttled, or decoy-redirected -- then stop the decoy service as a
+        safety net (restore() already stops it once no target is redirected
+        any more, but this covers a target whose restore() was never called
+        at all)."""
+        target_ips = set(self._isolated) | set(self._throttled) | set(self._redirect_rules)
+        for target_ip in target_ips:
             self.restore(target_ip)
         self.decoy.stop()
