@@ -402,3 +402,34 @@ class UnifiedRuleBasedDetector(Detector):
         if fallback_normal_event is None:
             raise ValueError("UnifiedRuleBasedDetector requires at least one detector")
         return fallback_normal_event  # every rule set agrees: normal traffic
+
+    def detect_flows(self, flows: list[Any]) -> ThreatEvent:
+        """Classify every flow in a capture window, not just a single
+        pre-selected one -- returns the first genuinely flagged flow's
+        event, applying detect()'s own "first non-normal wins" contract
+        per-flow instead of trusting flows[0] to already be the signal.
+
+        A capture window can contain more than the attack traffic itself:
+        incidental background noise (ARP, IPv6 neighbour discovery
+        triggered by an interface coming back up after isolate()/
+        restore()) can land earlier in capture order than the real
+        traffic, especially once a network has been isolated and restored
+        more than once in its lifetime. This was found, not assumed: a
+        real evaluation-harness run that isolated/restored the same
+        network several times in a row saw exactly this -- a stray
+        IPv6-neighbour-discovery packet became flows[0], and a real
+        exfiltration flow captured moments later in the same window was
+        silently ignored. Scanning every flow instead of trusting
+        position in the capture fixes that without weakening detection
+        for the common case, where the first flow already is the signal.
+        """
+        fallback_normal_event: ThreatEvent | None = None
+        for flow in flows:
+            event = self.detect(flow.to_dict())
+            if event.attack_type != "normal":
+                return event
+            fallback_normal_event = fallback_normal_event or event
+
+        if fallback_normal_event is None:
+            raise ValueError("detect_flows() requires at least one flow")
+        return fallback_normal_event  # every flow, and every rule set, agrees: normal traffic

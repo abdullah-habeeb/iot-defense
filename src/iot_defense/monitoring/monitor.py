@@ -27,7 +27,7 @@ class PacketMonitor:
 
         command = (
             f"tcpdump -i {interface} -nn -s 0 -c {packet_limit} -w {capture_path} "
-            f">/tmp/{host_name}_tcpdump.log 2>&1 & echo $!"
+            f">/tmp/{host_name}_tcpdump.log 2>&1 & disown; echo $!"
         )
         host.cmd(command)
         time.sleep(capture_seconds)
@@ -48,9 +48,23 @@ class PacketMonitor:
         if os.path.exists(capture_path):
             os.remove(capture_path)
 
+        # `disown` after backgrounding, not just output redirection: when
+        # stop_capture() has to SIGTERM this process (its packet limit
+        # wasn't reached in time), bash's own job-control notification for
+        # the now-terminated background job ("[1]+  Terminated  tcpdump...")
+        # is printed by the shell itself, not by tcpdump -- so redirecting
+        # tcpdump's own stdout/stderr to log_path never touches it. That
+        # notification lands in the same pty channel Mininet's host.cmd()
+        # reads from on its *next* call on this host, corrupting whatever
+        # that later, unrelated command was trying to read. Confirmed via a
+        # real repro: a throttle() call issued right after a SIGTERM'd
+        # capture raised "Unable to install traffic-control rate limit: 98
+        # packets captured" -- tcpdump's own exit summary, misread as
+        # iptables error output. disown removes the job from the shell's
+        # job table so its completion is never reported at all.
         command = (
             f"tcpdump -i {interface} -nn -s 0 -c {packet_limit} -w {capture_path} "
-            f">{log_path} 2>&1 & echo $!"
+            f">{log_path} 2>&1 & disown; echo $!"
         )
         pid = host.cmd(command).strip()
         self._wait_for_log_marker(host, log_path, "listening on", timeout=2.0)

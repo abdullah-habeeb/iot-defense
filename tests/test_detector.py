@@ -1,3 +1,5 @@
+import pytest
+
 from iot_defense.detection.detector import (
     RuleBasedBruteForceDetector,
     RuleBasedDosDetector,
@@ -5,6 +7,7 @@ from iot_defense.detection.detector import (
     RuleBasedReconDetector,
     UnifiedRuleBasedDetector,
 )
+from iot_defense.detection.flow_features import FlowFeatures
 
 
 def test_normal_traffic_is_not_flagged():
@@ -335,3 +338,41 @@ class TestUnifiedDetectorIsAttackTypeAgnostic:
         detector = self._detector()
         assert detector.detect(login_attempts).attack_type == "brute_force"
         assert detector.detect(exfiltration).attack_type == "data_exfiltration"
+
+
+def _flow(**overrides):
+    defaults = dict(
+        source_ip="unknown", destination_ip="unknown", protocol="UNKNOWN",
+        duration=0.0, packet_count=1, packets_per_second=0.0, bytes_total=42,
+        average_packet_size=42.0, unique_destination_ports=0, unique_source_ports=0,
+    )
+    defaults.update(overrides)
+    return FlowFeatures(**defaults)
+
+
+class TestDetectFlowsScansEveryFlow:
+    """Regression coverage for a real bug found running the evaluation
+    harness: a capture window can contain incidental background noise
+    (ARP, IPv6 neighbour discovery triggered by an interface flap) ahead
+    of the real attack traffic in capture order. detect() alone (called
+    on a single pre-selected flow, e.g. flows[0]) would pick up that noise
+    instead of the real signal -- detect_flows() must scan every flow."""
+
+    def test_skips_leading_noise_flow_and_finds_the_real_attack(self):
+        noise = _flow()  # unknown/unknown, exactly what a stray ND/ARP packet decodes to
+        real_flood = _flow(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="UDP",
+            duration=1.0, packet_count=200, packets_per_second=200.0,
+            unique_destination_ports=1, average_packet_size=64.0,
+        )
+        event = UnifiedRuleBasedDetector().detect_flows([noise, real_flood])
+        assert event.attack_type == "dos_flood"
+
+    def test_returns_normal_when_every_flow_is_benign(self):
+        benign = [_flow(source_ip="10.0.0.30", destination_ip="10.0.0.10", packet_count=3, average_packet_size=90.0) for _ in range(3)]
+        event = UnifiedRuleBasedDetector().detect_flows(benign)
+        assert event.attack_type == "normal"
+
+    def test_raises_on_an_empty_flow_list(self):
+        with pytest.raises(ValueError):
+            UnifiedRuleBasedDetector().detect_flows([])
