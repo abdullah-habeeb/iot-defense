@@ -237,6 +237,36 @@ def _exfiltration_traffic(host: Any, attacker_ip: str, port: int, duration: floa
     )
 
 
+def _exploit_traffic(host: Any, target_ip: str, port: int, duration: float) -> str:
+    """A small number of real TCP connections carrying one oversized
+    payload each -- unlike brute-force (many small attempts) or
+    exfiltration (a steady small UDP trickle out), this attack's defining
+    signature is payload *size*, not packet count or rate. Matches
+    simulation/traffic.py's generate_exploit_mininet_traffic (400-byte
+    payload, at most 4 attempts, 0.8s pauses)."""
+    return host.cmd(
+        "python3 - <<'PY'\n"
+        "import socket, time\n"
+        "payload = b'A' * 400\n"
+        "start = time.time()\n"
+        "attempts = 0\n"
+        f"while time.time() - start < {duration} and attempts < 4:\n"
+        "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+        "    sock.settimeout(0.5)\n"
+        "    try:\n"
+        f"        sock.connect(('{target_ip}', {port}))\n"
+        "        sock.sendall(payload)\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "    finally:\n"
+        "        sock.close()\n"
+        "    attempts += 1\n"
+        "    time.sleep(0.8)\n"
+        "print('exploit_dataset_traffic_done')\n"
+        "PY"
+    )
+
+
 def get_scenario_type(run_number: int) -> str:
     """Deterministically assign scenario type based on run number.
 
@@ -266,6 +296,8 @@ def get_scenario_type(run_number: int) -> str:
         return 'brute_force'
     if attack_key == "exfiltration":
         return 'exfiltration'
+    if attack_key == "exploit":
+        return 'exploit_payload_injection'
     raise ValueError(f"No dataset-generation dispatch registered for attack key: {attack_key!r}")
 
 def generate_dataset(
@@ -279,10 +311,10 @@ def generate_dataset(
         raise ValueError("At least six independent runs are required for group-aware evaluation.")
     rng = random.Random(seed)
     target_options = [("sensor", "10.0.0.10"), ("camera", "10.0.0.20"), ("smart_plug", "10.0.0.30")]
-    
+
     # Benign variations
     normal_ports_pool = [5683, 1883, 80, 443, 8080, 9999, 10001]
-    
+
     # Recon variations - split into known and unseen
     recon_known_port_sets = [
         [22, 80, 443, 8080],
@@ -307,10 +339,13 @@ def generate_dataset(
     exfiltration_target_ports = [4444, 5555, 6666]
     attacker_ip = "10.0.0.100"
 
+    # Exploit target port -- a single simulated management/control port
+    exploit_target_ports = [22, 7001, 7002]
+
 
     rows: list[dict[str, Any]] = []
     aggregator = FeatureAggregator(window_seconds=3.0)
-    
+
     successful_runs = 0
     failed_runs = []
 
@@ -319,13 +354,13 @@ def generate_dataset(
         target_name, target_ip = rng.choice(target_options)
         net = None
         listener_pids = []
-        
+
         # Stage tracking for failure accounting
         current_stage = "start_network"
         try:
             net = create_mininet_network()
             net.start()
-            
+
             # Start capture BEFORE traffic. start_capture() blocks only
             # until tcpdump confirms it is actually listening (not a fixed
             # guess), and later stop_capture() guarantees termination --
@@ -346,10 +381,10 @@ def generate_dataset(
                     else ("camera", "10.0.0.20")
                 )
                 source = net.get(source_name)
-                
+
                 # Create protocol/port traffic plan based on scenario type
                 traffic_plan = []
-                
+
                 # Normal TCP listeners/traffic. Deliberately all unprivileged
                 # (>1024) ports -- binding to 80/443 inside the Mininet host
                 # namespace was silently failing (permission/capability
@@ -364,13 +399,13 @@ def generate_dataset(
                         traffic_plan.append({'proto': 'STREAM', 'port': port, 'count': 1, 'size': rng.randint(64, 256)})
                         pid = _start_tcp_listener(net.get(target_name), port)
                         listener_pids.append(pid)
-                
+
                 # Normal UDP traffic
                 if scenario in ['normal_udp', 'normal_mixed']:
                     for _ in range(rng.randint(1, 3)):
                         port = rng.choice([5683, 1883, 9999])
                         traffic_plan.append({'proto': 'DGRAM', 'port': port, 'count': 3, 'size': rng.randint(16, 64)})
-                
+
                 delay = rng.choice([0.01, 0.05, 0.1, 0.5])
                 _normal_traffic(source, target_ip, traffic_plan, delay)
             elif scenario.startswith("reconnaissance"):
@@ -395,6 +430,12 @@ def generate_dataset(
                 # with real headroom, instead of landing right at it.
                 bf_interval = rng.choice([0.1, 0.15, 0.2])
                 _brute_force_traffic(source, target_ip, bf_port, duration=6.0, interval=bf_interval)
+            elif scenario == "exploit_payload_injection":
+                # Exploit-payload traffic -- a few oversized requests to a
+                # single management port.
+                source = net.get("attacker")
+                exploit_port = rng.choice(exploit_target_ports)
+                _exploit_traffic(source, target_ip, exploit_port, duration=4.0)
             else:
                 # Exfiltration traffic -- direction reversed: the chosen
                 # target device is the compromised traffic *source*, not
@@ -407,7 +448,7 @@ def generate_dataset(
             capture_path = monitor.stop_capture(net, capture_session, completion_timeout=4.0)
             events = monitor.read_capture(net, target_name, capture_path)
             features = aggregator.aggregate(events)
-            
+
             # Label flows. Every scenario except exfiltration has the
             # target device as the flow's destination and the attacker (or
             # a trusted normal-traffic source) as its source; exfiltration
@@ -447,15 +488,21 @@ def generate_dataset(
                     and feature.source_ip == target_ip
                     and feature.destination_ip == "10.0.0.100"
                 )
+                is_exploit = (
+                    scenario == "exploit_payload_injection"
+                    and feature.destination_ip == target_ip
+                    and feature.source_ip == "10.0.0.100"
+                )
                 is_normal = (
                     scenario.startswith("normal")
                     and feature.destination_ip == target_ip
                     and feature.source_ip in {"10.0.0.30", "10.0.0.20"}
                 )
 
-                if is_recon or is_dos or is_brute_force or is_exfiltration or is_normal:
+                if is_recon or is_dos or is_brute_force or is_exfiltration or is_exploit or is_normal:
                     label = (
-                        4 if is_exfiltration
+                        5 if is_exploit
+                        else 4 if is_exfiltration
                         else 3 if is_brute_force
                         else 2 if is_dos
                         else 1 if is_recon

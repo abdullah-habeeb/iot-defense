@@ -125,6 +125,7 @@ function renderHeader(state) {
       reconnaissance: { label: 'ATTACK: RECONNAISSANCE', accent: '--accent-amber', rgb: '245,158,11' },
       brute_force: { label: 'ATTACK: BRUTE-FORCE', accent: '--accent-purple', rgb: '168,85,247' },
       exfiltration: { label: 'ATTACK: DATA EXFILTRATION', accent: '--accent-cyan', rgb: '6,182,212' },
+      exploit: { label: 'ATTACK: EXPLOIT INJECTION', accent: '--accent-orange', rgb: '249,115,22' },
     };
     const style = ATTACK_BADGE_STYLES[state.attack_mode];
     if (style) {

@@ -50,6 +50,7 @@ def test_every_scenario_has_distinct_attack_type_and_observed_threat_key():
 # for any future attack whose detector inspects additional fields.
 DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
     "exfiltration": {"packet_count": 10, "average_packet_size": 1200.0},
+    "exploit": {"packet_count": 4, "average_packet_size": 350.0},
 }
 
 

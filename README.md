@@ -22,7 +22,7 @@ Mininet IoT Network -> Monitoring Agent -> Feature Extraction -> Detection Agent
 - Open vSwitch 3.3.9
 
 ## Attack types
-Four attack types are currently registered, selectable at demo start via `--attack <key>`:
+Five attack types are currently registered, selectable at demo start via `--attack <key>`:
 
 | Key | Label | Signature | Preferred response |
 |---|---|---|---|
@@ -30,6 +30,9 @@ Four attack types are currently registered, selectable at demo start via `--atta
 | `dos` | DDoS flood | Single port, very high packet rate | `ISOLATE` |
 | `brute_force` | Credential stuffing | Single port, moderate sustained rate, many attempts | `THROTTLE` |
 | `exfiltration` | Data exfiltration | Reversed direction (device → attacker), few packets, large payloads | `ISOLATE` |
+| `exploit` | Exploit payload injection | Single port, few packets, unusually large payload | `DECOY` |
+
+`exploit` is DECOY's second scenario: reconnaissance's decoy only observes a scan already known to be harmless probing, while this one redirects an unconfirmed, potentially dangerous payload away from the real device and captures it for analysis — a genuinely different reason to prefer deception, not the same one repeated.
 
 Adding a new attack means adding one `AttackScenario` entry to the registry, plus its own traffic generator and rule-based detector — not touching every dependent file by hand.
 
@@ -55,22 +58,24 @@ Two training passes exist:
 The generated models are ignored by Git. `PPODefensePolicy` fails clearly when a model is absent unless an explicit fallback policy is provided. The trained policy should not be interpreted as learning real-world attacker behaviour or general autonomous cyber defense — it is a bounded, controlled-environment demonstration.
 
 ## Controlled ML detection experiment
-A reproducible controlled dataset and Random Forest detector, now genuinely 5-class (normal + all four registered attacks). Generate labelled rows from fresh Mininet runs with:
+A reproducible controlled dataset and Random Forest detector. The dataset-generation pipeline (`ml/generate_dataset.py`, `ml/schema.py`) is registry-driven and already supports all five registered attacks (6 classes with `normal`) — but the currently deployed `data/ml/controlled_flows_5class.csv` and its trained model predate `exploit` and only cover the first four. Regenerating against all five (roughly 150 runs for reasonable per-class balance) and retraining is the natural next step, not yet done as part of adding `exploit`. Generate labelled rows from fresh Mininet runs with:
 
 ```bash
-sudo .venv/bin/python3 -m iot_defense.ml.generate_dataset --runs 130 --seed 42 \
-    --output data/ml/controlled_flows_5class.csv
+sudo .venv/bin/python3 -m iot_defense.ml.generate_dataset --runs 150 --seed 42 \
+    --output data/ml/controlled_flows_6class.csv
 ```
 
 Train and evaluate on run-held-out groups with:
 
 ```bash
 sudo .venv/bin/python3 -m iot_defense.ml.train_random_forest \
-    --dataset data/ml/controlled_flows_5class.csv \
+    --dataset data/ml/controlled_flows_6class.csv \
     --model models/random_forest_detector.joblib --seed 7
 ```
 
-The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run identifiers, timestamps, metadata, and labels remain audit fields. The rule-based comparison baseline reported alongside RF's own metrics uses the same `UnifiedRuleBasedDetector` the live demo calls, scored on the identical 5-class labels — not a separate binary question. This remains a small, controlled Mininet study; its held-out metrics must not be generalized to arbitrary IoT traffic. In the live demo, the trained RF model is consulted only as a confirmation step when the rule-based detector independently concludes reconnaissance — the one signature with the fuzziest rule-based boundary of the four; the other three have each been proven reliable across many live Mininet runs.
+The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run identifiers, timestamps, metadata, and labels remain audit fields. The rule-based comparison baseline reported alongside RF's own metrics uses the same `UnifiedRuleBasedDetector` the live demo calls, scored on the identical multi-class labels — not a separate binary question. This remains a small, controlled Mininet study; its held-out metrics must not be generalized to arbitrary IoT traffic. In the live demo, the trained RF model is consulted only as a confirmation step when the rule-based detector independently concludes reconnaissance — the one signature with the fuzziest rule-based boundary; every other registered attack has been proven reliable across many live Mininet runs without needing RF confirmation.
+
+The currently deployed `data/ml/controlled_flows_5class.csv` and `models/random_forest_detector.joblib` were trained before `exploit` was registered (125 rows, 5 classes: normal + reconnaissance/dos/brute_force/exfiltration; RF 100% held-out accuracy, rule-based baseline 94.7%) and have not yet been regenerated/retrained against the 6-class schema above.
 
 ## Planned future components
 - A genuinely new detection dimension (e.g. inter-arrival timing regularity) to support attacks that aren't a traffic-volume pattern at all, such as malware C2 beaconing
@@ -103,7 +108,7 @@ Then open **http://<host>:8000** in a browser.
 ### Run the live demo (requires Mininet, typically sudo)
 ```bash
 cd /home/abdullah/iot-defense
-sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <reconnaissance|dos|brute_force|exfiltration>
+sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <reconnaissance|dos|brute_force|exfiltration|exploit>
 ```
 Omit `--attack` to be prompted interactively. The dashboard server and the demo process share `data/dashboard/state.json` and the controller's SSE event queue when run together as one process; run the dashboard server itself with the demo controller instantiated once (as `server.py` does) so browser clients observe the same controller instance.
 
@@ -126,7 +131,8 @@ The controller's `cleanup()` tears down the response executor (removing any ipta
 - The Random Forest detector reflects a preliminary evaluation on a small controlled Mininet dataset (~125 rows across 5 classes; see "Controlled ML detection experiment" above) and should not be generalized to arbitrary IoT traffic.
 - The PPO policy's base training is a lightweight synthetic decision simulator, not live Mininet traffic. A bounded real-Mininet fine-tuning pass exists and has been run (see "PPO reinforcement-learned policy" above), but it is a short, warm-started refinement on top of the synthetic policy, not training from scratch against real traffic.
 - Stackelberg utilities are configured/modelled values (see `config/policies.yaml`), not measured real-world costs.
-- Only two attack signatures (reconnaissance, credential-stuffing) are genuinely distinguished by connection *rate/pattern*; the flood and exfiltration signatures rely more heavily on volume and direction. A malware C2 beaconing attack or similar timing-based signature is not currently detectable — it would need a new flow feature (inter-arrival timing regularity) this project doesn't compute yet.
+- Only two attack signatures (reconnaissance, credential-stuffing) are genuinely distinguished by connection *rate/pattern*; the flood and exfiltration signatures rely more heavily on volume and direction, and `exploit` relies on payload size rather than any of those. A malware C2 beaconing attack or similar timing-based signature is not currently detectable — it would need a new flow feature (inter-arrival timing regularity) this project doesn't compute yet.
+- `exploit`'s rule-based detector separates a single oversized request from ordinary low-volume traffic almost entirely by `average_packet_size` — packet_count and port diversity alone overlap with real observed normal-traffic values, so this signature has the least headroom of any currently registered detector if normal traffic patterns ever shift. A live capture of `generate_exploit_mininet_traffic` measured `average_packet_size=442` against a detection window of 250-550 and real normal traffic's observed max of ~119 (see `data/ml/controlled_flows_5class.csv`) — real margin on both sides today, not a coin flip, but a narrower gap than the other four attacks have.
 
 ## Virtual environment
 ```bash

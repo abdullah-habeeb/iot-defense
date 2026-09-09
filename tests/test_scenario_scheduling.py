@@ -34,6 +34,7 @@ ATTACK_ASSERTIONS = {
     "dos": _assert_fixed_value_bucket("dos_flood"),
     "brute_force": _assert_fixed_value_bucket("brute_force"),
     "exfiltration": _assert_fixed_value_bucket("exfiltration"),
+    "exploit": _assert_fixed_value_bucket("exploit_payload_injection"),
 }
 
 
