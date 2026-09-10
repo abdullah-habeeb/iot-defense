@@ -691,6 +691,7 @@ function renderMetrics(state) {
   set('m-decoy',        m.decoy_interactions);
   set('m-isolations',   m.isolations);
   set('m-restorations', m.restorations);
+  set('m-throttles',    m.throttles);
   set('m-detect-latency', m.detection_latency_ms !== undefined ? m.detection_latency_ms?.toFixed(1) : null);
   set('m-resp-latency',   m.response_latency_ms  !== undefined ? m.response_latency_ms?.toFixed(1) : null);
 }
