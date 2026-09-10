@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -45,13 +46,26 @@ def start_multi_connection_listener(host: Any, port: int) -> str:
         "    conn.close()\n"
     )
     log_path = f"/tmp/multi_listener_{port}.log"
-    cmd = (
-        f"python3 - <<'PY' >{log_path} 2>&1 & disown\n"
-        f"{script}\n"
-        "PY\n"
-        "echo $!"
-    )
-    pid = host.cmd(cmd).strip()
+    launch_cmd = f"python3 - <<'PY' >{log_path} 2>&1 & disown\n{script}\nPY"
+    # `echo $!` is sent as a genuinely separate host.cmd() call, not just a
+    # separate *line* of the same call, and this is deliberate, not
+    # cosmetic. Sending a multi-line heredoc through a Mininet host's pty
+    # makes bash echo a "> " continuation prompt for every line until "PY",
+    # and backgrounding with "&" prints its own "[1] <pid>" notification --
+    # both land ahead of "echo $!"'s own output if it rides along in the
+    # same call, and under real repeated real-Mininet load (many trials
+    # reusing the same long-lived host session) that combined read can even
+    # return *before* the heredoc has fully drained, with no digits in it
+    # at all. Ending the launch call right after the heredoc's terminator
+    # lets host.cmd() fully resync on that call's own completion; `$!` is a
+    # shell variable that persists across calls in the same host session,
+    # so a second, clean call still reports the just-backgrounded PID.
+    host.cmd(launch_cmd)
+    raw_output = host.cmd("echo $!")
+    digit_tokens = re.findall(r"\d+", raw_output)
+    if not digit_tokens:
+        raise RuntimeError(f"Could not determine listener PID from host.cmd() output: {raw_output!r}")
+    pid = digit_tokens[-1]
     # Block until the listener has actually bound, not a fixed guess --
     # traffic sent before that races the listener's own socket.bind()/
     # listen() and is refused exactly like the bug this function fixes.

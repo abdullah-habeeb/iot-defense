@@ -254,6 +254,29 @@ def test_start_tcp_listener_command():
     assert pid == "1234"
 
 
+def test_start_tcp_listener_extracts_real_pid_from_noisy_heredoc_output():
+    """Regression coverage for a real bug found via a live Mininet repro:
+    sending a multi-line heredoc through host.cmd() makes bash echo a "> "
+    continuation prompt for every script line, and backgrounding with "&"
+    prints its own "[1] <pid>" notification -- both land ahead of the real
+    `echo $!` output in host.cmd()'s captured text. The observed raw output
+    was literally "> > > > ... [1] 162191\\r\\n162191" -- naively
+    .strip()-ing that (the previous implementation) produced a garbage
+    multi-line "pid" that _stop_tcp_listener() then passed straight to
+    `kill`, silently never signaling the real listener process."""
+
+    class NoisyHost:
+        def cmd(self, command: str) -> str:
+            if "ss -ltn" in command:
+                return "LISTEN 0 128 *:8080"
+            if command.startswith("kill "):
+                return ""
+            return "> " * 25 + "[1] 162191\r\n162191"
+
+    pid = _start_tcp_listener(NoisyHost(), 8080)
+    assert pid == "162191"
+
+
 def test_start_tcp_listener_heredoc_terminator_is_valid_shell_syntax():
     """Regression test: the heredoc terminator line must be exactly "PY"
     with nothing else on it, or bash never recognizes it as the end of the
@@ -268,7 +291,8 @@ def test_start_tcp_listener_heredoc_terminator_is_valid_shell_syntax():
         def cmd(self, command: str) -> str:
             if "ss -ltn" in command:
                 return "LISTEN 0 128 *:8080"  # readiness poll: report ready immediately
-            captured["command"] = command
+            if "command" not in captured:
+                captured["command"] = command  # the heredoc launch call, not the later "echo $!"
             return "1234"
 
     _start_tcp_listener(RecordingHost(), 8080)

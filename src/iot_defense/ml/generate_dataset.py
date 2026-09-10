@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -69,15 +70,35 @@ finally:
     # whatever that later call was trying to read. Every other backgrounded
     # command in this codebase (tcpdump in monitor.py) already redirects
     # its output for this reason; this one didn't, which is why only
-    # listener-using scenarios were affected.
+    # listener-using scenarios were affected. `disown` is now added too --
+    # redirecting the listener's own stdout/stderr doesn't silence bash's
+    # own job-completion notice when the job later exits or is killed,
+    # only disown does (found via a live repro where a completely
+    # unrelated host.cmd() call three commands later came back empty).
     log_path = f"/tmp/tcp_listener_{port}.log"
-    cmd = (
-        f"python3 - <<'PY' >{log_path} 2>&1 &\n"
-        f"{script}\n"
-        "PY\n"
-        "echo $!"
-    )
-    pid = host.cmd(cmd).strip()
+    launch_cmd = f"python3 - <<'PY' >{log_path} 2>&1 & disown\n{script}\nPY"
+    # `echo $!` is sent as a genuinely separate host.cmd() call, not just a
+    # separate *line* of the same call -- deliberate, not cosmetic. Sending
+    # a multi-line heredoc through a Mininet host's pty makes bash echo a
+    # "> " continuation prompt for every line until "PY", and backgrounding
+    # with "&" prints its own "[1] <pid>" notification -- both land ahead
+    # of "echo $!"'s own output if it rides along in the same call, and
+    # under real repeated Mininet load (many runs reusing the same
+    # long-lived host session) that combined read can even return *before*
+    # the heredoc has fully drained, with no digits in it at all. A live
+    # repro of the single-call version showed raw output as literally
+    # "> > > > ... [1] 162191\r\n162191" -- garbage that _stop_tcp_listener()
+    # would pass straight to `kill`, silently never signaling the real
+    # process. Ending the launch call right after the heredoc's terminator
+    # lets host.cmd() fully resync on that call's own completion; `$!` is a
+    # shell variable that persists across calls in the same host session,
+    # so a second, clean call still reports the just-backgrounded PID.
+    host.cmd(launch_cmd)
+    raw_output = host.cmd("echo $!")
+    digit_tokens = re.findall(r"\d+", raw_output)
+    if not digit_tokens:
+        raise RuntimeError(f"Could not determine listener PID from host.cmd() output: {raw_output!r}")
+    pid = digit_tokens[-1]
     # host.cmd() returns as soon as the listener process is backgrounded --
     # not once it has actually bound and is ready to accept. Without
     # confirming that, traffic sent immediately afterward can race the

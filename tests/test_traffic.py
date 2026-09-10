@@ -48,6 +48,33 @@ def test_start_multi_connection_listener_backgrounds_and_disowns():
     assert "s.listen(" in start_cmd
 
 
+def test_start_multi_connection_listener_extracts_real_pid_from_noisy_heredoc_output():
+    """Regression coverage for a real bug found via a live Mininet repro:
+    sending a multi-line heredoc through host.cmd() makes bash echo a "> "
+    continuation prompt for every script line, and backgrounding with "&"
+    prints its own "[1] <pid>" notification -- both land ahead of the real
+    `echo $!` output in host.cmd()'s captured text. The observed raw output
+    was literally "> > > > ... [1] 162191\\r\\n162191" -- naively
+    .strip()-ing that (the previous implementation) produced a garbage
+    multi-line "pid" that stop_multi_connection_listener() then passed
+    straight to `kill`, silently never signaling the real process."""
+
+    class NoisyHost(FakeHost):
+        def cmd(self, command: str) -> str:
+            self.commands.append(command)
+            if "ss -ltn" in command:
+                return "LISTEN 0 128 *:2222"
+            if command.startswith("kill "):
+                return ""
+            # Realistic noisy heredoc + backgrounding output, real PID last.
+            return "> " * 25 + "[1] 162191\r\n162191"
+
+    host = NoisyHost("sensor", "10.0.0.10")
+    pid = start_multi_connection_listener(host, 2222)
+
+    assert pid == "162191"
+
+
 def test_start_multi_connection_listener_waits_for_readiness():
     """Regression coverage for the same readiness race this project has
     hit before (_start_tcp_listener in generate_dataset.py): traffic sent
