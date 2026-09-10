@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -99,10 +100,22 @@ finally:
     def stop(self) -> dict[str, Any]:
         if self.process is None:
             return {"status": "already_stopped"}
-        self.process.terminate()
-        self.process.wait(timeout=2)
-        self.process = None
-        return {"status": "stopped"}
+        try:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                # A stuck terminate() must not leave self.process pointing
+                # at a process this instance believes is still "running" --
+                # the next start() call would see poll() is None and
+                # report "already_running" without actually starting a
+                # fresh decoy, even though the old one is on its way out
+                # (or already unreachable). Escalate and reap it for real.
+                self.process.kill()
+                self.process.wait(timeout=2)
+            return {"status": "stopped"}
+        finally:
+            self.process = None
 
     def _validate_ports(self) -> None:
         if not self.ports or any(port < 1 or port > 65535 for port in self.ports):
@@ -171,13 +184,30 @@ class MininetResponseExecutor:
         return result
 
     def isolate(self, target_ip: str) -> dict[str, Any]:
+        """Take the target's interface down for real, and confirm it, not
+        just fire the command and assume it worked. Every other action in
+        this class already verifies its own real effect -- throttle()
+        checks its iptables command's output for error text, DecoyService
+        .start() polls until the port is genuinely listening -- isolate()
+        used to be the one exception, unconditionally reporting
+        "state": "down" even if `ip link set ... down` silently failed
+        (a stale interface name, a permission issue, or the same kind of
+        leaked-shell-output pty corruption already found and fixed
+        elsewhere in this project this session). host.cmd() never raises
+        on a failed command, so nothing would have surfaced that."""
         host = self._host_for_ip(target_ip)
         if target_ip in self._isolated:
             return {"operation": "isolate", "status": "already_isolated", "host": host.name}
         interface = host.defaultIntf().name
         host.cmd(f"ip link set dev {interface} down")
-        self._isolated[target_ip] = (host, interface)
-        return {"operation": "isolate", "host": host.name, "interface": interface, "state": "down"}
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            status = host.cmd(f"ip link show dev {interface}")
+            if "state DOWN" in status:
+                self._isolated[target_ip] = (host, interface)
+                return {"operation": "isolate", "host": host.name, "interface": interface, "state": "down"}
+            time.sleep(0.05)
+        raise RuntimeError(f"Failed to bring interface {interface} down on host {host.name}.")
 
     def throttle(self, target_ip: str, rate: str = "3/sec", burst: str = "3") -> dict[str, Any]:
         """Rate-limit new incoming TCP connection attempts to a host using

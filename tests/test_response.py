@@ -30,6 +30,7 @@ class FakeHost:
         self.name = name
         self._ip = ip
         self.commands = []
+        self._interface_up = True
 
     def IP(self):
         return self._ip
@@ -41,6 +42,12 @@ class FakeHost:
         self.commands.append(command)
         if command.startswith("ss -ltn"):
             return ":2222"
+        if command.startswith("ip link set"):
+            self._interface_up = command.rstrip().endswith("up")
+            return ""
+        if command.startswith("ip link show"):
+            state = "UP" if self._interface_up else "DOWN"
+            return f"2: {self.name}-eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noqueue state {state} mode DEFAULT\r\n"
         return ""
 
     def popen(self, *args, **kwargs):
@@ -103,7 +110,7 @@ def test_isolation_request_validates_known_mininet_ip(tmp_path):
     sensor = executor.net.hosts[0]
 
     assert result.status == "success"
-    assert sensor.commands == ["ip link set dev sensor-eth0 down"]
+    assert sensor.commands == ["ip link set dev sensor-eth0 down", "ip link show dev sensor-eth0"]
     assert executor.restore("10.0.0.10")["state"] == "up"
     assert sensor.commands[-1] == "ip link set dev sensor-eth0 up"
 
@@ -112,6 +119,57 @@ def test_isolation_request_validates_known_mininet_ip(tmp_path):
     failed = executor.execute(unsafe)
     assert failed.status == "failed"
     assert "Refusing" in failed.message
+
+
+def test_isolate_raises_when_the_interface_never_actually_goes_down(tmp_path):
+    """Regression test: isolate() used to fire `ip link set ... down` and
+    unconditionally report success, even if the command silently failed
+    (a stale interface name, a permission issue, or leaked-shell-output
+    pty corruption) -- host.cmd() never raises on a failed command, so
+    nothing would have surfaced that. It must now verify the real effect,
+    the same way throttle() and DecoyService.start() already do."""
+
+    class StubbornHost(FakeHost):
+        def cmd(self, command):
+            self.commands.append(command)
+            if command.startswith("ip link show"):
+                return f"2: {self.name}-eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> state UP\r\n"
+            return ""
+
+    network = FakeNetwork()
+    network.hosts[0] = StubbornHost("sensor", "10.0.0.10")
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.ISOLATE))
+
+    assert result.status == "failed"
+    assert "10.0.0.10" not in executor._isolated
+
+
+def test_decoy_stop_clears_process_even_when_terminate_times_out(tmp_path):
+    """Regression test: a stuck terminate() used to leave self.process
+    pointing at a process this instance still believed was running -- the
+    next start() call would see poll() is None and report
+    "already_running" without actually starting a fresh decoy."""
+    import subprocess
+
+    class StuckProcess(FakeProcess):
+        def wait(self, timeout=None):
+            if self.running:
+                raise subprocess.TimeoutExpired(cmd="decoy", timeout=timeout)
+            return 0
+
+        def kill(self):
+            self.running = False
+
+    decoy = DecoyService(log_path=tmp_path / "decoy.jsonl", ports=(2222,))
+    decoy.process = StuckProcess()
+    decoy.host = FakeHost("decoy", "10.0.0.200")
+
+    result = decoy.stop()
+
+    assert result["status"] == "stopped"
+    assert decoy.process is None
 
 
 def test_throttle_installs_tc_qdisc_and_restore_removes_it(tmp_path):
