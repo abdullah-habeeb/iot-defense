@@ -218,6 +218,11 @@ policy:
           CONTINUE: {attacker: -1.0, defender: 1.0}
           RETREAT: {attacker: -2.0, defender: 2.0}
   ppo:
+    # model_path/fallback_policy document the convention every real call
+    # site (train_ppo.py's own default output path, harness.py,
+    # demo/controller.py) already follows by hand -- unlike
+    # training_timesteps/environment_episode_length/reward below, these
+    # two are not read from this file by any code.
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"
     # Raised from 768 after adding the fifth scenario (data exfiltration):
@@ -225,7 +230,14 @@ policy:
     # Stackelberg policies specifically on exfiltration (picking DECOY
     # instead of ISOLATE) even though it converged correctly on every
     # other scenario -- 3000 timesteps (still ~12s to train) resolved it.
+    # Genuinely read by simulation/train_ppo.py -- editing this value
+    # changes what a bare `train_ppo` run actually does.
     training_timesteps: 3000
+    # Read by train_ppo.py, floored at len(TRAINING_SCENARIOS()) there
+    # regardless of what's configured here -- a shorter episode silently
+    # starves the last-cycled scenario of any training signal at all (see
+    # DefenseDecisionEnv's own docstring for the non-convergence bug this
+    # caused once already).
     environment_episode_length: 6
     reward:
       attack_contained: 5.0

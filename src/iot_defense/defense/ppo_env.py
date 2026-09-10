@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
+import yaml
 from gymnasium import spaces
 
 from iot_defense.defense.context import Beliefs, Desires, SecurityContext
@@ -70,6 +72,24 @@ class RewardConfig:
     unnecessary_isolation: float = -3.0
     service_disruption: float = -3.0
     response_cost: float = -0.5
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> "RewardConfig":
+        """Build from a plain dict (e.g. config/policies.yaml's policy.ppo.reward),
+        ignoring any keys that aren't real fields rather than raising on them."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{key: float(value) for key, value in data.items() if key in known})
+
+
+def load_ppo_training_config() -> dict[str, Any]:
+    """Load policy.ppo from config/policies.yaml, mirroring the pattern
+    defense/policy.py and defense/stackelberg.py already use."""
+    config_path = Path(__file__).resolve().parents[3] / "config" / "policies.yaml"
+    if not config_path.exists():
+        return {}
+    with config_path.open("r", encoding="utf-8") as fh:
+        loaded = yaml.safe_load(fh) or {}
+    return loaded.get("policy", {}).get("ppo", {})
 
 
 class SecurityContextEncoder:
