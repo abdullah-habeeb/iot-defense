@@ -6,8 +6,23 @@ from iot_defense.detection.detector import (
     RuleBasedExfiltrationDetector,
     RuleBasedReconDetector,
     UnifiedRuleBasedDetector,
+    _load_detection_policy,
 )
 from iot_defense.detection.flow_features import FlowFeatures
+
+
+def test_load_detection_policy_actually_finds_the_yaml_file():
+    """Regression test for a real bug: the config path was resolved one
+    directory too shallow (parents[2], landing in src/ instead of the repo
+    root), so config_path.exists() was always False and this always
+    silently returned {} -- editing config/policies.yaml's policy.detection
+    section had no effect at all. Invisible in practice only because every
+    detector's hardcoded fallback default happened to be kept in sync with
+    the YAML by hand; this asserts the file is genuinely found."""
+    config = _load_detection_policy()
+    assert config, "config/policies.yaml's policy.detection section must actually load, not silently return {}"
+    assert config["dos_min_packets_per_second"] == 20.0
+    assert config["exploit_min_average_packet_size"] == 250.0
 
 
 def test_normal_traffic_is_not_flagged():

@@ -19,7 +19,17 @@ from iot_defense.defense.stackelberg import StackelbergGame
 
 
 def _load_decision_policy_config() -> dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[2] / "config" / "policies.yaml"
+    # parents[2] from src/iot_defense/defense/policy.py is src/, not the
+    # repo root -- a real, previously silent bug found via a live check:
+    # config_path.exists() was always False, so this function always
+    # returned {} and every value below always fell back to its hardcoded
+    # default, never the YAML's own. Behaviorally invisible only because
+    # every hardcoded default here (and every ATTACK_SCENARIOS registry
+    # default action_score_min/action_confidence_min consulted below) had
+    # been kept numerically in sync with config/policies.yaml by hand --
+    # but editing the YAML's policy.decision section had silently done
+    # nothing at all until this fix.
+    config_path = Path(__file__).resolve().parents[3] / "config" / "policies.yaml"
     if not config_path.exists():
         return {}
 
