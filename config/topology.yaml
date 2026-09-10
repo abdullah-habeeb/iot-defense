@@ -19,11 +19,6 @@ topology:
     - name: "decoy"
       ip: "10.0.0.200/24"
       role: "simulated_decoy"
-  links:
-    - "sensor:s1"
-    - "camera:s1"
-    - "smart_plug:s1"
-    - "attacker:s1"
   traffic:
     normal_rate: 1
     malicious_rate: 1

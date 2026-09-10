@@ -45,10 +45,6 @@ class TopologyConfig:
         return self._data.get("topology", {}).get("switch", {})
 
     @property
-    def links(self) -> list[str]:
-        return self._data.get("topology", {}).get("links", [])
-
-    @property
     def traffic(self) -> dict[str, Any]:
         return self._data.get("topology", {}).get("traffic", {})
 
@@ -67,6 +63,8 @@ class IoTTopology(Topo):
         switch_name = self.config.switch.get("name", "s1")
         self.addSwitch(switch_name, cls=OVSKernelSwitch, failMode="standalone")
 
+        # Every host in config.hosts gets linked to the switch -- there is
+        # no separate, config-driven list of which links to create.
         for host in self.config.hosts:
             name = host.get("name")
             ip = host.get("ip")
