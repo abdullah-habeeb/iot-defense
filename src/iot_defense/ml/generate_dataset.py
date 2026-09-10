@@ -16,6 +16,7 @@ from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.monitoring.monitor import PacketMonitor
 from iot_defense.network.topology import create_mininet_network
 from iot_defense.ml.schema import DATASET_COLUMNS, flow_to_dataset_row, validate_dataset
+from iot_defense.simulation.traffic import start_multi_connection_listener
 
 # Registry key -> sub-scenario dispatch for get_scenario_type(). Each new
 # attack's dataset-generation logic is inherently bespoke (its own traffic
@@ -196,6 +197,16 @@ def _brute_force_traffic(host: Any, target_ip: str, port: int, duration: float, 
     against real Mininet, was producing runs as low as 9 packets against
     a threshold of 12: a ground-truth "brute_force" label the live rule-
     based detector couldn't actually have recognized as one.
+
+    Requires a real listener already running on `port` on the target host
+    (see the call site's start_multi_connection_listener) -- without one,
+    connect() is refused before sendall() ever runs, and a real captured
+    flow never actually contains this function's own "USER admin" payload
+    even though shape-based detection is unaffected. Found via the same
+    real evaluation that caught simulation/traffic.py's identical gap;
+    `interval` needs to be tuned for *successful* connections (a full
+    handshake + teardown, several packets) rather than a refused one
+    (SYN+immediate RST, one or two) for the same reason documented there.
     """
     return host.cmd(
         "python3 - <<'PY'\n"
@@ -420,15 +431,27 @@ def generate_dataset(
                 dos_port = rng.choice(dos_target_ports)
                 _dos_traffic(source, target_ip, dos_port, duration=2.0)
             elif scenario == "brute_force":
-                # Brute-force traffic
+                # Brute-force traffic -- a real listener on bf_port is
+                # required (see _brute_force_traffic's docstring): without
+                # one, connect() is refused before the payload is ever
+                # sent. Tracked in listener_pids for the same cleanup
+                # normal_tcp/normal_mixed's own listeners already use.
                 source = net.get("attacker")
                 bf_port = rng.choice(brute_force_target_ports)
-                # duration=6.0 with a 0.1-0.2s interval (not the original
-                # 4.0s/0.2-0.4s) mirrors the margin verified live in
-                # simulation/traffic.py: even the slowest combination here
-                # clears RuleBasedBruteForceDetector's min_packet_count=12
-                # with real headroom, instead of landing right at it.
-                bf_interval = rng.choice([0.1, 0.15, 0.2])
+                bf_listener_pid = start_multi_connection_listener(net.get(target_name), bf_port)
+                listener_pids.append(bf_listener_pid)
+                # duration=6.0 with a 0.7-0.9s interval: tuned for
+                # *successful* connections (a full handshake + teardown
+                # per attempt, several packets), not refused ones (a bare
+                # SYN+RST, one or two) -- a live run at the old 0.1-0.2s
+                # interval (tuned back when every connection here was
+                # refused) measured packets_per_second well past
+                # RuleBasedDosDetector's own floor, misclassifying the run
+                # as a flood instead of brute-force. See
+                # simulation/traffic.py's generate_brute_force_mininet_
+                # traffic for the identical real-Mininet measurement this
+                # mirrors.
+                bf_interval = rng.choice([0.7, 0.8, 0.9])
                 _brute_force_traffic(source, target_ip, bf_port, duration=6.0, interval=bf_interval)
             elif scenario == "exploit_payload_injection":
                 # Exploit-payload traffic -- a few oversized requests to a
