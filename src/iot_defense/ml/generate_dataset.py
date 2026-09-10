@@ -249,30 +249,37 @@ def _exfiltration_traffic(host: Any, attacker_ip: str, port: int, duration: floa
 
 
 def _exploit_traffic(host: Any, target_ip: str, port: int, duration: float) -> str:
-    """A small number of real TCP connections carrying one oversized
-    payload each -- unlike brute-force (many small attempts) or
-    exfiltration (a steady small UDP trickle out), this attack's defining
-    signature is payload *size*, not packet count or rate. Matches
-    simulation/traffic.py's generate_exploit_mininet_traffic (400-byte
-    payload, at most 4 attempts, 0.8s pauses)."""
+    """A small number of oversized UDP packets -- unlike brute-force (many
+    small attempts) or exfiltration (a steady small UDP trickle out),
+    this attack's defining signature is payload *size*, not packet count
+    or rate. Matches simulation/traffic.py's generate_exploit_mininet_
+    traffic (400-byte payload, at most 4 attempts, 0.8s pauses).
+
+    UDP, not TCP: this copy originally used TCP connect()+sendall(), the
+    same mistake simulation/traffic.py's own generator had before a live
+    run showed it there -- nothing listens on the target's management
+    port outside an active DECOY response, so connect() is refused before
+    sendall() ever runs and only bare ~74-byte SYN/RST packets get
+    captured, never the actual payload. Confirmed happening here too:
+    every exploit-labeled row in a real 156-run dataset had
+    average_packet_size=74.0 and packet_count=4 (matching 4 refused
+    connection attempts) instead of a real oversized payload. UDP's
+    sendto() puts the full packet on the wire regardless of whether
+    anything is listening, exactly like the other UDP-based generators
+    in this file already rely on.
+    """
     return host.cmd(
         "python3 - <<'PY'\n"
         "import socket, time\n"
+        "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
         "payload = b'A' * 400\n"
         "start = time.time()\n"
         "attempts = 0\n"
         f"while time.time() - start < {duration} and attempts < 4:\n"
-        "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
-        "    sock.settimeout(0.5)\n"
-        "    try:\n"
-        f"        sock.connect(('{target_ip}', {port}))\n"
-        "        sock.sendall(payload)\n"
-        "    except OSError:\n"
-        "        pass\n"
-        "    finally:\n"
-        "        sock.close()\n"
+        f"    sock.sendto(payload, ('{target_ip}', {port}))\n"
         "    attempts += 1\n"
         "    time.sleep(0.8)\n"
+        "sock.close()\n"
         "print('exploit_dataset_traffic_done')\n"
         "PY"
     )
