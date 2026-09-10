@@ -120,6 +120,11 @@ class PacketMonitor:
             return []
 
         try:
+            host_ip = net.get(host_name).IP()
+        except Exception:  # noqa: BLE001
+            host_ip = None
+
+        try:
             packets = rdpcap(capture_path)
         except Exception:  # noqa: BLE001
             # Defense in depth: stop_capture() should already guarantee
@@ -134,7 +139,8 @@ class PacketMonitor:
                 continue
             ip_layer = packet.getlayer("IP")
             arp_layer = packet.getlayer("ARP")
-            tcp_udp_layer = packet.getlayer("TCP") or packet.getlayer("UDP")
+            tcp_layer = packet.getlayer("TCP")
+            tcp_udp_layer = tcp_layer or packet.getlayer("UDP")
             protocol_name = "UNKNOWN"
             if tcp_udp_layer is not None:
                 protocol_name = "TCP" if tcp_udp_layer.name == "TCP" else "UDP"
@@ -146,6 +152,13 @@ class PacketMonitor:
             src_ip = ip_layer.src if ip_layer is not None else (arp_layer.psrc if arp_layer is not None else "unknown")
             dst_ip = ip_layer.dst if ip_layer is not None else (arp_layer.pdst if arp_layer is not None else "unknown")
 
+            direction = "unknown"
+            if host_ip is not None:
+                if dst_ip == host_ip:
+                    direction = "inbound"
+                elif src_ip == host_ip:
+                    direction = "outbound"
+
             event = {
                 "timestamp": float(packet.time),
                 "src_ip": src_ip,
@@ -154,6 +167,13 @@ class PacketMonitor:
                 "src_port": getattr(tcp_udp_layer, "sport", None),
                 "dst_port": getattr(tcp_udp_layer, "dport", None),
                 "packet_length": len(packet),
+                "ttl": int(ip_layer.ttl) if ip_layer is not None else None,
+                "direction": direction,
+                # int(), not the raw FlagValue -- keeps the event dict JSON-safe
+                # for the dashboard's SSE feed while still carrying real SYN/ACK
+                # bits for FeatureAggregator (port presence alone can't tell
+                # SYN/ACK apart -- every TCP packet has both ports set).
+                "tcp_flags": int(tcp_layer.flags) if tcp_layer is not None else None,
             }
             events.append(event)
         return events

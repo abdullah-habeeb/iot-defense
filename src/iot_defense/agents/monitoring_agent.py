@@ -15,9 +15,13 @@ class MonitoringAgent:
             "dst_ip": packet.get("dst_ip", "unknown"),
             "protocol": packet.get("protocol", "UNKNOWN"),
             "packet_length": int(packet.get("packet_length", 0)),
-            "ttl": int(packet.get("ttl", 0)),
+            "ttl": int(packet.get("ttl") or 0),
             "src_port": packet.get("src_port"),
             "dst_port": packet.get("dst_port"),
             "timestamp": float(packet.get("timestamp", 0.0)),
             "direction": packet.get("direction", "unknown"),
+            # Real SYN/ACK bits, not just port presence -- every TCP packet
+            # carries both ports, so FeatureAggregator needs the real flags
+            # to tell a SYN scan from a completed handshake.
+            "tcp_flags": packet.get("tcp_flags"),
         }
