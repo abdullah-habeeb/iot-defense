@@ -8,11 +8,35 @@ from iot_defense.defense.ppo_env import (
     OBSERVATION_SIZE,
     TRAINING_SCENARIOS,
     DefenseDecisionEnv,
+    RewardConfig,
     SecurityContextEncoder,
     context_for_scenario,
+    load_ppo_training_config,
 )
 from iot_defense.defense.ppo_policy import PPODefensePolicy
 from iot_defense.detection.threat_event import ThreatEvent
+
+
+def test_load_ppo_training_config_actually_finds_the_yaml_file():
+    """Regression coverage for the same 'config never actually loads' bug
+    class already found and fixed in policy.py/detector.py -- this asserts
+    the file is genuinely found rather than silently returning {}."""
+    config = load_ppo_training_config()
+    assert config, "config/policies.yaml's policy.ppo section must actually load"
+    assert config["training_timesteps"] == 3000
+    assert config["environment_episode_length"] == 6
+
+
+def test_reward_config_from_mapping_reads_real_yaml_values():
+    config = RewardConfig.from_mapping(load_ppo_training_config()["reward"])
+    assert config.attack_contained == 5.0
+    assert config.response_cost == -0.5
+
+
+def test_reward_config_from_mapping_ignores_unknown_keys():
+    # Defensive: a stray/renamed YAML key must not crash config loading.
+    config = RewardConfig.from_mapping({"attack_contained": 9.0, "not_a_real_field": 1.0})
+    assert config.attack_contained == 9.0
 
 
 def test_context_encoding_is_normalized_and_deterministic():
