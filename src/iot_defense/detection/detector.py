@@ -12,7 +12,15 @@ from iot_defense.detection.threat_event import ThreatEvent
 
 
 def _load_detection_policy() -> dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[2] / "config" / "policies.yaml"
+    # parents[2] from src/iot_defense/detection/detector.py is src/, not
+    # the repo root -- the same off-by-one bug found and fixed in
+    # defense/policy.py's own _load_decision_policy_config(). config_path
+    # never existed, so this always silently returned {} and every
+    # detector below always used its hardcoded fallback default instead of
+    # the YAML's own -- behaviorally invisible only because every default
+    # here had been kept numerically in sync with config/policies.yaml's
+    # policy.detection section by hand.
+    config_path = Path(__file__).resolve().parents[3] / "config" / "policies.yaml"
     if not config_path.exists():
         return {}
     with config_path.open("r", encoding="utf-8") as fh:

@@ -1,8 +1,23 @@
 from iot_defense.agents.decision_agent import DecisionAgent
 from iot_defense.defense.context import build_security_context
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
-from iot_defense.defense.policy import DefensePolicy, RuleBasedDefensePolicy
+from iot_defense.defense.policy import DefensePolicy, RuleBasedDefensePolicy, _load_decision_policy_config
 from iot_defense.detection.threat_event import ThreatEvent
+
+
+def test_load_decision_policy_config_actually_finds_the_yaml_file():
+    """Regression test for a real bug: the config path was resolved one
+    directory too shallow (parents[2], landing in src/ instead of the repo
+    root), so config_path.exists() was always False and this function
+    always silently returned {} -- editing config/policies.yaml's
+    policy.decision section had no effect at all. Invisible in practice
+    only because every caller's hardcoded fallback happened to be kept in
+    sync with the YAML by hand; this asserts the file is genuinely found
+    and its real, non-default values come through."""
+    config = _load_decision_policy_config()
+    assert config, "config/policies.yaml's policy.decision section must actually load, not silently return {}"
+    assert config["recon_decoy_score_min"] == 0.8
+    assert config["brute_force_score_min"] == 0.65
 
 
 def _event(
