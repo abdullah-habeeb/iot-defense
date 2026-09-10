@@ -304,7 +304,20 @@ class DemoController:
             try:
                 from iot_defense.ml.random_forest import RandomForestDetector
                 rf = RandomForestDetector("models/random_forest_detector.joblib")
-                threat_event = rf.detect(features)
+                rf_event = rf.detect(features)
+                # RF is a *confirmation* step, not a veto: only let it
+                # override the rule-based recon classification -- downgrade
+                # to "normal" or relabel to a different attack -- when it
+                # disagrees with real confidence, not a near coin-flip.
+                # Found via a live run where RF reclassified a genuine,
+                # rule-verified port scan as "normal" at 50% confidence in
+                # this 6-class model (only marginally better than the ~17%
+                # an uninformed guess would get) -- silently downgrading a
+                # real, already-detected attack to no response is the one
+                # mistake this confirmation step must never make, however
+                # small this project's controlled training set stays.
+                if rf_event.attack_type == threat_event.attack_type or rf_event.confidence >= 0.7:
+                    threat_event = rf_event
             except (FileNotFoundError, Exception):  # noqa: BLE001
                 pass  # keep the rule-based recon classification
 
