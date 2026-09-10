@@ -133,12 +133,19 @@ def test_run_suricata_per_pcap_runs_a_fresh_process_per_file(tmp_path):
 
 
 def test_evaluate_pcaps_marks_correctness_against_ground_truth(tmp_path):
+    pcap_dir = tmp_path / "pcaps"
+    pcap_dir.mkdir()
+    dos_pcap = pcap_dir / "trial000_dos_flood.pcap"
+    normal_pcap = pcap_dir / "trial001_normal.pcap"
+    dos_pcap.touch()
+    normal_pcap.touch()
+
     results_path = tmp_path / "results.jsonl"
     _write_jsonl(
         results_path,
         [
-            _result_row(trial=0, condition="dos_flood", ground_truth_attack_type="dos_flood", pcap_path="/x/trial000_dos_flood.pcap"),
-            _result_row(trial=1, condition="normal", ground_truth_attack_type="normal", pcap_path="/x/trial001_normal.pcap"),
+            _result_row(trial=0, condition="dos_flood", ground_truth_attack_type="dos_flood", pcap_path=str(dos_pcap)),
+            _result_row(trial=1, condition="normal", ground_truth_attack_type="normal", pcap_path=str(normal_pcap)),
         ],
     )
 
@@ -157,13 +164,13 @@ def test_evaluate_pcaps_marks_correctness_against_ground_truth(tmp_path):
                     results_path,
                     batch_rulesets={"et_open": "et_open_rules_path"},
                     per_pcap_rulesets={"lab": "lab_rules_path"},
-                    pcap_dir="/x",
+                    pcap_dir=str(pcap_dir),
                     work_dir=tmp_path / "work",
                 )
 
     by_pcap = {r["pcap_path"]: r for r in rows}
-    dos_row = by_pcap["/x/trial000_dos_flood.pcap"]
-    normal_row = by_pcap["/x/trial001_normal.pcap"]
+    dos_row = by_pcap[str(dos_pcap)]
+    normal_row = by_pcap[str(normal_pcap)]
 
     assert dos_row["lab_alerted"] is True
     assert dos_row["lab_correct"] is True
@@ -174,6 +181,34 @@ def test_evaluate_pcaps_marks_correctness_against_ground_truth(tmp_path):
     assert normal_row["lab_correct"] is True
     assert normal_row["et_open_alerted"] is False
     assert normal_row["et_open_correct"] is True
+
+
+def test_evaluate_pcaps_fails_loudly_when_referenced_pcaps_are_missing(tmp_path):
+    """Regression test: run_suricata_batch() scans every file physically
+    present in pcap_dir, not specifically the pcaps results.jsonl
+    references -- if pcap_dir doesn't actually match the run that produced
+    results.jsonl (a stale or wrong --pcap-dir), every alert lookup used to
+    silently fall back to "no alert" via dict.get(name, []), making every
+    ruleset look like it detected nothing instead of surfacing the real
+    mismatch. This must now fail loudly instead."""
+    results_path = tmp_path / "results.jsonl"
+    _write_jsonl(
+        results_path,
+        [_result_row(trial=0, condition="dos_flood", ground_truth_attack_type="dos_flood",
+                      pcap_path=str(tmp_path / "does_not_exist.pcap"))],
+    )
+
+    try:
+        evaluate_pcaps(
+            results_path,
+            batch_rulesets={"et_open": "et_open_rules_path"},
+            per_pcap_rulesets={},
+            pcap_dir=str(tmp_path),
+            work_dir=tmp_path / "work",
+        )
+        assert False, "expected FileNotFoundError for a missing referenced pcap"
+    except FileNotFoundError as exc:
+        assert "does_not_exist.pcap" in str(exc)
 
 
 def test_summarize_computes_accuracy_tpr_fpr():

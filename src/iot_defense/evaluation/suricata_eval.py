@@ -182,6 +182,20 @@ def evaluate_pcaps(
     system_config: str | Path = "/etc/suricata/suricata.yaml",
 ) -> list[dict[str, Any]]:
     pcaps = _distinct_pcaps(results_path)
+    # run_suricata_batch() scans every file physically present in pcap_dir,
+    # not specifically the pcaps referenced by results_path -- if pcap_dir
+    # doesn't actually match the run that produced results_path (a stale
+    # or wrong --pcap-dir), every batch-mode alert lookup below silently
+    # falls back to "no alert" (dict.get(name, [])) rather than erroring,
+    # making every ruleset look like it detected nothing instead of
+    # surfacing the real mismatch. Fail loud here instead.
+    missing = [meta["pcap_path"] for meta in pcaps.values() if not Path(meta["pcap_path"]).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"{len(missing)} pcap(s) referenced by {results_path} are missing on disk "
+            f"(first: {missing[0]!r}) -- pcap_dir likely doesn't match the harness run "
+            f"that produced this results file."
+        )
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     config_path = _patched_config(work_dir, system_config)
