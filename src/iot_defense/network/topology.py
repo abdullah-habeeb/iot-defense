@@ -44,10 +44,6 @@ class TopologyConfig:
     def switch(self) -> dict[str, Any]:
         return self._data.get("topology", {}).get("switch", {})
 
-    @property
-    def traffic(self) -> dict[str, Any]:
-        return self._data.get("topology", {}).get("traffic", {})
-
 
 class IoTTopology(Topo):
     """Create a small residential IoT lab topology backed by OVSKernelSwitch."""

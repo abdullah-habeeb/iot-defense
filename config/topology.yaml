@@ -2,7 +2,6 @@ topology:
   name: "iot-home-lab"
   switch:
     name: "s1"
-    dpid: "0000000000000001"
   hosts:
     - name: "sensor"
       ip: "10.0.0.10/24"
@@ -19,7 +18,3 @@ topology:
     - name: "decoy"
       ip: "10.0.0.200/24"
       role: "simulated_decoy"
-  traffic:
-    normal_rate: 1
-    malicious_rate: 1
-    scan_interval_seconds: 1
