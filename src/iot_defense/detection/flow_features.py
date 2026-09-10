@@ -7,6 +7,12 @@ from dataclasses import asdict, dataclass, field
 from ipaddress import ip_address
 from typing import Any
 
+# TCP flag bit positions (RFC 793) -- used to tell SYN/ACK packets apart from
+# a real "tcp_flags" event field, not from port presence (every TCP packet,
+# real or refused, carries a source and destination port).
+_TCP_FLAG_SYN = 0x02
+_TCP_FLAG_ACK = 0x10
+
 
 @dataclass(slots=True)
 class FlowFeatures:
@@ -94,8 +100,14 @@ class FeatureAggregator:
 
             ports = [event.get("src_port") for event in group if event.get("src_port") is not None]
             dest_ports = [event.get("dst_port") for event in group if event.get("dst_port") is not None]
-            tcp_syn_count = sum(1 for event in group if event.get("protocol") == "TCP" and event.get("src_port") is not None)
-            tcp_ack_count = sum(1 for event in group if event.get("protocol") == "TCP" and event.get("dst_port") is not None)
+            tcp_syn_count = sum(
+                1 for event in group
+                if event.get("protocol") == "TCP" and (event.get("tcp_flags") or 0) & _TCP_FLAG_SYN
+            )
+            tcp_ack_count = sum(
+                1 for event in group
+                if event.get("protocol") == "TCP" and (event.get("tcp_flags") or 0) & _TCP_FLAG_ACK
+            )
             udp_packet_count = sum(1 for event in group if event.get("protocol") == "UDP")
             icmp_packet_count = sum(1 for event in group if event.get("protocol") == "ICMP")
 
@@ -134,8 +146,10 @@ class FeatureAggregator:
         return len(values)
 
     def count_tcp_flags(self, events: list[dict[str, Any]], flag_name: str) -> int:
-        if flag_name == "syn":
-            return sum(1 for event in events if event.get("protocol") == "TCP" and event.get("src_port") is not None)
-        if flag_name == "ack":
-            return sum(1 for event in events if event.get("protocol") == "TCP" and event.get("dst_port") is not None)
-        return 0
+        bit = {"syn": _TCP_FLAG_SYN, "ack": _TCP_FLAG_ACK}.get(flag_name)
+        if bit is None:
+            return 0
+        return sum(
+            1 for event in events
+            if event.get("protocol") == "TCP" and (event.get("tcp_flags") or 0) & bit
+        )
