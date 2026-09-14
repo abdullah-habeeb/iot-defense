@@ -457,19 +457,36 @@ policy:
     # two are not read from this file by any code.
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"
-    # Raised from 768 after adding the fifth scenario (data exfiltration):
-    # at 768 timesteps PPO occasionally disagreed with the rule-based and
-    # Stackelberg policies specifically on exfiltration (picking DECOY
-    # instead of ISOLATE) even though it converged correctly on every
-    # other scenario -- 3000 timesteps (still ~12s to train) resolved it.
+    # Raised from 768 to 3000 after adding the fifth scenario (data
+    # exfiltration) -- see below. Raised again, 3000 -> 12000, after the
+    # registry grew from 6 training scenarios (normal + 5 attacks) to 16
+    # (normal + 15 attacks): episode_length auto-floors to
+    # len(TRAINING_SCENARIOS()) regardless of this file's
+    # environment_episode_length, so the same 3000-timestep budget was now
+    # spread across nearly 3x as many scenarios per cycle -- the same
+    # starvation risk the 768->3000 raise below already fixed once, just
+    # at a larger scale. 12000 keeps roughly the same per-scenario budget
+    # (~750/scenario) that 3000 gave 6 scenarios (~500/scenario), with
+    # margin, and was confirmed (not assumed) to converge PPO's decision
+    # to each scenario's own preferred_action for all 16 training
+    # scenarios before being committed -- see the harness/review notes
+    # for the verification run.
+    #
+    # Original note, still accurate for the mechanism: at 768 timesteps
+    # PPO occasionally disagreed with the rule-based and Stackelberg
+    # policies specifically on exfiltration (picking DECOY instead of
+    # ISOLATE) even though it converged correctly on every other
+    # scenario -- 3000 timesteps resolved it for that 6-scenario registry.
     # Genuinely read by simulation/train_ppo.py -- editing this value
     # changes what a bare `train_ppo` run actually does.
-    training_timesteps: 3000
+    training_timesteps: 12000
     # Read by train_ppo.py, floored at len(TRAINING_SCENARIOS()) there
     # regardless of what's configured here -- a shorter episode silently
     # starves the last-cycled scenario of any training signal at all (see
     # DefenseDecisionEnv's own docstring for the non-convergence bug this
-    # caused once already).
+    # caused once already). Left at the original 6 deliberately: train_ppo.py
+    # always floors this to the real, current len(TRAINING_SCENARIOS()) (16
+    # now), so raising this number here would be purely cosmetic.
     environment_episode_length: 6
     reward:
       attack_contained: 5.0

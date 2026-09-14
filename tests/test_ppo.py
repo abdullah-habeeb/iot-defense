@@ -23,7 +23,7 @@ def test_load_ppo_training_config_actually_finds_the_yaml_file():
     the file is genuinely found rather than silently returning {}."""
     config = load_ppo_training_config()
     assert config, "config/policies.yaml's policy.ppo section must actually load"
-    assert config["training_timesteps"] == 3000
+    assert config["training_timesteps"] == 12000
     assert config["environment_episode_length"] == 6
 
 
