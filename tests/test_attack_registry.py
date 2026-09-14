@@ -51,6 +51,16 @@ def test_every_scenario_has_distinct_attack_type_and_observed_threat_key():
 DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
     "exfiltration": {"packet_count": 10, "average_packet_size": 1200.0},
     "exploit": {"packet_count": 4, "average_packet_size": 350.0},
+    "syn_flood": {"protocol": "TCP", "tcp_syn_count": 15, "tcp_ack_count": 0},
+    "icmp_flood": {"protocol": "ICMP", "icmp_packet_count": 30, "average_packet_size": 220.0},
+    "slow_loris": {"protocol": "TCP", "unique_source_ports": 20, "tcp_ack_count": 20, "average_packet_size": 225.0},
+    "dns_amplification": {"protocol": "UDP", "average_packet_size": 570.0},
+    "dns_tunneling": {"protocol": "UDP", "average_packet_size": 220.0},
+    "mqtt_flood": {"protocol": "TCP", "tcp_ack_count": 20, "average_packet_size": 80.0},
+    "firmware_tampering": {"protocol": "UDP", "average_packet_size": 570.0},
+    "buffer_overflow": {"protocol": "TCP", "average_packet_size": 570.0},
+    "replay_attack": {"protocol": "UDP", "average_packet_size": 100.0},
+    "rogue_beacon": {"protocol": "UDP", "average_packet_size": 220.0},
 }
 
 
@@ -74,6 +84,35 @@ class TestUnifiedDetectorIsRegistryDriven:
         }
         event = detector.detect(features)
         assert event.attack_type == scenario.attack_type
+
+    def test_each_scenarios_own_signature_survives_the_full_unified_sweep(self, scenario: AttackScenario):
+        """The real regression this whole registry exists to prevent: it is
+        not enough for an attack's *own* detector to recognize its own
+        signature in isolation (test above) -- UnifiedRuleBasedDetector
+        tries every registered detector in registry order and returns the
+        *first* one that fires, so an earlier-registered detector whose
+        window happens to also cover this signature would silently steal
+        it, and this attack's own detector would never even be consulted.
+        Every one of the 15 rule-based signatures registered as of this
+        test was hand-designed to avoid every other one's numeric window
+        (see each detector's own docstring for the specific gap it was
+        placed in) -- this is what actually proves those gaps are real
+        and disjoint, not just individually self-consistent."""
+        detector = UnifiedRuleBasedDetector()
+        features = {
+            "source_ip": "10.0.0.100",
+            "destination_ip": "10.0.0.10",
+            "packet_count": 200,
+            **scenario.ppo_example_features,
+            **DETECTION_FEATURE_OVERRIDES.get(scenario.key, {}),
+        }
+        event = detector.detect(features)
+        assert event.attack_type == scenario.attack_type, (
+            f"expected {scenario.key!r}'s own signature to be classified as "
+            f"{scenario.attack_type!r} by the full unified sweep, got "
+            f"{event.attack_type!r} (detected by {event.detector_name!r}) -- "
+            "an earlier-registered detector's window overlaps this one's."
+        )
 
 
 class TestPolicyIsRegistryDriven:

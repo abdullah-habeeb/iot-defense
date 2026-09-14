@@ -313,3 +313,544 @@ class TrafficGenerator:
             "PY"
         )
         return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
+    def generate_syn_flood_mininet_traffic(self, net: Any, duration_seconds: int = 14) -> dict[str, Any]:
+        """Generate a bounded TCP SYN-flood attempt: repeated refused
+        connects to a single fixed port, tight enough to be a real flood
+        but paced to land strictly between two existing detectors' own
+        numeric windows rather than inside either.
+
+        A refused connect() still puts a genuine SYN on the wire (the
+        kernel sends it before the target's RST arrives) with no
+        completed handshake -- exactly reconnaissance's own SYN/RST
+        pattern, but concentrated on *one* port at a *much* higher rate
+        instead of spread across several at a moderate one. That rate is
+        deliberately paced (a short sleep per attempt, not a bare tight
+        loop) to stay in the real, unclaimed gap strictly between
+        RuleBasedBruteForceDetector's own packets_per_second ceiling
+        (15.0) and RuleBasedDosDetector's own floor (20.0) -- a genuine,
+        if narrow, gap neither existing detector's window covers, found
+        by reading their own thresholds rather than guessed. Landing
+        inside RuleBasedBruteForceDetector's or RuleBasedDosDetector's
+        window instead would make either of them claim this traffic
+        first, since neither checks protocol or TCP flags. Paced for
+        the real middle of that gap (~17.5/s), not just "inside" it: a
+        live run at a 0.055s pause measured 15.2-15.3/s across repeated
+        runs -- technically inside the gap, but close enough to its
+        15.0 floor that ordinary real Mininet timing jitter risked
+        dipping under it on some runs and being claimed by
+        RuleBasedBruteForceDetector instead. Even after retargeting the
+        pace, a short (5s) window still occasionally measured a dip --
+        few enough real samples that one slow connect() attempt could
+        meaningfully skew the average. 14s, not a faster pace, is the
+        actual fix: more real attempts means real per-attempt timing
+        noise averages out instead of dominating a small sample.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 6001
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "start = time.time()\n"
+            f"while time.time() - start < {duration_seconds}:\n"
+            "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+            "    sock.settimeout(0.2)\n"
+            "    try:\n"
+            f"        sock.connect(('{target_ip}', {target_port}))\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "    finally:\n"
+            "        sock.close()\n"
+            "    time.sleep(0.048)\n"
+            "print('syn_flood_done')\n"
+            "PY"
+        )
+        return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
+    def generate_icmp_flood_mininet_traffic(self, net: Any, duration_seconds: int = 4) -> dict[str, Any]:
+        """Generate a bounded ICMP ping-flood attempt using the real
+        system `ping` binary -- no raw sockets or third-party tools
+        needed, and Mininet hosts run as root so `ping`'s own flood-rate
+        options are available.
+
+        Padded to a ~220-byte payload deliberately, not for realism on
+        its own: ICMP carries no ports at all, so it trivially satisfies
+        every other detector's port-count check, and its natural packet
+        rate here (~10/s) already sits inside RuleBasedBruteForceDetector's
+        own [1, 15] packets_per_second window -- padding the payload past
+        that detector's own 200-byte average_packet_size ceiling (while
+        staying below RuleBasedExploitDetector's 250-byte floor) is what
+        actually keeps this from being silently claimed by an earlier,
+        protocol-blind detector.
+        """
+        sensor_ip = "10.0.0.10"
+        attacker = net.get("attacker")
+        count = max(int(duration_seconds * 10), 20)
+        command = f"ping -c {count} -i 0.1 -s 220 {sensor_ip}"
+        return {"attacker": attacker.name, "target": sensor_ip, "output": attacker.cmd(command)}
+
+    def generate_slow_loris_mininet_traffic(self, net: Any, duration_seconds: int = 25) -> dict[str, Any]:
+        """Generate a bounded connection-exhaustion (Slowloris-style)
+        attempt: many real, concurrent TCP connections opened against one
+        port and held open for the whole window rather than closed --
+        the opposite of brute-force's sequential connect/send/close
+        cycle.
+
+        unique_source_ports is the real, previously-unused signal this
+        relies on: every one of the ~28 concurrent connections gets its
+        own fresh ephemeral source port, something no other attack in
+        this file produces in volume (brute-force's own sequential
+        attempts do accumulate several too, just an order of magnitude
+        fewer over the same window). Each connection sends one ~1000-byte
+        "partial header" chunk once, right after connecting, not to
+        exfiltrate anything but specifically to push average_packet_size
+        above RuleBasedBruteForceDetector's 200-byte ceiling -- a real
+        capture with a smaller (540-byte) chunk measured
+        average_packet_size at only 175.6, *below* that ceiling, because
+        28 connections' worth of small handshake/teardown packets (~54-70
+        bytes each) outnumber the 28 large data packets by roughly 4-to-1
+        and drag the average down; 1000 bytes keeps a real capture's
+        average comfortably above 200 even with that dilution.
+
+        Connections are opened 0.4s apart, not in a tight loop -- a live
+        run at a tighter 0.1s spacing measured packets_per_second at
+        ~37/s (each connection's handshake-plus-data cycle puts several
+        packets on the wire, not one), well past RuleBasedDosDetector's
+        own 20/s floor, misclassifying the run as a flood instead of
+        connection-exhaustion. 0.4s brings a live run back to a real,
+        low rate its own detector doesn't even check, while still
+        finishing all 28 connections well inside duration_seconds.
+
+        A real listener runs on the target port for the duration of this
+        call (mirrors generate_brute_force_mininet_traffic's own need for
+        one) -- without it every connect() here is refused before any
+        data is sent.
+        """
+        attacker = net.get("attacker")
+        sensor = net.get("sensor")
+        target_ip = "10.0.0.10"
+        target_port = 7001
+        listener_pid = start_multi_connection_listener(sensor, target_port)
+        try:
+            command = (
+                "python3 - <<'PY'\n"
+                "import socket, time\n"
+                "socks = []\n"
+                "chunk = b'H' * 1000\n"
+                "start = time.time()\n"
+                "for _ in range(28):\n"
+                "    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+                "    s.settimeout(2.0)\n"
+                "    try:\n"
+                f"        s.connect(('{target_ip}', {target_port}))\n"
+                "        s.sendall(chunk)\n"
+                "        socks.append(s)\n"
+                "    except OSError:\n"
+                "        s.close()\n"
+                "    time.sleep(0.4)\n"
+                f"while time.time() - start < {duration_seconds}:\n"
+                "    time.sleep(0.2)\n"
+                "for s in socks:\n"
+                "    try:\n"
+                "        s.close()\n"
+                "    except OSError:\n"
+                "        pass\n"
+                "print('slow_loris_done')\n"
+                "PY"
+            )
+            output = attacker.cmd(command)
+        finally:
+            stop_multi_connection_listener(sensor, listener_pid)
+        return {"attacker": attacker.name, "target": target_ip, "output": output}
+
+    def generate_dns_amplification_mininet_traffic(self, net: Any, duration_seconds: int = 9) -> dict[str, Any]:
+        """Generate a bounded DNS-amplification/reflection attempt:
+        oversized UDP responses arriving at the device, the shape a real
+        reflection victim sees, regardless of what a real reflector or
+        spoofed source would look like upstream of this lab.
+
+        Distinct from data-exfiltration's own oversized-payload signature
+        on packet count alone (26+ packets here vs. exfiltration's capped
+        3-25 window) and from RuleBasedExploitDetector's single-shot
+        payload (capped at 8 packets there) -- packet_count is what keeps
+        this out of both windows even though the payload size (~570
+        bytes) sits in the same general territory. average_packet_size is
+        tuned into the real, narrow gap between RuleBasedExploitDetector's
+        550-byte ceiling and RuleBasedExfiltrationDetector's 600-byte
+        floor -- large enough to be a real amplified response, not large
+        enough to be mistaken for either neighbor.
+
+        Sends up to 60 packets over 9s (theoretical max ~82 at this
+        pace, so the 60 cap -- not the clock -- is what normally ends
+        this early), not just enough to clear the 26-packet floor: a
+        live run at a tighter 5s/38-packet budget measured real captured
+        counts anywhere from 21 to 35 across repeated runs -- real
+        Mininet-level variance in exactly how many of the attempted
+        sends actually land in one capture window -- and the lower end
+        of that range fell *under* RuleBasedExfiltrationDetector's own
+        25-packet ceiling, misclassifying the run as exfiltration. A
+        wider real margin above the floor being approached, not a
+        tighter budget that merely clears it on average, is what
+        actually fixes that.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 53
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'R' * 570\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 60:\n"
+            f"    sock.sendto(payload, ('{target_ip}', {target_port}))\n"
+            "    sent += 1\n"
+            "    time.sleep(0.11)\n"
+            "sock.close()\n"
+            "print('dns_amplification_done')\n"
+            "PY"
+        )
+        return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
+    def generate_dns_tunneling_mininet_traffic(self, net: Any, duration_seconds: int = 15) -> dict[str, Any]:
+        """Generate a bounded DNS-tunneling covert-channel attempt: many
+        small, frequent encoded-looking UDP "queries" leaving the device
+        over a long window, a genuinely different exfiltration mechanism
+        from data-exfiltration's own few-large-packets signature --
+        this is the low-and-slow, high-frequency shape a naive
+        payload-size-only exfiltration detector would miss entirely.
+
+        Direction is reversed, like data-exfiltration: the compromised
+        device (sensor) is the traffic source, not an external attacker
+        probing in. average_packet_size (~220 bytes, encoded subdomain
+        chunks) sits in the same real gap RuleBasedSlowLorisDetector's
+        own padding targets -- between RuleBasedBruteForceDetector's
+        200-byte ceiling and RuleBasedExploitDetector's 250-byte floor --
+        and packets_per_second is deliberately kept low (~2/s) to stay
+        clear of RuleBasedRogueBeaconDetector's own higher-frequency
+        window, the only other detector sharing this same size gap.
+        """
+        sensor = net.get("sensor")
+        attacker_ip = "10.0.0.100"
+        target_port = 53
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'Q' * 220\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 34:\n"
+            f"    sock.sendto(payload, ('{attacker_ip}', {target_port}))\n"
+            "    sent += 1\n"
+            "    time.sleep(0.42)\n"
+            "sock.close()\n"
+            "print('dns_tunneling_done')\n"
+            "PY"
+        )
+        return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}
+
+    def generate_mqtt_flood_mininet_traffic(self, net: Any, duration_seconds: int = 110) -> dict[str, Any]:
+        """Generate a bounded MQTT publish-flood attempt: many real,
+        completed TCP connections against the device's message-broker
+        port, each delivering one small message -- an IoT-protocol-
+        specific flood, distinct from a raw undifferentiated packet
+        flood (RuleBasedDosDetector) and from SYN-flood's refused,
+        never-completed connects (RuleBasedSynFloodDetector). Every
+        connection here actually completes its handshake
+        (tcp_ack_count stays high), where SYN-flood's are all refused
+        (tcp_ack_count stays at zero) -- the two never need to agree on
+        registration order because their conditions are already
+        mutually exclusive on that axis, independent of rate.
+
+        Originally paced into the same real, narrow 15-20/s gap
+        RuleBasedSynFloodDetector's own traffic shares (a real
+        completed connect+send+close cycle puts ~5 packets on the wire
+        per attempt, not the 1 a refused SYN-flood connect does, so the
+        inter-attempt pause has to account for that). Retargeted twice
+        -- first to the gap's real middle (~17.5/s), then given a longer
+        window to average out timing noise -- and still measured real
+        dips into the low-teens on two separate live runs (13.7/s,
+        14.1/s), claimed by RuleBasedBruteForceDetector's own <=15.0
+        ceiling: a full TCP handshake per attempt is real kernel/network
+        work, with more scheduling-level variance than a bare refused
+        connect, and on this VM that variance turned out to be too much
+        for a 5-unit gap even with retuning. Moved out of that gap
+        entirely, the same way credential-replay was: packets_per_second
+        kept below 1.0/s (~18 attempts, ~6s apart, over a much longer
+        ~110s window), a real, wide-margin gap clear of every other
+        registered detector's own floor on this axis
+        (RuleBasedBruteForceDetector's 1.0/s included).
+
+        A real listener runs on the target port for the duration of this
+        call, the same pattern generate_brute_force_mininet_traffic and
+        generate_slow_loris_mininet_traffic already rely on.
+        """
+        attacker = net.get("attacker")
+        sensor = net.get("sensor")
+        target_ip = "10.0.0.10"
+        target_port = 1883
+        listener_pid = start_multi_connection_listener(sensor, target_port)
+        try:
+            command = (
+                "python3 - <<'PY'\n"
+                "import socket, time\n"
+                "start = time.time()\n"
+                "sent = 0\n"
+                f"while time.time() - start < {duration_seconds} and sent < 18:\n"
+                "    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+                "    s.settimeout(0.2)\n"
+                "    try:\n"
+                f"        s.connect(('{target_ip}', {target_port}))\n"
+                "        s.sendall(b'PUBLISH')\n"
+                "    except OSError:\n"
+                "        pass\n"
+                "    finally:\n"
+                "        s.close()\n"
+                "    sent += 1\n"
+                "    time.sleep(6.0)\n"
+                "print('mqtt_flood_done')\n"
+                "PY"
+            )
+            output = attacker.cmd(command)
+        finally:
+            stop_multi_connection_listener(sensor, listener_pid)
+        return {"attacker": attacker.name, "target": target_ip, "output": output}
+
+    def generate_firmware_tampering_mininet_traffic(self, net: Any, duration_seconds: int = 18) -> dict[str, Any]:
+        """Generate a bounded firmware/configuration-tampering attempt:
+        an already-compromised device pushing periodic, moderately-sized
+        unauthorized config/firmware blobs out to an external host --
+        direction reversed, like data-exfiltration and DNS-tunneling,
+        but distinct from both on shape: fewer, slower, larger pushes
+        than DNS-tunneling's frequent small queries, and unlike
+        data-exfiltration's few-shot burst, sustained over a much longer
+        window with a much lower packets_per_second (~3/s, vs.
+        RuleBasedDnsAmplificationDetector's own >=4/s floor -- the two
+        share the same average_packet_size range and are disambiguated
+        purely on rate).
+
+        Sends up to 50 packets over 18s, not just enough to clear the
+        26-packet floor: a live run at a tighter 10s/36-packet budget
+        measured real captured counts anywhere from 25 to 31 across
+        repeated runs, and the lower end of that range fell *under*
+        RuleBasedExfiltrationDetector's own 25-packet ceiling (which is
+        inclusive -- exactly 25 already qualifies), misclassifying the
+        run as exfiltration -- the same real Mininet-level variance
+        RuleBasedDnsAmplificationDetector's own generator docstring
+        describes hitting. A wider real margin above the floor, not a
+        tighter budget that only clears it on average, is the fix.
+        """
+        sensor = net.get("sensor")
+        attacker_ip = "10.0.0.100"
+        target_port = 7443
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'C' * 570\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 50:\n"
+            f"    sock.sendto(payload, ('{attacker_ip}', {target_port}))\n"
+            "    sent += 1\n"
+            "    time.sleep(0.3)\n"
+            "sock.close()\n"
+            "print('firmware_tampering_done')\n"
+            "PY"
+        )
+        return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}
+
+    def generate_buffer_overflow_mininet_traffic(self, net: Any, duration_seconds: int = 40) -> dict[str, Any]:
+        """Generate a bounded buffer-overflow-probe campaign: many
+        oversized payloads sent on *one* persistent TCP connection --
+        unlike RuleBasedExploitDetector's own deliberately single-shot
+        signature (capped at 8 attempts, modelling one uncertain
+        injection try), this is a sustained fuzzing-style campaign,
+        which is what actually keeps it out of that detector's own
+        packet_count window even though both share the same general
+        payload-size territory.
+
+        One persistent connection, not many reconnects, is deliberate:
+        a live run reconnecting for every payload (mirroring
+        generate_slow_loris_mininet_traffic's own many-connections
+        pattern) measured average_packet_size at only 182 -- the many
+        small handshake/teardown packets from ~30 reconnects outnumbered
+        the 30 large payload packets roughly 4-to-1 and diluted the
+        average well below RuleBasedBufferOverflowDetector's own
+        550-byte floor. One handshake for the *entire* campaign, not one
+        per payload, keeps the overhead-to-payload ratio real: ~30 large
+        packets against just 2-3 small ones.
+
+        The pace (~1.3s between sends, deliberately slow) fixes a second,
+        subtler issue a live run surfaced: FeatureAggregator groups flows
+        by direction, so the sensor's own stream of pure TCP ACKs (one
+        per received data segment -- real, unavoidable TCP behavior, not
+        a bug in this generator) forms its *own* small-packet flow,
+        entirely separate from the large-payload flow this attack
+        actually means to produce. Whichever flow a given capture happens
+        to group first gets checked first, and a live run at a faster
+        pace (~3.4/s) found the ACK-only flow -- count>=12, tiny average,
+        and a rate inside RuleBasedBruteForceDetector's own [1, 15]
+        window -- classified as brute-force before this attack's own
+        real payload flow was ever reached. Since a data segment and its
+        ACK are paired 1-to-1, no combination of payload size or handshake
+        count changes that risk; only packets_per_second can, because it's
+        the one axis where *both* directions can be pushed to the same
+        safe place at once. Below 1.0/s clears every other registered
+        detector's own floor on this axis (RuleBasedBruteForceDetector's
+        own 1.0/s included) for both the payload flow and its ACK flow
+        simultaneously, regardless of which one a given capture checks
+        first.
+
+        Uses its own dedicated listener rather than
+        start_multi_connection_listener: that shared listener closes
+        each connection after a single recv() (by design, for the
+        connect/send/close attacks that reuse it) -- a persistent
+        connection here needs one that keeps reading in a loop instead.
+        """
+        attacker = net.get("attacker")
+        sensor = net.get("sensor")
+        target_ip = "10.0.0.10"
+        target_port = 7100
+
+        listener_script = (
+            "import socket\n"
+            "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+            "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            f"s.bind(('0.0.0.0', {target_port}))\n"
+            "s.listen(1)\n"
+            "conn, _ = s.accept()\n"
+            "try:\n"
+            "    while True:\n"
+            "        data = conn.recv(4096)\n"
+            "        if not data:\n"
+            "            break\n"
+            "except OSError:\n"
+            "    pass\n"
+            "conn.close()\n"
+        )
+        log_path = "/tmp/buffer_overflow_listener.log"
+        launch_cmd = f"python3 - <<'PY' >{log_path} 2>&1 & disown\n{listener_script}\nPY"
+        # See start_multi_connection_listener's own docstring for why
+        # `echo $!` must be a genuinely separate host.cmd() call, not a
+        # trailing line of the same heredoc-launch call.
+        sensor.cmd(launch_cmd)
+        raw_output = sensor.cmd("echo $!")
+        digit_tokens = re.findall(r"\d+", raw_output)
+        if not digit_tokens:
+            raise RuntimeError(f"Could not determine listener PID from host.cmd() output: {raw_output!r}")
+        listener_pid = digit_tokens[-1]
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            listening = sensor.cmd(f"ss -ltn 'sport = :{target_port}' 2>/dev/null")
+            if f":{target_port}" in listening:
+                break
+            time.sleep(0.05)
+
+        try:
+            command = (
+                "python3 - <<'PY'\n"
+                "import socket, time\n"
+                "payload = b'F' * 650\n"
+                "sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+                "sock.settimeout(2.0)\n"
+                "sent = 0\n"
+                "try:\n"
+                f"    sock.connect(('{target_ip}', {target_port}))\n"
+                "    start = time.time()\n"
+                f"    while time.time() - start < {duration_seconds} and sent < 30:\n"
+                "        sock.sendall(payload)\n"
+                "        sent += 1\n"
+                "        time.sleep(1.3)\n"
+                "except OSError:\n"
+                "    pass\n"
+                "finally:\n"
+                "    sock.close()\n"
+                "print('buffer_overflow_done')\n"
+                "PY"
+            )
+            output = attacker.cmd(command)
+        finally:
+            sensor.cmd(f"kill {listener_pid} 2>/dev/null || true")
+        return {"attacker": attacker.name, "target": target_ip, "output": output}
+
+    def generate_replay_attack_mininet_traffic(self, net: Any, duration_seconds: int = 20) -> dict[str, Any]:
+        """Generate a bounded credential/command-replay burst: a captured
+        (here, a static stand-in) authentication or command payload
+        re-sent repeatedly -- a real, distinct attack mechanism from
+        brute-force's own varied guesses, even though both are repeated
+        single-port attempts.
+
+        Originally paced to land in the same real, narrow
+        packets_per_second gap RuleBasedSynFloodDetector and
+        RuleBasedMqttFloodDetector's own traffic shares (strictly
+        between brute-force's 15/s ceiling and DoS's 20/s floor),
+        disambiguated from both on protocol (UDP, not TCP). Moved out of
+        that gap entirely after repeated live runs -- even retargeted to
+        the gap's real middle (~17.5/s) with a longer window to average
+        out timing noise -- still measured an occasional dip under
+        15.0/s (once in 8 real runs) and were claimed by
+        RuleBasedBruteForceDetector's own <=15.0 ceiling instead: with
+        three attacks already sharing that one 5-unit gap, on this VM's
+        real timing variance it wasn't reliably narrow enough for a
+        fourth. Mirrors RuleBasedBufferOverflowDetector's own generator
+        instead: packets_per_second kept below 1.0/s, a real, wide-margin
+        gap clear of every other registered detector's own floor on this
+        axis (RuleBasedBruteForceDetector's 1.0/s included) rather than
+        threading a narrow needle between two adjacent ones.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 6668
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'TOKEN=stale-session-abc123'\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 18:\n"
+            f"    sock.sendto(payload, ('{target_ip}', {target_port}))\n"
+            "    sent += 1\n"
+            "    time.sleep(1.2)\n"
+            "sock.close()\n"
+            "print('replay_attack_done')\n"
+            "PY"
+        )
+        return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
+
+    def generate_rogue_beacon_mininet_traffic(self, net: Any, duration_seconds: int = 10) -> dict[str, Any]:
+        """Generate a bounded rogue-configuration-beacon attempt: an
+        already-compromised device periodically pushing small,
+        unauthorized state/config updates out to an external host --
+        direction reversed, like every other tampering-style attack in
+        this file, but at a meaningfully *higher* frequency
+        (packets_per_second >= 5.5/s) than RuleBasedFirmwareTamperingDetector's
+        own slow, infrequent pushes (< 5/s), which is the entire real
+        distinction between "occasional tampering" and "a live,
+        continuously-beaconing implant" at this shape resolution --
+        both otherwise share the same average_packet_size range as
+        RuleBasedDnsTunnelingDetector.
+        """
+        sensor = net.get("sensor")
+        attacker_ip = "10.0.0.100"
+        target_port = 7999
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'B' * 220\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 90:\n"
+            f"    sock.sendto(payload, ('{attacker_ip}', {target_port}))\n"
+            "    sent += 1\n"
+            "    time.sleep(0.11)\n"
+            "sock.close()\n"
+            "print('rogue_beacon_done')\n"
+            "PY"
+        )
+        return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}

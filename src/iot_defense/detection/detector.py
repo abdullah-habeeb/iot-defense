@@ -370,6 +370,697 @@ class RuleBasedExploitDetector(Detector):
         )
 
 
+class RuleBasedSynFloodDetector(Detector):
+    """A TCP SYN-flood detector: many refused connects to one port at a
+    rate strictly between RuleBasedBruteForceDetector's own ceiling
+    (15.0 packets_per_second) and RuleBasedDosDetector's own floor
+    (20.0) -- a real, unclaimed gap between the two, not a guess.
+    tcp_ack_count staying near zero is what actually separates this from
+    RuleBasedMqttFloodDetector, which shares the same rate gap but with
+    real, completed handshakes.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_tcp_syn_count: int | None = None,
+        max_tcp_ack_count: int | None = None,
+        min_packets_per_second: float | None = None,
+        max_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("syn_flood_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_tcp_syn_count = int(config.get("syn_flood_min_tcp_syn_count", min_tcp_syn_count if min_tcp_syn_count is not None else 10))
+        self.max_tcp_ack_count = int(config.get("syn_flood_max_tcp_ack_count", max_tcp_ack_count if max_tcp_ack_count is not None else 3))
+        self.min_packets_per_second = float(config.get("syn_flood_min_packets_per_second", min_packets_per_second if min_packets_per_second is not None else 15.0))
+        self.max_packets_per_second = float(config.get("syn_flood_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 20.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        tcp_syn_count = int(features.get("tcp_syn_count", 0))
+        tcp_ack_count = int(features.get("tcp_ack_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            protocol == "TCP"
+            and unique_ports <= self.max_unique_ports
+            and tcp_syn_count >= self.min_tcp_syn_count
+            and tcp_ack_count <= self.max_tcp_ack_count
+            and self.min_packets_per_second < packets_per_second < self.max_packets_per_second
+        )
+
+        if is_threat:
+            attack_type = "tcp_syn_flood"
+            threat_score = 0.88
+            confidence = 0.85
+            reason = "sustained high-rate refused TCP connects to a single port, with no completed handshakes"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet SYN-flood criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedSynFloodDetector",
+        )
+
+
+class RuleBasedIcmpFloodDetector(Detector):
+    """An ICMP ping-flood detector. ICMP carries no ports at all, so
+    every other detector's port-count check is trivially satisfied by
+    ICMP traffic -- protocol=="ICMP" plus a real packet-count floor is
+    what actually keeps this specific to a genuine flood rather than
+    ordinary ICMP echo traffic (e.g. the two-packet pings
+    generate_normal_mininet_traffic already sends). average_packet_size
+    is required above 200 bytes specifically because this attack's real
+    rate (~9/s) otherwise sits inside RuleBasedBruteForceDetector's own
+    [1, 15] packets_per_second window -- padding the ping payload is
+    what keeps it out. The window's upper bound (300 bytes) is not a
+    tight "gap" the way some other detectors' are: a real live capture
+    of a 220-byte ping payload measured average_packet_size=262 (the
+    220-byte payload plus real Ethernet+IP+ICMP framing overhead, ~42
+    bytes, not accounted for in the original design estimate) --
+    RuleBasedExploitDetector's own packet_count<=8 ceiling, not this
+    upper bound, is what actually keeps a real flood (packet_count in
+    the dozens) out of that detector's territory regardless of size.
+    """
+
+    def __init__(
+        self,
+        min_icmp_packet_count: int | None = None,
+        min_packets_per_second: float | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.min_icmp_packet_count = int(config.get("icmp_flood_min_icmp_packet_count", min_icmp_packet_count if min_icmp_packet_count is not None else 20))
+        self.min_packets_per_second = float(config.get("icmp_flood_min_packets_per_second", min_packets_per_second if min_packets_per_second is not None else 5.0))
+        self.min_average_packet_size = float(config.get("icmp_flood_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 200.0))
+        self.max_average_packet_size = float(config.get("icmp_flood_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 300.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        icmp_packet_count = int(features.get("icmp_packet_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+
+        is_threat = (
+            protocol == "ICMP"
+            and icmp_packet_count >= self.min_icmp_packet_count
+            and packets_per_second >= self.min_packets_per_second
+            and self.min_average_packet_size < average_packet_size < self.max_average_packet_size
+        )
+
+        if is_threat:
+            attack_type = "icmp_ping_flood"
+            threat_score = 0.82
+            confidence = 0.8
+            reason = "sustained high-volume padded ICMP echo traffic, consistent with a ping flood"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet ICMP-flood criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedIcmpFloodDetector",
+        )
+
+
+class RuleBasedSlowLorisDetector(Detector):
+    """A Slowloris-style connection-exhaustion detector.
+    unique_source_ports is the real, previously-unused signal this
+    relies on: many concurrent held-open connections each claim their
+    own fresh ephemeral source port, something no other registered
+    attack produces in volume (brute-force's own sequential attempts
+    accumulate a handful too, an order of magnitude fewer over the same
+    window -- a real live capture measured 14 for this attack's own
+    generator against brute-force's own single-digit count over the
+    same window, so the floor here is set at 12, not the higher number
+    an idealized "20 concurrent connections" design would suggest,
+    since not every attempted connection reliably completes within a
+    real, bounded capture window). average_packet_size is required
+    above RuleBasedBruteForceDetector's 200-byte ceiling; the upper
+    bound is wide (280) because RuleBasedExploitDetector's own
+    packet_count<=8 ceiling, not a tight size gap, is what actually
+    keeps this detector's real traffic (packet_count in the dozens) out
+    of that one's territory.
+    """
+
+    def __init__(
+        self,
+        max_unique_destination_ports: int | None = None,
+        min_unique_source_ports: int | None = None,
+        min_tcp_ack_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_destination_ports = int(config.get("slow_loris_max_unique_destination_ports", max_unique_destination_ports if max_unique_destination_ports is not None else 2))
+        self.min_unique_source_ports = int(config.get("slow_loris_min_unique_source_ports", min_unique_source_ports if min_unique_source_ports is not None else 12))
+        self.min_tcp_ack_count = int(config.get("slow_loris_min_tcp_ack_count", min_tcp_ack_count if min_tcp_ack_count is not None else 15))
+        self.min_average_packet_size = float(config.get("slow_loris_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 200.0))
+        self.max_average_packet_size = float(config.get("slow_loris_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 280.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_destination_ports = int(features.get("unique_destination_ports", 0))
+        unique_source_ports = int(features.get("unique_source_ports", 0))
+        tcp_ack_count = int(features.get("tcp_ack_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+
+        is_threat = (
+            protocol == "TCP"
+            and unique_destination_ports <= self.max_unique_destination_ports
+            and unique_source_ports >= self.min_unique_source_ports
+            and tcp_ack_count >= self.min_tcp_ack_count
+            and self.min_average_packet_size < average_packet_size < self.max_average_packet_size
+        )
+
+        if is_threat:
+            attack_type = "slow_loris_exhaustion"
+            threat_score = 0.78
+            confidence = 0.75
+            reason = "many concurrent connections held open from distinct source ports, consistent with connection-exhaustion"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet connection-exhaustion criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedSlowLorisDetector",
+        )
+
+
+class RuleBasedDnsAmplificationDetector(Detector):
+    """A DNS-amplification/reflection detector: oversized inbound UDP
+    responses. packet_count>=26 is what keeps this out of both
+    RuleBasedExfiltrationDetector's window (capped at 25) and
+    RuleBasedExploitDetector's (capped at 8) even though all three sit
+    in similar payload-size territory -- packet_count, not
+    average_packet_size, is the real guard against both, which is why
+    this detector's own upper size bound (650) is wide rather than a
+    tight gap: a real live capture of a 570-byte payload measured
+    average_packet_size=612 (real Ethernet+IP+UDP framing overhead, not
+    accounted for in the original design estimate). packets_per_second
+    >= 4.0 is what separates this from RuleBasedFirmwareTamperingDetector,
+    which shares the same size range at a slower, less bursty rate.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+        min_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("dns_amplification_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("dns_amplification_min_packet_count", min_packet_count if min_packet_count is not None else 26))
+        self.min_average_packet_size = float(config.get("dns_amplification_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 550.0))
+        self.max_average_packet_size = float(config.get("dns_amplification_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 650.0))
+        self.min_packets_per_second = float(config.get("dns_amplification_min_packets_per_second", min_packets_per_second if min_packets_per_second is not None else 4.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            protocol == "UDP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_average_packet_size <= average_packet_size < self.max_average_packet_size
+            and packets_per_second >= self.min_packets_per_second
+        )
+
+        if is_threat:
+            attack_type = "dns_amplification"
+            threat_score = 0.87
+            confidence = 0.82
+            reason = "a burst of oversized inbound UDP responses, consistent with a reflection/amplification attack"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet amplification criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedDnsAmplificationDetector",
+        )
+
+
+class RuleBasedDnsTunnelingDetector(Detector):
+    """A DNS-tunneling covert-channel exfiltration detector -- direction
+    reversed, like RuleBasedExfiltrationDetector, but a genuinely
+    different mechanism: many small, frequent queries rather than a few
+    large transfers, the shape a naive payload-size-only exfiltration
+    detector would miss entirely. average_packet_size shares the same
+    real range RuleBasedSlowLorisDetector's own padding targets;
+    packets_per_second < 5.5 is what separates this from
+    RuleBasedRogueBeaconDetector, which shares the same size range at a
+    higher, more continuous frequency.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+        max_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("dns_tunneling_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("dns_tunneling_min_packet_count", min_packet_count if min_packet_count is not None else 22))
+        self.min_average_packet_size = float(config.get("dns_tunneling_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 200.0))
+        self.max_average_packet_size = float(config.get("dns_tunneling_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 280.0))
+        self.max_packets_per_second = float(config.get("dns_tunneling_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 5.5))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            protocol == "UDP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_average_packet_size < average_packet_size < self.max_average_packet_size
+            and packets_per_second < self.max_packets_per_second
+        )
+
+        if is_threat:
+            # Direction reversed, like RuleBasedExfiltrationDetector: the
+            # flow's own source_ip is the compromised device, not the
+            # external attacker.
+            source_ip = str(features.get("destination_ip", "unknown"))
+            destination_ip = str(features.get("source_ip", "unknown"))
+            attack_type = "dns_tunneling_exfiltration"
+            threat_score = 0.8
+            confidence = 0.72
+            reason = "many small, frequent outbound queries over a sustained window, consistent with a DNS-tunneling covert channel"
+        else:
+            source_ip = str(features.get("source_ip", "unknown"))
+            destination_ip = str(features.get("destination_ip", "unknown"))
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet DNS-tunneling criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedDnsTunnelingDetector",
+        )
+
+
+class RuleBasedMqttFloodDetector(Detector):
+    """An MQTT publish-flood detector: many real, completed TCP
+    connections against the device's message-broker port, deliberately
+    paced slow (packets_per_second below 1.0) -- a real, wide-margin gap
+    clear of every other registered detector's own floor on this axis
+    (RuleBasedBruteForceDetector's own 1.0/s included), rather than the
+    narrow 15-20/s gap RuleBasedSynFloodDetector's own traffic shares.
+    That gap was tried here first and abandoned: even retargeted to its
+    real middle with a longer capture window to average out timing
+    noise, live runs still occasionally measured a dip into the
+    low-teens (13.7/s, 14.1/s across two separate runs) and were claimed
+    by RuleBasedBruteForceDetector's own <=15.0 ceiling instead -- a
+    full TCP handshake per attempt carries more real scheduling-level
+    variance than a bare refused connect, and that variance proved too
+    much for a 5-unit gap on this VM. tcp_ack_count staying high here
+    (real completed handshakes) vs. RuleBasedSynFloodDetector's own
+    near-zero (refused connects) is what actually disambiguates the two,
+    independent of rate.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_tcp_ack_count: int | None = None,
+        max_packets_per_second: float | None = None,
+        max_average_packet_size: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("mqtt_flood_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_tcp_ack_count = int(config.get("mqtt_flood_min_tcp_ack_count", min_tcp_ack_count if min_tcp_ack_count is not None else 15))
+        self.max_packets_per_second = float(config.get("mqtt_flood_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 1.0))
+        self.max_average_packet_size = float(config.get("mqtt_flood_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 200.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        tcp_ack_count = int(features.get("tcp_ack_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+
+        is_threat = (
+            protocol == "TCP"
+            and unique_ports <= self.max_unique_ports
+            and tcp_ack_count >= self.min_tcp_ack_count
+            and packets_per_second < self.max_packets_per_second
+            and average_packet_size <= self.max_average_packet_size
+        )
+
+        if is_threat:
+            attack_type = "mqtt_message_flood"
+            threat_score = 0.75
+            confidence = 0.72
+            reason = "a sustained high-rate burst of small, real completed connections to the message-broker port"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet MQTT-flood criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedMqttFloodDetector",
+        )
+
+
+class RuleBasedFirmwareTamperingDetector(Detector):
+    """A firmware/configuration-tampering detector -- direction
+    reversed, like RuleBasedExfiltrationDetector and
+    RuleBasedDnsTunnelingDetector: an already-compromised device pushing
+    unauthorized config/firmware blobs outward. Shares
+    RuleBasedDnsAmplificationDetector's own average_packet_size range but
+    at a meaningfully slower, less bursty rate (< 5.0/s here vs. that
+    detector's own >= 4.0/s floor) -- the two are disambiguated purely
+    on packets_per_second, not size.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+        max_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("firmware_tampering_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("firmware_tampering_min_packet_count", min_packet_count if min_packet_count is not None else 26))
+        self.min_average_packet_size = float(config.get("firmware_tampering_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 550.0))
+        self.max_average_packet_size = float(config.get("firmware_tampering_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 650.0))
+        self.max_packets_per_second = float(config.get("firmware_tampering_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 5.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            protocol == "UDP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_average_packet_size <= average_packet_size < self.max_average_packet_size
+            and packets_per_second < self.max_packets_per_second
+        )
+
+        if is_threat:
+            source_ip = str(features.get("destination_ip", "unknown"))
+            destination_ip = str(features.get("source_ip", "unknown"))
+            attack_type = "firmware_tampering"
+            threat_score = 0.83
+            confidence = 0.78
+            reason = "periodic, oversized outbound configuration/firmware pushes, consistent with an already-compromised device"
+        else:
+            source_ip = str(features.get("source_ip", "unknown"))
+            destination_ip = str(features.get("destination_ip", "unknown"))
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet firmware-tampering criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedFirmwareTamperingDetector",
+        )
+
+
+class RuleBasedBufferOverflowDetector(Detector):
+    """A sustained buffer-overflow/fuzzing-probe detector: many real
+    oversized TCP requests sent on one persistent connection. Unlike
+    RuleBasedExploitDetector's deliberately single-shot signature
+    (capped at 8 attempts, modelling one uncertain injection try),
+    packet_count>=26 here models a sustained campaign -- which is what
+    keeps this out of RuleBasedExploitDetector's own window even though
+    both sit in similar payload-size territory (this detector's own
+    upper size bound, 700, is wide rather than a tight gap, for the same
+    reason -- packet_count, not size, is the real guard). The generator's
+    own docstring explains why the real ceiling is far stricter than
+    this class's own max_packets_per_second suggests: a persistent
+    connection's data segments and their TCP ACKs are grouped into two
+    *separate* flows by direction, so both the payload flow and its
+    paired ACK-only flow need to clear every other registered detector's
+    own thresholds independently -- in practice that means well below
+    1.0/s, not just below DoS's 20.0/s floor.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+        max_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("buffer_overflow_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("buffer_overflow_min_packet_count", min_packet_count if min_packet_count is not None else 26))
+        self.min_average_packet_size = float(config.get("buffer_overflow_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 550.0))
+        self.max_average_packet_size = float(config.get("buffer_overflow_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 700.0))
+        self.max_packets_per_second = float(config.get("buffer_overflow_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 20.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            protocol == "TCP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_average_packet_size <= average_packet_size < self.max_average_packet_size
+            and packets_per_second < self.max_packets_per_second
+        )
+
+        if is_threat:
+            attack_type = "buffer_overflow_probe"
+            threat_score = 0.86
+            confidence = 0.8
+            reason = "a sustained campaign of many oversized requests to a single service port, consistent with active fuzzing/exploitation"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet buffer-overflow-probe criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedBufferOverflowDetector",
+        )
+
+
+class RuleBasedReplayAttackDetector(Detector):
+    """A credential/command-replay detector: a captured payload re-sent
+    repeatedly over UDP, deliberately paced slow (packets_per_second
+    below 1.0) -- a real, wide-margin gap clear of every other
+    registered detector's own floor on this axis
+    (RuleBasedBruteForceDetector's own 1.0/s included), rather than the
+    narrow 15-20/s gap RuleBasedSynFloodDetector and
+    RuleBasedMqttFloodDetector's own traffic shares. That gap was tried
+    here first and abandoned: even retargeted to its real middle with a
+    longer capture window to average out timing noise, live runs still
+    occasionally measured a dip under 15.0/s (with three attacks
+    already sharing that one 5-unit gap, this VM's own real timing
+    variance made it unreliable for a fourth) and were claimed by
+    RuleBasedBruteForceDetector's own <=15.0 ceiling instead.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        max_packets_per_second: float | None = None,
+        max_average_packet_size: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("replay_attack_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("replay_attack_min_packet_count", min_packet_count if min_packet_count is not None else 15))
+        self.max_packets_per_second = float(config.get("replay_attack_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 1.0))
+        self.max_average_packet_size = float(config.get("replay_attack_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 200.0))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+
+        is_threat = (
+            protocol == "UDP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and packets_per_second < self.max_packets_per_second
+            and average_packet_size <= self.max_average_packet_size
+        )
+
+        if is_threat:
+            attack_type = "credential_replay"
+            threat_score = 0.72
+            confidence = 0.68
+            reason = "a rapid, repeated burst of uniform small packets to a single port, consistent with a captured credential/command being replayed"
+        else:
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet replay-attack criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedReplayAttackDetector",
+        )
+
+
+class RuleBasedRogueBeaconDetector(Detector):
+    """A rogue-configuration-beacon detector -- direction reversed, like
+    every other tampering-style detector here: an already-compromised
+    device continuously beaconing small, unauthorized updates outward.
+    Shares RuleBasedDnsTunnelingDetector's own average_packet_size range
+    but at a meaningfully higher, more continuous frequency
+    (packets_per_second >= 5.5 here vs. that detector's own < 5.5
+    ceiling) -- the real distinction between "occasional tampering" and
+    "a live, continuously-beaconing implant" at this shape resolution.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+        min_packets_per_second: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("rogue_beacon_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("rogue_beacon_min_packet_count", min_packet_count if min_packet_count is not None else 40))
+        self.min_average_packet_size = float(config.get("rogue_beacon_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 200.0))
+        self.max_average_packet_size = float(config.get("rogue_beacon_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 280.0))
+        self.min_packets_per_second = float(config.get("rogue_beacon_min_packets_per_second", min_packets_per_second if min_packets_per_second is not None else 5.5))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+
+        is_threat = (
+            protocol == "UDP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_average_packet_size < average_packet_size < self.max_average_packet_size
+            and packets_per_second >= self.min_packets_per_second
+        )
+
+        if is_threat:
+            source_ip = str(features.get("destination_ip", "unknown"))
+            destination_ip = str(features.get("source_ip", "unknown"))
+            attack_type = "rogue_config_beacon"
+            threat_score = 0.6
+            confidence = 0.55
+            reason = "frequent, low-confidence outbound beaconing pattern, possibly indicating an unauthorized or tampered device"
+        else:
+            source_ip = str(features.get("source_ip", "unknown"))
+            destination_ip = str(features.get("destination_ip", "unknown"))
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet rogue-beacon criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedRogueBeaconDetector",
+        )
+
+
 class UnifiedRuleBasedDetector(Detector):
     """Classify captured flow features without being told which attack (if
     any) is actually happening.

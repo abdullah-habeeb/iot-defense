@@ -106,6 +106,108 @@ def flow_for_label(label_name: str) -> FlowFeatures:
             average_packet_size=350.0, unique_destination_ports=1, unique_source_ports=1,
             tcp_syn_count=4, tcp_ack_count=4, udp_packet_count=0, icmp_packet_count=0,
         )
+    if label_name == "tcp_syn_flood":
+        # Matches RuleBasedSynFloodDetector's own window: a rate strictly
+        # between brute-force's 15/s ceiling and DoS's 20/s floor, with
+        # no completed handshakes (tcp_ack_count stays at zero).
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="TCP",
+            duration=2.35, packet_count=40, packets_per_second=17.0, bytes_total=2400,
+            average_packet_size=60.0, unique_destination_ports=1, unique_source_ports=40,
+            tcp_syn_count=40, tcp_ack_count=0, udp_packet_count=0, icmp_packet_count=0,
+        )
+    if label_name == "icmp_ping_flood":
+        # Padded past RuleBasedBruteForceDetector's 200-byte ceiling
+        # (ICMP carries no ports, so it would otherwise trivially satisfy
+        # every port-based detector's own port-count check).
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="ICMP",
+            duration=3.0, packet_count=30, packets_per_second=10.0, bytes_total=6600,
+            average_packet_size=220.0, unique_destination_ports=0, unique_source_ports=0,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=0, icmp_packet_count=30,
+        )
+    if label_name == "slow_loris_exhaustion":
+        # unique_source_ports is the real signal: many concurrent
+        # held-open connections, each claiming its own ephemeral port.
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="TCP",
+            duration=20.0, packet_count=40, packets_per_second=2.0, bytes_total=9000,
+            average_packet_size=225.0, unique_destination_ports=1, unique_source_ports=20,
+            tcp_syn_count=20, tcp_ack_count=20, udp_packet_count=0, icmp_packet_count=0,
+        )
+    if label_name == "dns_amplification":
+        # Oversized inbound UDP responses -- packet_count clears both
+        # RuleBasedExfiltrationDetector's and RuleBasedExploitDetector's
+        # own upper bounds; average_packet_size sits in the real gap
+        # between them.
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="UDP",
+            duration=4.6, packet_count=30, packets_per_second=6.5, bytes_total=17100,
+            average_packet_size=570.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=30, icmp_packet_count=0,
+        )
+    if label_name == "dns_tunneling_exfiltration":
+        # Direction-reversed, like data_exfiltration, but a genuinely
+        # different mechanism: many small, frequent queries rather than
+        # a few large transfers.
+        return FlowFeatures(
+            source_ip="10.0.0.10", destination_ip="10.0.0.100", protocol="UDP",
+            duration=15.0, packet_count=30, packets_per_second=2.0, bytes_total=6600,
+            average_packet_size=220.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=30, icmp_packet_count=0,
+        )
+    if label_name == "mqtt_message_flood":
+        # Deliberately slow (packets_per_second < 1.0), a real
+        # wide-margin gap clear of every other detector's own floor on
+        # this axis; real, completed handshakes (tcp_ack_count stays
+        # high) are what distinguish this from tcp_syn_flood's refused
+        # ones, independent of rate.
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="TCP",
+            duration=108.0, packet_count=90, packets_per_second=0.83, bytes_total=7200,
+            average_packet_size=80.0, unique_destination_ports=1, unique_source_ports=18,
+            tcp_syn_count=18, tcp_ack_count=90, udp_packet_count=0, icmp_packet_count=0,
+        )
+    if label_name == "firmware_tampering":
+        # Direction-reversed; shares dns_amplification's own
+        # average_packet_size gap but at a meaningfully slower rate.
+        return FlowFeatures(
+            source_ip="10.0.0.10", destination_ip="10.0.0.100", protocol="UDP",
+            duration=12.0, packet_count=30, packets_per_second=2.5, bytes_total=17100,
+            average_packet_size=570.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=30, icmp_packet_count=0,
+        )
+    if label_name == "buffer_overflow_probe":
+        # A sustained campaign (packet_count well past
+        # RuleBasedExploitDetector's own 8-packet ceiling), unlike that
+        # detector's deliberately single-shot signature.
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="TCP",
+            duration=7.5, packet_count=30, packets_per_second=4.0, bytes_total=17100,
+            average_packet_size=570.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=30, tcp_ack_count=30, udp_packet_count=0, icmp_packet_count=0,
+        )
+    if label_name == "credential_replay":
+        # Deliberately slow (packets_per_second < 1.0), a real
+        # wide-margin gap clear of every other detector's own floor on
+        # this axis, rather than the narrow 15-20/s gap tcp_syn_flood
+        # and mqtt_message_flood share.
+        return FlowFeatures(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", protocol="UDP",
+            duration=23.5, packet_count=20, packets_per_second=0.85, bytes_total=2000,
+            average_packet_size=100.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=20, icmp_packet_count=0,
+        )
+    if label_name == "rogue_config_beacon":
+        # Direction-reversed; shares dns_tunneling_exfiltration's own
+        # average_packet_size gap but at a meaningfully higher, more
+        # continuous frequency.
+        return FlowFeatures(
+            source_ip="10.0.0.10", destination_ip="10.0.0.100", protocol="UDP",
+            duration=7.14, packet_count=50, packets_per_second=7.0, bytes_total=11000,
+            average_packet_size=220.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=50, icmp_packet_count=0,
+        )
     raise ValueError(f"no fixture defined for label {label_name!r}")
 
 
