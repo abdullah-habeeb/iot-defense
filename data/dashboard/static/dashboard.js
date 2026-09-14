@@ -126,6 +126,16 @@ function renderHeader(state) {
       brute_force: { label: 'ATTACK: BRUTE-FORCE', accent: '--accent-purple', rgb: '168,85,247' },
       exfiltration: { label: 'ATTACK: DATA EXFILTRATION', accent: '--accent-cyan', rgb: '6,182,212' },
       exploit: { label: 'ATTACK: EXPLOIT INJECTION', accent: '--accent-orange', rgb: '249,115,22' },
+      syn_flood: { label: 'ATTACK: SYN FLOOD', accent: '--accent-teal', rgb: '20,184,166' },
+      icmp_flood: { label: 'ATTACK: ICMP PING FLOOD', accent: '--accent-green', rgb: '34,197,94' },
+      slow_loris: { label: 'ATTACK: SLOWLORIS EXHAUSTION', accent: '--accent-violet', rgb: '124,58,237' },
+      dns_amplification: { label: 'ATTACK: DNS AMPLIFICATION', accent: '--accent-blue', rgb: '59,130,246' },
+      dns_tunneling: { label: 'ATTACK: DNS TUNNELING', accent: '--accent-amber', rgb: '245,158,11' },
+      mqtt_flood: { label: 'ATTACK: MQTT MESSAGE FLOOD', accent: '--accent-red', rgb: '239,68,68' },
+      firmware_tampering: { label: 'ATTACK: FIRMWARE TAMPERING', accent: '--accent-purple', rgb: '168,85,247' },
+      buffer_overflow: { label: 'ATTACK: BUFFER OVERFLOW PROBE', accent: '--accent-orange', rgb: '249,115,22' },
+      replay_attack: { label: 'ATTACK: CREDENTIAL REPLAY', accent: '--accent-cyan', rgb: '6,182,212' },
+      rogue_beacon: { label: 'ATTACK: ROGUE CONFIG BEACON', accent: '--accent-teal', rgb: '20,184,166' },
     };
     const style = ATTACK_BADGE_STYLES[state.attack_mode];
     if (style) {

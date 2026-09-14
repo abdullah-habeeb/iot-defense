@@ -108,10 +108,20 @@ def _build_registry() -> dict[str, AttackScenario]:
     from iot_defense.defense.decision import DefenseAction
     from iot_defense.detection.detector import (
         RuleBasedBruteForceDetector,
+        RuleBasedBufferOverflowDetector,
+        RuleBasedDnsAmplificationDetector,
+        RuleBasedDnsTunnelingDetector,
         RuleBasedDosDetector,
         RuleBasedExfiltrationDetector,
         RuleBasedExploitDetector,
+        RuleBasedFirmwareTamperingDetector,
+        RuleBasedIcmpFloodDetector,
+        RuleBasedMqttFloodDetector,
         RuleBasedReconDetector,
+        RuleBasedReplayAttackDetector,
+        RuleBasedRogueBeaconDetector,
+        RuleBasedSlowLorisDetector,
+        RuleBasedSynFloodDetector,
     )
     from iot_defense.simulation.traffic import TrafficGenerator
 
@@ -227,6 +237,250 @@ def _build_registry() -> dict[str, AttackScenario]:
             ppo_example_features={"packets_per_second": 1.5, "unique_destination_ports": 1},
             ppo_threat_score=0.8,
             ppo_confidence=0.78,
+        ),
+        "syn_flood": AttackScenario(
+            key="syn_flood",
+            label="TCP SYN flood",
+            attack_type="tcp_syn_flood",
+            observed_threat_key="TCP_SYN_FLOOD",
+            build_detector=RuleBasedSynFloodDetector,
+            generate_traffic=lambda net: traffic.generate_syn_flood_mininet_traffic(net, duration_seconds=14),
+            capture_packet_limit=400,
+            capture_duration_seconds=14.0,
+            capture_completion_timeout=16.0,
+            # A resource-exhaustion flood, same reasoning as DOS_FLOOD:
+            # full containment is the decisive response, and the
+            # Stackelberg payoff table independently agrees.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.7,
+            action_confidence_min=0.7,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 17.0, "unique_destination_ports": 1},
+            ppo_threat_score=0.88,
+            ppo_confidence=0.85,
+        ),
+        "icmp_flood": AttackScenario(
+            key="icmp_flood",
+            label="ICMP ping flood",
+            attack_type="icmp_ping_flood",
+            observed_threat_key="ICMP_PING_FLOOD",
+            build_detector=RuleBasedIcmpFloodDetector,
+            generate_traffic=lambda net: traffic.generate_icmp_flood_mininet_traffic(net, duration_seconds=4),
+            # A real 40-count ping produces ~80 wire packets (echo +
+            # reply, both captured); a live run at the old limit of 60
+            # truncated the capture mid-flood.
+            capture_packet_limit=110,
+            capture_duration_seconds=4.0,
+            capture_completion_timeout=6.0,
+            # Rate-limiting directly defeats a ping flood's mechanism
+            # while leaving the device reachable -- the same reasoning
+            # BRUTE_FORCE's own THROTTLE choice already establishes, and
+            # the Stackelberg payoff table independently agrees.
+            preferred_action=DefenseAction.THROTTLE,
+            action_score_min=0.65,
+            action_confidence_min=0.65,
+            intention="minimize_unnecessary_disruption",
+            ppo_example_features={"packets_per_second": 10.0, "unique_destination_ports": 0},
+            ppo_threat_score=0.82,
+            ppo_confidence=0.8,
+        ),
+        "slow_loris": AttackScenario(
+            key="slow_loris",
+            label="Slowloris connection exhaustion",
+            attack_type="slow_loris_exhaustion",
+            observed_threat_key="SLOW_LORIS_EXHAUSTION",
+            build_detector=RuleBasedSlowLorisDetector,
+            generate_traffic=lambda net: traffic.generate_slow_loris_mininet_traffic(net, duration_seconds=25),
+            # 28 connections each producing a handshake, one data packet,
+            # and a teardown (both directions) comfortably exceeds 100 --
+            # a live run at that old limit truncated the capture well
+            # before enough distinct source ports had connected.
+            capture_packet_limit=400,
+            capture_duration_seconds=25.0,
+            capture_completion_timeout=27.0,
+            # Rate-limiting new connection attempts directly defeats this
+            # attack's mechanism (it needs to keep opening connections
+            # faster than they're released) while legitimate traffic
+            # still gets through -- the Stackelberg payoff table
+            # independently agrees.
+            preferred_action=DefenseAction.THROTTLE,
+            action_score_min=0.65,
+            action_confidence_min=0.65,
+            intention="minimize_unnecessary_disruption",
+            ppo_example_features={"packets_per_second": 2.0, "unique_destination_ports": 1},
+            ppo_threat_score=0.78,
+            ppo_confidence=0.75,
+        ),
+        "dns_amplification": AttackScenario(
+            key="dns_amplification",
+            label="DNS amplification / reflection",
+            attack_type="dns_amplification",
+            observed_threat_key="DNS_AMPLIFICATION",
+            build_detector=RuleBasedDnsAmplificationDetector,
+            generate_traffic=lambda net: traffic.generate_dns_amplification_mininet_traffic(net, duration_seconds=9),
+            capture_packet_limit=200,
+            capture_duration_seconds=9.0,
+            capture_completion_timeout=11.0,
+            # A volumetric attack the device cannot defend against by
+            # itself -- full containment is the decisive response, same
+            # reasoning as DOS_FLOOD, and the Stackelberg payoff table
+            # independently agrees.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.7,
+            action_confidence_min=0.7,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 6.5, "unique_destination_ports": 1},
+            ppo_threat_score=0.87,
+            ppo_confidence=0.82,
+        ),
+        "dns_tunneling": AttackScenario(
+            key="dns_tunneling",
+            label="DNS tunneling (covert-channel exfiltration)",
+            attack_type="dns_tunneling_exfiltration",
+            observed_threat_key="DNS_TUNNELING_EXFILTRATION",
+            build_detector=RuleBasedDnsTunnelingDetector,
+            generate_traffic=lambda net: traffic.generate_dns_tunneling_mininet_traffic(net, duration_seconds=15),
+            capture_packet_limit=150,
+            capture_duration_seconds=15.0,
+            capture_completion_timeout=17.0,
+            # A genuinely different exfiltration mechanism from
+            # DATA_EXFILTRATION's bulk-transfer signature -- unconfirmed
+            # until the encoded queries are actually inspected, so
+            # redirecting to a decoy captures real intelligence on what's
+            # being leaked while the covert channel never reaches its
+            # real destination. The Stackelberg payoff table
+            # independently agrees.
+            preferred_action=DefenseAction.DECOY,
+            action_score_min=0.65,
+            action_confidence_min=0.6,
+            intention="gather_attacker_intelligence_when_appropriate",
+            ppo_example_features={"packets_per_second": 2.0, "unique_destination_ports": 1},
+            ppo_threat_score=0.8,
+            ppo_confidence=0.72,
+        ),
+        "mqtt_flood": AttackScenario(
+            key="mqtt_flood",
+            label="MQTT message flood",
+            attack_type="mqtt_message_flood",
+            observed_threat_key="MQTT_MESSAGE_FLOOD",
+            build_detector=RuleBasedMqttFloodDetector,
+            generate_traffic=lambda net: traffic.generate_mqtt_flood_mininet_traffic(net, duration_seconds=110),
+            capture_packet_limit=120,
+            capture_duration_seconds=110.0,
+            capture_completion_timeout=112.0,
+            # An IoT-protocol-specific flood of otherwise-legitimate
+            # messages -- rate-limiting the publish rate defeats the
+            # attack while the broker keeps serving real clients, the
+            # same reasoning BRUTE_FORCE's own THROTTLE choice
+            # establishes. The Stackelberg payoff table independently
+            # agrees.
+            preferred_action=DefenseAction.THROTTLE,
+            action_score_min=0.6,
+            action_confidence_min=0.6,
+            intention="minimize_unnecessary_disruption",
+            ppo_example_features={"packets_per_second": 0.85, "unique_destination_ports": 1},
+            ppo_threat_score=0.75,
+            ppo_confidence=0.72,
+        ),
+        "firmware_tampering": AttackScenario(
+            key="firmware_tampering",
+            label="Firmware / configuration tampering",
+            attack_type="firmware_tampering",
+            observed_threat_key="FIRMWARE_TAMPERING",
+            build_detector=RuleBasedFirmwareTamperingDetector,
+            generate_traffic=lambda net: traffic.generate_firmware_tampering_mininet_traffic(net, duration_seconds=18),
+            capture_packet_limit=150,
+            capture_duration_seconds=18.0,
+            capture_completion_timeout=20.0,
+            # The device is already compromised and actively pushing
+            # unauthorized changes out -- deception offers nothing once
+            # tampering is underway, the same reasoning DATA_EXFILTRATION's
+            # own ISOLATE choice establishes. The Stackelberg payoff table
+            # independently agrees.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.7,
+            action_confidence_min=0.7,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 2.5, "unique_destination_ports": 1},
+            ppo_threat_score=0.83,
+            ppo_confidence=0.78,
+        ),
+        "buffer_overflow": AttackScenario(
+            key="buffer_overflow",
+            label="Buffer-overflow / fuzzing probe",
+            attack_type="buffer_overflow_probe",
+            observed_threat_key="BUFFER_OVERFLOW_PROBE",
+            build_detector=RuleBasedBufferOverflowDetector,
+            generate_traffic=lambda net: traffic.generate_buffer_overflow_mininet_traffic(net, duration_seconds=40),
+            capture_packet_limit=100,
+            # 40s, not a shorter window: see generate_buffer_overflow_
+            # mininet_traffic's own docstring for why this attack's real
+            # rate must stay below 1.0/s on *both* the payload flow and
+            # its paired TCP-ACK flow to avoid either being misclassified
+            # by an earlier-registered detector.
+            capture_duration_seconds=40.0,
+            capture_completion_timeout=42.0,
+            # Unlike EXPLOIT_PAYLOAD_INJECTION's single uncertain shot,
+            # this is a sustained, unambiguous campaign of many oversized
+            # requests -- full containment is warranted rather than
+            # deception, and the Stackelberg payoff table independently
+            # agrees.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.7,
+            action_confidence_min=0.7,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 0.8, "unique_destination_ports": 1},
+            ppo_threat_score=0.86,
+            ppo_confidence=0.8,
+        ),
+        "replay_attack": AttackScenario(
+            key="replay_attack",
+            label="Credential / command replay",
+            attack_type="credential_replay",
+            observed_threat_key="CREDENTIAL_REPLAY",
+            build_detector=RuleBasedReplayAttackDetector,
+            generate_traffic=lambda net: traffic.generate_replay_attack_mininet_traffic(net, duration_seconds=20),
+            capture_packet_limit=60,
+            capture_duration_seconds=20.0,
+            capture_completion_timeout=22.0,
+            # Rate-limiting directly defeats a replay attack's mechanism
+            # (it needs to resend fast enough to catch a still-valid
+            # window) while legitimate traffic still gets through -- the
+            # same reasoning BRUTE_FORCE's own THROTTLE choice
+            # establishes. The Stackelberg payoff table independently
+            # agrees.
+            preferred_action=DefenseAction.THROTTLE,
+            action_score_min=0.6,
+            action_confidence_min=0.55,
+            intention="minimize_unnecessary_disruption",
+            ppo_example_features={"packets_per_second": 0.85, "unique_destination_ports": 1},
+            ppo_threat_score=0.72,
+            ppo_confidence=0.68,
+        ),
+        "rogue_beacon": AttackScenario(
+            key="rogue_beacon",
+            label="Rogue configuration beacon",
+            attack_type="rogue_config_beacon",
+            observed_threat_key="ROGUE_CONFIG_BEACON",
+            build_detector=RuleBasedRogueBeaconDetector,
+            generate_traffic=lambda net: traffic.generate_rogue_beacon_mininet_traffic(net, duration_seconds=10),
+            capture_packet_limit=200,
+            capture_duration_seconds=10.0,
+            capture_completion_timeout=12.0,
+            # The lowest-confidence signature of any registered attack
+            # (a frequent-but-small outbound pattern that could still be
+            # legitimate) -- logging and watching is the least
+            # disruptive response for something this uncertain, unlike
+            # FIRMWARE_TAMPERING's larger, less frequent, more clearly
+            # hostile pushes. The Stackelberg payoff table independently
+            # agrees.
+            preferred_action=DefenseAction.ALERT,
+            action_score_min=0.5,
+            action_confidence_min=0.5,
+            intention="minimize_unnecessary_disruption",
+            ppo_example_features={"packets_per_second": 7.0, "unique_destination_ports": 1},
+            ppo_threat_score=0.6,
+            ppo_confidence=0.55,
         ),
     }
 

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 # We must use patch.dict to safely patch sys.modules without permanent global impact
 import sys
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
-from iot_defense.ml.generate_dataset import get_scenario_type
+from iot_defense.ml.generate_dataset import _DATASET_GENERATION_UNSUPPORTED, get_scenario_type
 
 # Bucket 0 is always normal; every other bucket is one registered attack, in
 # registry order -- this grows automatically as ATTACK_SCENARIOS grows, so
@@ -35,6 +35,34 @@ ATTACK_ASSERTIONS = {
     "brute_force": _assert_fixed_value_bucket("brute_force"),
     "exfiltration": _assert_fixed_value_bucket("exfiltration"),
     "exploit": _assert_fixed_value_bucket("exploit_payload_injection"),
+    # These ten were registered for the live detection/decision/response
+    # pipeline without extending generate_dataset.py's own bespoke
+    # per-attack dispatch (see get_scenario_type()'s docstring for why:
+    # deliberately deferred, since none of them are ever consulted by the
+    # RF model this dataset trains). Every one of their buckets must
+    # consistently return the unsupported sentinel, not silently fall
+    # through to some other scenario's dispatch branch.
+    "syn_flood": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "icmp_flood": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "slow_loris": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "dns_amplification": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "dns_tunneling": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "mqtt_flood": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "firmware_tampering": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "buffer_overflow": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "replay_attack": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+    "rogue_beacon": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
+}
+
+# Keys whose dataset-generation dispatch is deliberately not yet
+# implemented (see ATTACK_ASSERTIONS above) -- their scenario values are
+# the unsupported sentinel, not a name derived from the attack key, so
+# test_all_registered_scenarios_appear_over_a_larger_sample's "does this
+# key's own name appear in the scenario set" check doesn't apply to them.
+_DATASET_GENERATION_DEFERRED_KEYS = {
+    "syn_flood", "icmp_flood", "slow_loris", "dns_amplification",
+    "dns_tunneling", "mqtt_flood", "firmware_tampering", "buffer_overflow",
+    "replay_attack", "rogue_beacon",
 }
 
 
@@ -78,6 +106,9 @@ class TestScenarioScheduling(unittest.TestCase):
         top_level = {s.split('_')[0] for s in scenarios}
         self.assertIn('normal', top_level)
         for key in ATTACK_KEYS:
+            if key in _DATASET_GENERATION_DEFERRED_KEYS:
+                self.assertIn(_DATASET_GENERATION_UNSUPPORTED, scenarios)
+                continue
             # Every registered attack's own top-level prefix (its key, or
             # for multi-word keys the first underscore-separated segment)
             # must appear somewhere in the generated scenario set.

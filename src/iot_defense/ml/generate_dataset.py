@@ -306,6 +306,8 @@ def _exploit_traffic(host: Any, target_ip: str, port: int, duration: float) -> s
     )
 
 
+_DATASET_GENERATION_UNSUPPORTED = "__unsupported__"
+
 def get_scenario_type(run_number: int) -> str:
     """Deterministically assign scenario type based on run number.
 
@@ -314,6 +316,19 @@ def get_scenario_type(run_number: int) -> str:
     grows automatically as new attacks are registered. Registering a new
     attack key still requires adding its own dispatch branch below, since
     each attack's sub-variations and traffic shape are attack-specific.
+
+    Attacks registered but not yet given their own dataset-generation
+    branch return the _DATASET_GENERATION_UNSUPPORTED sentinel rather
+    than raising: ten new attacks (syn_flood through rogue_beacon) were
+    added to the live detection/decision/response pipeline without
+    extending this file's own bespoke per-attack traffic/labeling logic
+    -- deliberately deferred scope, since none of them are ever consulted
+    by the RF model this dataset trains (RF is only ever consulted as a
+    reconnaissance confirmation step, never for any other attack). Making
+    generate_dataset() skip those buckets keeps existing 5-attack dataset
+    generation working exactly as it always has, rather than crashing the
+    moment ATTACK_SCENARIOS grew past the six buckets this file already
+    knew how to handle.
     """
     num_buckets = 1 + len(_ATTACK_KEYS)
     bucket = run_number % num_buckets
@@ -337,7 +352,7 @@ def get_scenario_type(run_number: int) -> str:
         return 'exfiltration'
     if attack_key == "exploit":
         return 'exploit_payload_injection'
-    raise ValueError(f"No dataset-generation dispatch registered for attack key: {attack_key!r}")
+    return _DATASET_GENERATION_UNSUPPORTED
 
 def generate_dataset(
     *,
@@ -390,6 +405,13 @@ def generate_dataset(
 
     for run_number in range(runs):
         scenario = get_scenario_type(run_number)
+        if scenario == _DATASET_GENERATION_UNSUPPORTED:
+            # See get_scenario_type()'s own docstring: this run's bucket
+            # belongs to an attack registered for the live pipeline but
+            # not yet given its own dataset-generation branch here. Skip
+            # it cleanly (no Mininet network is even started for it)
+            # rather than crashing or mislabeling it as something else.
+            continue
         target_name, target_ip = rng.choice(target_options)
         net = None
         listener_pids = []

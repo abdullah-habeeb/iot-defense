@@ -217,6 +217,238 @@ policy:
           # real but essentially irrelevant mitigation here.
           CONTINUE: {attacker: -1.0, defender: 1.0}
           RETREAT: {attacker: -2.0, defender: 2.0}
+      TCP_SYN_FLOOD:
+        # Mirrors DOS_FLOOD's own table -- a resource-exhaustion flood,
+        # same decisive-containment reasoning: ISOLATE wins.
+        ALLOW:
+          CONTINUE: {attacker: 9.0, defender: -8.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 6.0, defender: -3.0}
+          RETREAT: {attacker: -1.0, defender: 2.0}
+        DECOY:
+          CONTINUE: {attacker: 2.0, defender: -2.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        ISOLATE:
+          CONTINUE: {attacker: -7.0, defender: 9.0}
+          RETREAT: {attacker: -8.0, defender: 6.0}
+        THROTTLE:
+          # A raw connection-attempt flood still has real bandwidth
+          # behind it -- rate-limiting helps but doesn't fully contain
+          # it the way it does a guess-rate-limited attack.
+          CONTINUE: {attacker: -2.0, defender: 5.0}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+      ICMP_PING_FLOOD:
+        # Mirrors BRUTE_FORCE's own table -- rate-limiting directly
+        # defeats this attack's mechanism while the device stays
+        # reachable: THROTTLE wins.
+        ALLOW:
+          CONTINUE: {attacker: 8.0, defender: -6.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 4.0, defender: -1.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: 1.0, defender: 1.0}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+        ISOLATE:
+          # Contains it completely, but a raw ping flood is a milder,
+          # more easily-absorbed nuisance than a resource-exhaustion or
+          # data-loss attack -- full isolation is heavier than this
+          # signature calls for.
+          CONTINUE: {attacker: -5.0, defender: 6.0}
+          RETREAT: {attacker: -6.0, defender: 5.0}
+        THROTTLE:
+          CONTINUE: {attacker: -6.0, defender: 7.5}
+          RETREAT: {attacker: -7.0, defender: 6.5}
+      SLOW_LORIS_EXHAUSTION:
+        # Mirrors BRUTE_FORCE's own table -- rate-limiting new
+        # connection attempts directly defeats a connection-exhaustion
+        # attack while legitimate traffic still gets through: THROTTLE
+        # wins.
+        ALLOW:
+          CONTINUE: {attacker: 8.0, defender: -7.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 4.5, defender: -1.5}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: 1.0, defender: 1.5}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+        ISOLATE:
+          # Contains it completely, but also blocks the device's
+          # legitimate use, not just the attacker's held-open sockets.
+          CONTINUE: {attacker: -6.0, defender: 6.5}
+          RETREAT: {attacker: -7.0, defender: 5.5}
+        THROTTLE:
+          CONTINUE: {attacker: -6.5, defender: 8.0}
+          RETREAT: {attacker: -7.5, defender: 7.0}
+      DNS_AMPLIFICATION:
+        # Mirrors DOS_FLOOD's own table -- a volumetric attack the
+        # device cannot defend against itself: ISOLATE wins.
+        ALLOW:
+          CONTINUE: {attacker: 9.0, defender: -8.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 6.0, defender: -3.0}
+          RETREAT: {attacker: -1.0, defender: 2.0}
+        DECOY:
+          CONTINUE: {attacker: 2.0, defender: -2.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        ISOLATE:
+          CONTINUE: {attacker: -7.0, defender: 9.0}
+          RETREAT: {attacker: -8.0, defender: 6.0}
+        THROTTLE:
+          CONTINUE: {attacker: -2.0, defender: 5.0}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+      DNS_TUNNELING_EXFILTRATION:
+        # Mirrors EXPLOIT_PAYLOAD_INJECTION's own table -- unconfirmed
+        # until the encoded queries are actually inspected, so
+        # redirecting captures real intelligence on what's being leaked
+        # while the real device never completes the leak: DECOY wins.
+        ALLOW:
+          # A real, ongoing leak, though slower and less certain per
+          # query than DATA_EXFILTRATION's own bulk transfer.
+          CONTINUE: {attacker: 8.5, defender: -7.5}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 5.0, defender: -2.5}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: -4.0, defender: 5.5}
+          RETREAT: {attacker: -3.0, defender: 9.0}
+        ISOLATE:
+          # Contains it, but forfeits the chance to learn what's
+          # actually being tunneled out -- heavier than the uncertainty
+          # warrants for a channel not yet confirmed.
+          CONTINUE: {attacker: -6.0, defender: 6.0}
+          RETREAT: {attacker: -7.0, defender: 5.0}
+        THROTTLE:
+          # Slows the leak but doesn't stop it -- still a breach in
+          # progress, just a slower one.
+          CONTINUE: {attacker: 1.0, defender: 2.5}
+          RETREAT: {attacker: -2.0, defender: 3.5}
+      MQTT_MESSAGE_FLOOD:
+        # Mirrors BRUTE_FORCE's own table -- rate-limiting the publish
+        # rate defeats this attack while the broker keeps serving real
+        # clients: THROTTLE wins.
+        ALLOW:
+          CONTINUE: {attacker: 7.5, defender: -6.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 4.0, defender: -1.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: 1.0, defender: 1.5}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+        ISOLATE:
+          # Contains it completely, but also blocks every other
+          # legitimate message on the same broker connection, not just
+          # the flood.
+          CONTINUE: {attacker: -5.5, defender: 6.0}
+          RETREAT: {attacker: -6.5, defender: 5.0}
+        THROTTLE:
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
+      FIRMWARE_TAMPERING:
+        # Mirrors DATA_EXFILTRATION's own table -- the device is already
+        # compromised and actively pushing unauthorized changes out;
+        # deception offers nothing once tampering is underway: ISOLATE
+        # wins.
+        ALLOW:
+          CONTINUE: {attacker: 9.5, defender: -8.5}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 7.0, defender: -4.0}
+          RETREAT: {attacker: -2.0, defender: 2.0}
+        DECOY:
+          CONTINUE: {attacker: 3.0, defender: -3.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ISOLATE:
+          CONTINUE: {attacker: -8.0, defender: 9.5}
+          RETREAT: {attacker: -9.0, defender: 7.5}
+        THROTTLE:
+          # Slows the pushes but doesn't stop integrity from being
+          # compromised further -- still an active tampering breach.
+          CONTINUE: {attacker: 1.0, defender: 3.0}
+          RETREAT: {attacker: -2.0, defender: 4.0}
+      BUFFER_OVERFLOW_PROBE:
+        # Unlike EXPLOIT_PAYLOAD_INJECTION's single uncertain shot, this
+        # is a sustained, unambiguous campaign -- full containment is
+        # warranted rather than deception: ISOLATE wins.
+        ALLOW:
+          CONTINUE: {attacker: 9.0, defender: -7.5}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 5.5, defender: -2.5}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          # Still gathers some intelligence, but a sustained campaign
+          # has already had many chances to succeed against the real
+          # device by the time a decoy is stood up -- less clearly
+          # correct here than for a single-shot exploit attempt.
+          CONTINUE: {attacker: -3.0, defender: 4.5}
+          RETREAT: {attacker: -3.0, defender: 8.0}
+        ISOLATE:
+          CONTINUE: {attacker: -7.0, defender: 8.5}
+          RETREAT: {attacker: -8.0, defender: 6.5}
+        THROTTLE:
+          CONTINUE: {attacker: -1.5, defender: 2.5}
+          RETREAT: {attacker: -2.5, defender: 3.5}
+      CREDENTIAL_REPLAY:
+        # Mirrors BRUTE_FORCE's own table -- rate-limiting directly
+        # defeats a replay attack's mechanism (it needs to resend fast
+        # enough to catch a still-valid window) while legitimate traffic
+        # still gets through: THROTTLE wins.
+        ALLOW:
+          CONTINUE: {attacker: 7.0, defender: -5.5}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 3.5, defender: -0.5}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        DECOY:
+          CONTINUE: {attacker: 1.0, defender: 1.5}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+        ISOLATE:
+          CONTINUE: {attacker: -5.5, defender: 6.0}
+          RETREAT: {attacker: -6.5, defender: 5.0}
+        THROTTLE:
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
+      ROGUE_CONFIG_BEACON:
+        # The lowest-confidence signature of any registered attack -- a
+        # frequent-but-small outbound pattern that could still be
+        # legitimate. Every disruptive response costs more legitimate-
+        # service value than this uncertain a signal warrants; logging
+        # and watching wins on defender utility precisely because it's
+        # the only response that doesn't risk that cost for a signal
+        # this weak.
+        ALLOW:
+          # Missing a real tampered device has a real cost, but it's
+          # bounded and slow here, not an active ongoing breach.
+          CONTINUE: {attacker: 3.0, defender: -1.0}
+          RETREAT: {attacker: 0.0, defender: 2.0}
+        ALERT:
+          CONTINUE: {attacker: 1.0, defender: 3.0}
+          RETREAT: {attacker: -1.0, defender: 3.5}
+        DECOY:
+          # Wastes real effort investigating what is, most of the time,
+          # still-legitimate traffic at this confidence level.
+          CONTINUE: {attacker: -0.5, defender: 1.0}
+          RETREAT: {attacker: -1.0, defender: 2.0}
+        ISOLATE:
+          # Full containment over a low-confidence signal risks cutting
+          # off a legitimate device for nothing -- heavier than the
+          # uncertainty warrants, the same reasoning
+          # EXPLOIT_PAYLOAD_INJECTION's own ISOLATE downgrade already
+          # establishes, just more so here.
+          CONTINUE: {attacker: -3.0, defender: 1.5}
+          RETREAT: {attacker: -4.0, defender: 1.0}
+        THROTTLE:
+          # Rate isn't really the issue for a low-volume beacon -- a
+          # real but largely pointless mitigation here.
+          CONTINUE: {attacker: -0.5, defender: 1.5}
+          RETREAT: {attacker: -1.5, defender: 2.0}
   ppo:
     # model_path/fallback_policy document the convention every real call
     # site (train_ppo.py's own default output path, harness.py,
