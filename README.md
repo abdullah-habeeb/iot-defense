@@ -24,7 +24,7 @@ For a research-style comparison of the 3-policy system against simpler baselines
 - Open vSwitch 3.3.9
 
 ## Attack types
-Five attack types are currently registered, selectable at demo start via `--attack <key>`:
+Fifteen attack types are currently registered, selectable at demo start via `--attack <key>`. Every rule-based detector's numeric thresholds were hand-placed in a real, unclaimed gap between its neighbors' own thresholds (not guessed), and cross-checked two ways: a generic test runs every attack's own synthetic signature through the *complete* detector sweep (not just its own detector) and confirms no earlier-registered one claims it first, and real live Mininet runs of all 15 (repeated across many rounds) confirm the same holds under real-world timing variance, not just on paper.
 
 | Key | Label | Signature | Preferred response |
 |---|---|---|---|
@@ -33,8 +33,22 @@ Five attack types are currently registered, selectable at demo start via `--atta
 | `brute_force` | Credential stuffing | Single port, moderate sustained rate, many attempts | `THROTTLE` |
 | `exfiltration` | Data exfiltration | Reversed direction (device → attacker), few packets, large payloads | `ISOLATE` |
 | `exploit` | Exploit payload injection | Single port, few packets, unusually large payload | `DECOY` |
+| `syn_flood` | TCP SYN flood | Refused connects, one port, no completed handshakes | `ISOLATE` |
+| `icmp_flood` | ICMP ping flood | Padded, high-volume ICMP echo traffic | `THROTTLE` |
+| `slow_loris` | Slowloris connection exhaustion | Many concurrent held-open connections, many source ports | `THROTTLE` |
+| `dns_amplification` | DNS amplification / reflection | Oversized inbound UDP responses | `ISOLATE` |
+| `dns_tunneling` | DNS tunneling (covert-channel exfiltration) | Many small, frequent outbound UDP queries (reversed direction) | `DECOY` |
+| `mqtt_flood` | MQTT message flood | Many real completed TCP connections to the broker port | `THROTTLE` |
+| `firmware_tampering` | Firmware / configuration tampering | Periodic oversized outbound pushes (reversed direction) | `ISOLATE` |
+| `buffer_overflow` | Buffer-overflow / fuzzing probe | Sustained campaign of oversized TCP payloads, one connection | `ISOLATE` |
+| `replay_attack` | Credential / command replay | Repeated uniform small UDP payload | `THROTTLE` |
+| `rogue_beacon` | Rogue configuration beacon | Frequent small outbound pattern, low confidence (reversed direction) | `ALERT` |
 
-`exploit` is DECOY's second scenario: reconnaissance's decoy only observes a scan already known to be harmless probing, while this one redirects an unconfirmed, potentially dangerous payload away from the real device and captures it for analysis — a genuinely different reason to prefer deception, not the same one repeated.
+`exploit` is DECOY's second scenario: reconnaissance's decoy only observes a scan already known to be harmless probing, while this one redirects an unconfirmed, potentially dangerous payload away from the real device and captures it for analysis — a genuinely different reason to prefer deception, not the same one repeated. `rogue_beacon` is the only attack whose preferred response is `ALERT` — the system's least disruptive action, reserved for a signature deliberately designed to be its lowest-confidence one, where every more disruptive response costs more legitimate-service value than the signal actually warrants.
+
+`slow_loris` relies on `unique_source_ports` — many concurrent connections each claiming a fresh ephemeral port — a signal none of the first five attacks' detectors use. Three attacks (`dns_tunneling`, `firmware_tampering`, `rogue_beacon`) reverse traffic direction like `exfiltration` does, but with genuinely different shapes: `dns_tunneling` is many small frequent queries (the shape a naive payload-size-only exfiltration detector would miss), `firmware_tampering` is larger, less frequent pushes, and `rogue_beacon` is the same size range as `dns_tunneling` at a meaningfully higher frequency. `mqtt_flood`, `buffer_overflow`, and `replay_attack` were all originally paced into the same narrow packets-per-second gap `syn_flood` occupies (strictly between `brute_force`'s and `dos`'s own thresholds); repeated live runs found that gap genuinely too narrow for more than one attack under this project's own real Mininet timing variance, so `mqtt_flood`, `buffer_overflow`, and `replay_attack` were moved to a much wider, uncontested sub-1.0-packets-per-second rate instead — see each one's own traffic-generator docstring in `simulation/traffic.py` for the real live numbers behind that call.
+
+ML dataset generation (`ml/generate_dataset.py`) and RF training are **not yet extended** to these ten new attacks — deliberately deferred, since the trained RF model is only ever consulted as a reconnaissance confirmation step (see "Controlled ML detection experiment" below), never for any other attack, so it isn't on these attacks' own detection path. `get_scenario_type()` skips their bucket cleanly rather than crashing, so existing 5-attack dataset generation is unaffected.
 
 Adding a new attack means adding one `AttackScenario` entry to the registry, plus its own traffic generator and rule-based detector — not touching every dependent file by hand.
 
@@ -110,7 +124,8 @@ Then open **http://<host>:8000** in a browser.
 ### Run the live demo (requires Mininet, typically sudo)
 ```bash
 cd /home/abdullah/iot-defense
-sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <reconnaissance|dos|brute_force|exfiltration|exploit>
+sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <key>
+# <key> is any registered key -- see "Attack types" above for the full list of 15
 ```
 Omit `--attack` to be prompted interactively. The dashboard server and the demo process share `data/dashboard/state.json` and the controller's SSE event queue when run together as one process; run the dashboard server itself with the demo controller instantiated once (as `server.py` does) so browser clients observe the same controller instance.
 
@@ -135,6 +150,8 @@ The controller's `cleanup()` tears down the response executor (removing any ipta
 - Stackelberg utilities are configured/modelled values (see `config/policies.yaml`), not measured real-world costs.
 - Only two attack signatures (reconnaissance, credential-stuffing) are genuinely distinguished by connection *rate/pattern*; the flood and exfiltration signatures rely more heavily on volume and direction, and `exploit` relies on payload size rather than any of those. A malware C2 beaconing attack or similar timing-based signature is not currently detectable — it would need a new flow feature (inter-arrival timing regularity) this project doesn't compute yet.
 - `exploit`'s rule-based detector separates a single oversized request from ordinary low-volume traffic almost entirely by `average_packet_size` — packet_count and port diversity alone overlap with real observed normal-traffic values, so this signature has the least headroom of any currently registered detector if normal traffic patterns ever shift. A live capture of `generate_exploit_mininet_traffic` measured `average_packet_size=442` against a detection window of 250-550 and real normal traffic's observed max of 111.6 (see `data/ml/controlled_flows_6class.csv`) — real margin on both sides today, not a coin flip, but a narrower gap than the other four attacks have.
+- Run durations vary a lot across the 15 attacks, by design, not by accident — most finish in 4-25s, but `mqtt_flood` takes ~110s and `buffer_overflow` ~40s: both were deliberately slowed down to a real, wide-margin sub-1.0 packets-per-second rate after live runs found the alternative (a faster, narrower rate shared with other attacks) intermittently misclassified under this VM's own real timing variance. A slower, longer, reliable run was preferred over a faster, occasionally-wrong one.
+- The `--attack` CLI choice is registry-driven (`ATTACK_SCENARIOS`), so all 15 keys are always available at the live demo and always exercise the real detection/decision/response pipeline — but ML dataset generation and RF training only cover the original 5 (see "Attack types" above).
 
 ## Virtual environment
 ```bash
