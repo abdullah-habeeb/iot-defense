@@ -75,6 +75,59 @@ def test_start_multi_connection_listener_extracts_real_pid_from_noisy_heredoc_ou
     assert pid == "162191"
 
 
+def test_start_multi_connection_listener_retries_once_on_a_genuinely_empty_first_read():
+    """Regression coverage for a real bug found via a live Mininet repro
+    against the evaluation harness: under real repeated long-lived-session
+    load (16 sequential conditions reusing one host session), `echo $!`
+    came back completely empty on its first read, not just noisy --
+    something the noisy-output fix above narrowed but didn't eliminate.
+    `$!` is already set correctly by this point (only the *read* raced),
+    so a second call on the same host session must recover it rather than
+    raising immediately."""
+
+    class EmptyOnceHost(FakeHost):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._pid_reads = 0
+
+        def cmd(self, command: str) -> str:
+            self.commands.append(command)
+            if "ss -ltn" in command:
+                return "LISTEN 0 128 *:2222"
+            if command.startswith("kill "):
+                return ""
+            if command == "echo $!":
+                self._pid_reads += 1
+                return "" if self._pid_reads == 1 else "162191"
+            return ""
+
+    host = EmptyOnceHost("sensor", "10.0.0.10")
+    pid = start_multi_connection_listener(host, 2222)
+
+    assert pid == "162191"
+    assert host.commands.count("echo $!") == 2
+
+
+def test_start_multi_connection_listener_still_raises_if_both_reads_are_empty():
+    class AlwaysEmptyHost(FakeHost):
+        def cmd(self, command: str) -> str:
+            self.commands.append(command)
+            if "ss -ltn" in command:
+                return "LISTEN 0 128 *:2222"
+            if command.startswith("kill "):
+                return ""
+            if command == "echo $!":
+                return ""
+            return ""
+
+    host = AlwaysEmptyHost("sensor", "10.0.0.10")
+    try:
+        start_multi_connection_listener(host, 2222)
+        assert False, "expected a RuntimeError when both PID reads come back empty"
+    except RuntimeError:
+        pass
+
+
 def test_start_multi_connection_listener_waits_for_readiness():
     """Regression coverage for the same readiness race this project has
     hit before (_start_tcp_listener in generate_dataset.py): traffic sent

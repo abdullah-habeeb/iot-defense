@@ -64,6 +64,22 @@ def start_multi_connection_listener(host: Any, port: int) -> str:
     raw_output = host.cmd("echo $!")
     digit_tokens = re.findall(r"\d+", raw_output)
     if not digit_tokens:
+        # A real, confirmed failure mode under the evaluation harness's own
+        # long-lived host-session reuse (many trials issuing host.cmd()
+        # calls back-to-back on the same persistent shell): `echo $!`
+        # occasionally comes back completely empty, not just noisy --
+        # something this function's own separate-call fix (see the comment
+        # above) narrowed but did not fully eliminate under that much real
+        # repeated load. `$!` is a shell variable that is already set
+        # correctly by this point (the background job did start; only the
+        # *read* of it raced), so a second, later call on the same host
+        # session reliably recovers the real value rather than genuinely
+        # losing it -- confirmed via a live repro against the harness
+        # (slow_loris_exhaustion, condition 9 of 16 in one real run).
+        time.sleep(0.2)
+        raw_output = host.cmd("echo $!")
+        digit_tokens = re.findall(r"\d+", raw_output)
+    if not digit_tokens:
         raise RuntimeError(f"Could not determine listener PID from host.cmd() output: {raw_output!r}")
     pid = digit_tokens[-1]
     # Block until the listener has actually bound, not a fixed guess --
@@ -740,6 +756,14 @@ class TrafficGenerator:
         sensor.cmd(launch_cmd)
         raw_output = sensor.cmd("echo $!")
         digit_tokens = re.findall(r"\d+", raw_output)
+        if not digit_tokens:
+            # See start_multi_connection_listener's own matching comment --
+            # a confirmed transient pty-read race under real repeated
+            # long-lived-session load (the evaluation harness), not a lost
+            # value; a second call on the same host session recovers it.
+            time.sleep(0.2)
+            raw_output = sensor.cmd("echo $!")
+            digit_tokens = re.findall(r"\d+", raw_output)
         if not digit_tokens:
             raise RuntimeError(f"Could not determine listener PID from host.cmd() output: {raw_output!r}")
         listener_pid = digit_tokens[-1]
