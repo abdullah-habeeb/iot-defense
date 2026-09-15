@@ -36,3 +36,55 @@ alert udp 10.0.0.10 any -> 10.0.0.100 4444 (msg:"LAB data exfiltration to attack
 # exploit_payload_injection: a small number of oversized UDP requests
 # (~400-byte payload) to the simulated management port (9200).
 alert udp 10.0.0.100 any -> 10.0.0.10 9200 (msg:"LAB exploit payload injection"; dsize:>300; sid:9000005; rev:1;)
+
+# --- The 10 attacks added in the 15-attack expansion (see registry.py) ---
+# Values below (ports, payload markers, real per-attempt spacing) are read
+# directly from each generate_*_mininet_traffic() method in
+# simulation/traffic.py, not estimated -- the same standard the five rules
+# above were already held to. sid 9000006-9000015.
+
+# tcp_syn_flood: refused connects to a single fixed port (6001) at ~20.8/s
+# (0.048s spacing) -- never a completed handshake, just a real SYN each
+# time. A rate threshold, not a bare content/dsize match, because a lone
+# SYN is common in ordinary traffic; it's the concentrated rate to one
+# port that makes this an attack.
+alert tcp 10.0.0.100 any -> 10.0.0.10 6001 (msg:"LAB TCP SYN flood"; flags:S; threshold: type threshold, track by_src, count 10, seconds 3; sid:9000006; rev:1;)
+
+# icmp_ping_flood: padded (220-byte) ICMP echo requests via the real `ping`
+# binary at ~10/s. Padding size is the real disambiguator (see
+# RuleBasedIcmpFloodDetector's own docstring) so it's matched here too, on
+# top of a rate threshold since ICMP echo alone is common background noise.
+alert icmp 10.0.0.100 any -> 10.0.0.10 any (msg:"LAB ICMP ping flood"; itype:8; dsize:>200; threshold: type threshold, track by_src, count 8, seconds 3; sid:9000007; rev:1;)
+
+# slow_loris_exhaustion: ~28 concurrent TCP connections to port 7001, each
+# sending one 1000-byte 'H'-filled chunk right after connecting.
+alert tcp 10.0.0.100 any -> 10.0.0.10 7001 (msg:"LAB slow-loris connection exhaustion"; content:"HHHH"; sid:9000008; rev:1;)
+
+# dns_amplification: oversized (570-byte) UDP "responses" arriving at the
+# sensor on port 53 -- the shape a real reflection victim sees.
+alert udp 10.0.0.100 any -> 10.0.0.10 53 (msg:"LAB DNS amplification oversized response"; dsize:>500; sid:9000009; rev:1;)
+
+# dns_tunneling_exfiltration: direction reversed (sensor is the source) --
+# many small (220-byte) encoded-looking UDP "queries" leaving on port 53.
+alert udp 10.0.0.10 any -> 10.0.0.100 53 (msg:"LAB DNS tunneling covert channel"; dsize:>150; sid:9000010; rev:1;)
+
+# mqtt_message_flood: many real, completed TCP connections to the
+# broker port (1883), each sending a fixed "PUBLISH" marker.
+alert tcp 10.0.0.100 any -> 10.0.0.10 1883 (msg:"LAB MQTT publish flood"; content:"PUBLISH"; sid:9000011; rev:1;)
+
+# firmware_tampering: direction reversed -- periodic oversized (570-byte)
+# UDP config/firmware pushes leaving the sensor on port 7443.
+alert udp 10.0.0.10 any -> 10.0.0.100 7443 (msg:"LAB firmware/config tampering exfiltration"; dsize:>500; sid:9000012; rev:1;)
+
+# buffer_overflow_probe: a sustained campaign of oversized (650-byte)
+# payloads on one persistent TCP connection to port 7100.
+alert tcp 10.0.0.100 any -> 10.0.0.10 7100 (msg:"LAB buffer overflow probe campaign"; dsize:>500; sid:9000013; rev:1;)
+
+# credential_replay: a fixed captured-token payload re-sent repeatedly over
+# UDP to port 6668.
+alert udp 10.0.0.100 any -> 10.0.0.10 6668 (msg:"LAB credential/command replay"; content:"TOKEN=stale-session-abc123"; sid:9000014; rev:1;)
+
+# rogue_config_beacon: direction reversed -- frequent small (220-byte) UDP
+# beacons leaving the sensor on port 7999, at a meaningfully higher rate
+# (~9/s) than firmware_tampering's own slow, infrequent pushes.
+alert udp 10.0.0.10 any -> 10.0.0.100 7999 (msg:"LAB rogue configuration beacon"; dsize:>150; sid:9000015; rev:1;)
