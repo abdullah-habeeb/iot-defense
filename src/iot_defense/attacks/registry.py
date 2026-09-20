@@ -174,14 +174,21 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_packet_limit=100,
             capture_duration_seconds=6.0,
             capture_completion_timeout=7.0,
-            # Rate-limiting the repeated attempts defeats a brute-force
-            # attack's actual mechanism (it needs a high guess rate to
-            # succeed) while leaving the device reachable for a legitimate
-            # user -- strictly better than fully isolating it, which
-            # achieves the same containment at the cost of also blocking
-            # legitimate access. The Stackelberg payoff table below
-            # independently arrives at the same choice.
-            preferred_action=DefenseAction.THROTTLE,
+            # Originally THROTTLE (rate-limiting the repeated attempts
+            # defeats a brute-force attack's actual mechanism while
+            # leaving the device reachable) -- still true, and still a
+            # real, live-verified mitigation (7/56 attempts got through
+            # under a 2/sec hashlimit). But this lab's brute_force traffic
+            # always comes from one fixed, identifiable attacker host, so
+            # BLOCK_SOURCE does strictly better with the same "legitimate
+            # access preserved" property: 0/N attempts get through, not
+            # 7/56, and every OTHER source stays completely unaffected,
+            # not just rate-limited. This is not a general replacement for
+            # THROTTLE -- a real distributed/botnet-driven brute force has
+            # no single source to block, which is exactly the case
+            # THROTTLE (still used elsewhere in this registry) covers. The
+            # Stackelberg payoff table below independently agrees.
+            preferred_action=DefenseAction.BLOCK_SOURCE,
             action_score_min=0.65,
             action_confidence_min=0.65,
             intention="contain_malicious_activity",
@@ -274,8 +281,14 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_completion_timeout=6.0,
             # Rate-limiting directly defeats a ping flood's mechanism
             # while leaving the device reachable -- the same reasoning
-            # BRUTE_FORCE's own THROTTLE choice already establishes, and
-            # the Stackelberg payoff table independently agrees.
+            # BRUTE_FORCE's own original THROTTLE choice already
+            # establishes, and the Stackelberg payoff table independently
+            # agrees. (throttle()'s iptables rule was, until fixed this
+            # pass, hardcoded to TCP SYNs -- meaning this attack's own
+            # THROTTLE response reported "success" while never matching a
+            # single one of its real ICMP packets. throttle() is now
+            # protocol-aware; this is the one registered attack that fix
+            # actually changes the live behavior of.)
             preferred_action=DefenseAction.THROTTLE,
             action_score_min=0.65,
             action_confidence_min=0.65,
@@ -321,11 +334,17 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_packet_limit=200,
             capture_duration_seconds=9.0,
             capture_completion_timeout=11.0,
-            # A volumetric attack the device cannot defend against by
-            # itself -- full containment is the decisive response, same
-            # reasoning as DOS_FLOOD, and the Stackelberg payoff table
-            # independently agrees.
-            preferred_action=DefenseAction.ISOLATE,
+            # Originally ISOLATE, mirroring DOS_FLOOD's own full-
+            # containment reasoning -- but this attack's real mechanism is
+            # bulk *byte volume* from the reflector/attacker's own egress
+            # (~570-byte UDP responses sent rapidly), not a raw packet-
+            # count flood, and unlike a SYN flood a byte-rate cap actually
+            # bites here. BANDWIDTH_CAP constrains the attack at its real
+            # source instead of taking the target fully offline -- the
+            # target stays reachable to legitimate traffic throughout,
+            # something full ISOLATE can't offer. The Stackelberg payoff
+            # table below independently agrees.
+            preferred_action=DefenseAction.BANDWIDTH_CAP,
             action_score_min=0.7,
             action_confidence_min=0.7,
             intention="contain_malicious_activity",
@@ -392,12 +411,18 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_packet_limit=150,
             capture_duration_seconds=18.0,
             capture_completion_timeout=20.0,
-            # The device is already compromised and actively pushing
-            # unauthorized changes out -- deception offers nothing once
-            # tampering is underway, the same reasoning DATA_EXFILTRATION's
-            # own ISOLATE choice establishes. The Stackelberg payoff table
-            # independently agrees.
-            preferred_action=DefenseAction.ISOLATE,
+            # Originally ISOLATE, mirroring DATA_EXFILTRATION's own
+            # reasoning -- still true that deception offers nothing once
+            # tampering is underway. But unlike a data leak (where full
+            # severance has no downside once the data's gone), a tampered
+            # device is one you actively want to *remediate*, and full
+            # ISOLATE cuts off the very path a corrective push would need.
+            # QUARANTINE keeps the device reachable to the network's other
+            # known-legitimate peers under a default-deny policy while
+            # cutting it off from the attacker specifically -- contained,
+            # but not unreachable for recovery. The Stackelberg payoff
+            # table below independently agrees.
+            preferred_action=DefenseAction.QUARANTINE,
             action_score_min=0.7,
             action_confidence_min=0.7,
             intention="contain_malicious_activity",
@@ -420,12 +445,17 @@ def _build_registry() -> dict[str, AttackScenario]:
             # by an earlier-registered detector.
             capture_duration_seconds=40.0,
             capture_completion_timeout=42.0,
-            # Unlike EXPLOIT_PAYLOAD_INJECTION's single uncertain shot,
-            # this is a sustained, unambiguous campaign of many oversized
-            # requests -- full containment is warranted rather than
-            # deception, and the Stackelberg payoff table independently
-            # agrees.
-            preferred_action=DefenseAction.ISOLATE,
+            # Originally ISOLATE -- still true that this sustained,
+            # unambiguous campaign warrants full containment over
+            # deception. But unlike a flood or a scan, this attack's
+            # entire campaign runs over ONE persistent TCP connection (see
+            # generate_buffer_overflow_mininet_traffic's own docstring),
+            # so it is this registry's one genuinely session-oriented
+            # attack: RESET_SESSIONS kills exactly that connection outright
+            # -- more surgical than taking the whole interface down, and
+            # with no standing rule left behind afterward. The Stackelberg
+            # payoff table below independently agrees.
+            preferred_action=DefenseAction.RESET_SESSIONS,
             action_score_min=0.7,
             action_confidence_min=0.7,
             intention="contain_malicious_activity",
@@ -443,13 +473,19 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_packet_limit=60,
             capture_duration_seconds=20.0,
             capture_completion_timeout=22.0,
-            # Rate-limiting directly defeats a replay attack's mechanism
-            # (it needs to resend fast enough to catch a still-valid
-            # window) while legitimate traffic still gets through -- the
-            # same reasoning BRUTE_FORCE's own THROTTLE choice
-            # establishes. The Stackelberg payoff table independently
+            # Originally THROTTLE -- but this attack's traffic is UDP, and
+            # THROTTLE's iptables rule was, until fixed this pass, TCP-only
+            # (`-p tcp --syn`), meaning it never actually matched a single
+            # packet of this attack's real traffic despite reporting
+            # "success". Now that throttle() is protocol-aware this would
+            # work, but BLOCK_SOURCE is still the better fit on its own
+            # merits, the same reasoning BRUTE_FORCE's own reassignment
+            # establishes: this lab's replay traffic comes from one fixed,
+            # identifiable source, so blocking it outright beats merely
+            # slowing it down, with the same "other sources unaffected"
+            # property. The Stackelberg payoff table below independently
             # agrees.
-            preferred_action=DefenseAction.THROTTLE,
+            preferred_action=DefenseAction.BLOCK_SOURCE,
             action_score_min=0.6,
             action_confidence_min=0.55,
             intention="minimize_unnecessary_disruption",
@@ -467,14 +503,18 @@ def _build_registry() -> dict[str, AttackScenario]:
             capture_packet_limit=200,
             capture_duration_seconds=10.0,
             capture_completion_timeout=12.0,
-            # The lowest-confidence signature of any registered attack
-            # (a frequent-but-small outbound pattern that could still be
-            # legitimate) -- logging and watching is the least
-            # disruptive response for something this uncertain, unlike
-            # FIRMWARE_TAMPERING's larger, less frequent, more clearly
-            # hostile pushes. The Stackelberg payoff table independently
-            # agrees.
-            preferred_action=DefenseAction.ALERT,
+            # Originally ALERT -- still the lowest-confidence signature of
+            # any registered attack (a frequent-but-small outbound pattern
+            # that could still be legitimate), so still the least
+            # disruptive category of response, unlike FIRMWARE_TAMPERING's
+            # larger, less frequent, more clearly hostile pushes. But a
+            # single log line is a weaker response to genuine uncertainty
+            # than actually gathering evidence: FORENSIC_CAPTURE preserves
+            # a real pcap plus connection/neighbor state for later review
+            # -- still zero disruption to the device, strictly more useful
+            # than ALERT if this ever needs a second look. The Stackelberg
+            # payoff table below independently agrees.
+            preferred_action=DefenseAction.FORENSIC_CAPTURE,
             action_score_min=0.5,
             action_confidence_min=0.5,
             intention="minimize_unnecessary_disruption",

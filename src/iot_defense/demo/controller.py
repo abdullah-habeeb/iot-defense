@@ -37,6 +37,11 @@ PHASES = (
     "DECOY_ACTIVE",
     "ISOLATED",
     "THROTTLED",
+    "BLOCKED_SOURCE",
+    "QUARANTINED",
+    "SESSIONS_RESET",
+    "FORENSICS_CAPTURED",
+    "BANDWIDTH_CAPPED",
     "RESTORING",
     "RESTORED",
     "COMPLETE",
@@ -98,6 +103,11 @@ def _initial_state() -> dict[str, Any]:
             "decoy_interactions": 0,
             "isolations": 0,
             "throttles": 0,
+            "blocks": 0,
+            "quarantines": 0,
+            "session_resets": 0,
+            "forensic_captures": 0,
+            "bandwidth_caps": 0,
             "restorations": 0,
             "detection_latency_ms": None,
             "response_latency_ms": None,
@@ -440,6 +450,34 @@ class DemoController:
                 f"Connection attempts to {selected.target_ip} rate-limited "
                 f"({throttle_details.get('rate', '?')}, real iptables hashlimit)"
             )
+        elif action == DefenseAction.BLOCK_SOURCE:
+            post_phase = "BLOCKED_SOURCE"
+            node_updates = {"sensor": "SOURCE BLOCKED"}
+            decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
+            block_details = result_dict.get("details", {})
+            tl_msg = f"Attacker source {block_details.get('source_ip', selected.source_ip)} blocked at {selected.target_ip}"
+        elif action == DefenseAction.QUARANTINE:
+            post_phase = "QUARANTINED"
+            node_updates = {"sensor": "QUARANTINED"}
+            decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
+            tl_msg = f"{selected.target_ip} quarantined to a default-deny allowlist of known-legitimate peers"
+        elif action == DefenseAction.RESET_SESSIONS:
+            post_phase = "SESSIONS_RESET"
+            node_updates = {"sensor": "SESSIONS RESET"}
+            decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
+            tl_msg = f"Live connections between {selected.target_ip} and {selected.source_ip} were terminated"
+        elif action == DefenseAction.FORENSIC_CAPTURE:
+            post_phase = "FORENSICS_CAPTURED"
+            node_updates = {"sensor": "MONITORED"}
+            decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
+            forensic_details = result_dict.get("details", {})
+            tl_msg = f"Evidence captured to {forensic_details.get('pcap_path', '?')} — no network change"
+        elif action == DefenseAction.BANDWIDTH_CAP:
+            post_phase = "BANDWIDTH_CAPPED"
+            node_updates = {"attacker": "BANDWIDTH CAPPED"}
+            decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
+            bandwidth_details = result_dict.get("details", {})
+            tl_msg = f"Attacker egress bandwidth capped ({bandwidth_details.get('rate', '?')}, real tc tbf)"
         else:
             post_phase = "OBSERVING"
             node_updates = {}
@@ -452,6 +490,11 @@ class DemoController:
             "threats_detected": self.state["metrics"]["threats_detected"] + 1,
             "isolations": self.state["metrics"]["isolations"] + (1 if action == DefenseAction.ISOLATE else 0),
             "throttles": self.state["metrics"].get("throttles", 0) + (1 if action == DefenseAction.THROTTLE else 0),
+            "blocks": self.state["metrics"].get("blocks", 0) + (1 if action == DefenseAction.BLOCK_SOURCE else 0),
+            "quarantines": self.state["metrics"].get("quarantines", 0) + (1 if action == DefenseAction.QUARANTINE else 0),
+            "session_resets": self.state["metrics"].get("session_resets", 0) + (1 if action == DefenseAction.RESET_SESSIONS else 0),
+            "forensic_captures": self.state["metrics"].get("forensic_captures", 0) + (1 if action == DefenseAction.FORENSIC_CAPTURE else 0),
+            "bandwidth_caps": self.state["metrics"].get("bandwidth_caps", 0) + (1 if action == DefenseAction.BANDWIDTH_CAP else 0),
             "decoy_interactions": decoy_interactions,
         }
 

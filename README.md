@@ -30,21 +30,21 @@ Fifteen attack types are currently registered, selectable at demo start via `--a
 |---|---|---|---|
 | `reconnaissance` | Port scan | Many destination ports, moderate rate | `DECOY` |
 | `dos` | DDoS flood | Single port, very high packet rate | `ISOLATE` |
-| `brute_force` | Credential stuffing | Single port, moderate sustained rate, many attempts | `THROTTLE` |
+| `brute_force` | Credential stuffing | Single port, moderate sustained rate, many attempts | `BLOCK_SOURCE` |
 | `exfiltration` | Data exfiltration | Reversed direction (device → attacker), few packets, large payloads | `ISOLATE` |
 | `exploit` | Exploit payload injection | Single port, few packets, unusually large payload | `DECOY` |
 | `syn_flood` | TCP SYN flood | Refused connects, one port, no completed handshakes | `ISOLATE` |
 | `icmp_flood` | ICMP ping flood | Padded, high-volume ICMP echo traffic | `THROTTLE` |
 | `slow_loris` | Slowloris connection exhaustion | Many concurrent held-open connections, many source ports | `THROTTLE` |
-| `dns_amplification` | DNS amplification / reflection | Oversized inbound UDP responses | `ISOLATE` |
+| `dns_amplification` | DNS amplification / reflection | Oversized inbound UDP responses | `BANDWIDTH_CAP` |
 | `dns_tunneling` | DNS tunneling (covert-channel exfiltration) | Many small, frequent outbound UDP queries (reversed direction) | `DECOY` |
 | `mqtt_flood` | MQTT message flood | Many real completed TCP connections to the broker port | `THROTTLE` |
-| `firmware_tampering` | Firmware / configuration tampering | Periodic oversized outbound pushes (reversed direction) | `ISOLATE` |
-| `buffer_overflow` | Buffer-overflow / fuzzing probe | Sustained campaign of oversized TCP payloads, one connection | `ISOLATE` |
-| `replay_attack` | Credential / command replay | Repeated uniform small UDP payload | `THROTTLE` |
-| `rogue_beacon` | Rogue configuration beacon | Frequent small outbound pattern, low confidence (reversed direction) | `ALERT` |
+| `firmware_tampering` | Firmware / configuration tampering | Periodic oversized outbound pushes (reversed direction) | `QUARANTINE` |
+| `buffer_overflow` | Buffer-overflow / fuzzing probe | Sustained campaign of oversized TCP payloads, one connection | `RESET_SESSIONS` |
+| `replay_attack` | Credential / command replay | Repeated uniform small UDP payload | `BLOCK_SOURCE` |
+| `rogue_beacon` | Rogue configuration beacon | Frequent small outbound pattern, low confidence (reversed direction) | `FORENSIC_CAPTURE` |
 
-`exploit` is DECOY's second scenario: reconnaissance's decoy only observes a scan already known to be harmless probing, while this one redirects an unconfirmed, potentially dangerous payload away from the real device and captures it for analysis — a genuinely different reason to prefer deception, not the same one repeated. `rogue_beacon` is the only attack whose preferred response is `ALERT` — the system's least disruptive action, reserved for a signature deliberately designed to be its lowest-confidence one, where every more disruptive response costs more legitimate-service value than the signal actually warrants.
+`exploit` is DECOY's second scenario: reconnaissance's decoy only observes a scan already known to be harmless probing, while this one redirects an unconfirmed, potentially dangerous payload away from the real device and captures it for analysis — a genuinely different reason to prefer deception, not the same one repeated. `rogue_beacon` remains this registry's deliberately lowest-confidence signature — every more disruptive response costs more legitimate-service value than the signal actually warrants — but its preferred response is `FORENSIC_CAPTURE` rather than a plain `ALERT` log line: gathering real evidence (a pcap plus connection/neighbor state) is strictly more useful than logging alone while staying exactly as non-disruptive. See "Defense actions" below for why `brute_force`, `dns_amplification`, `firmware_tampering`, `buffer_overflow`, and `replay_attack` moved off their original preferred actions too.
 
 `slow_loris` relies on `unique_source_ports` — many concurrent connections each claiming a fresh ephemeral port — a signal none of the first five attacks' detectors use. Three attacks (`dns_tunneling`, `firmware_tampering`, `rogue_beacon`) reverse traffic direction like `exfiltration` does, but with genuinely different shapes: `dns_tunneling` is many small frequent queries (the shape a naive payload-size-only exfiltration detector would miss), `firmware_tampering` is larger, less frequent pushes, and `rogue_beacon` is the same size range as `dns_tunneling` at a meaningfully higher frequency. `mqtt_flood`, `buffer_overflow`, and `replay_attack` were all originally paced into the same narrow packets-per-second gap `syn_flood` occupies (strictly between `brute_force`'s and `dos`'s own thresholds); repeated live runs found that gap genuinely too narrow for more than one attack under this project's own real Mininet timing variance, so `mqtt_flood`, `buffer_overflow`, and `replay_attack` were moved to a much wider, uncontested sub-1.0-packets-per-second rate instead — see each one's own traffic-generator docstring in `simulation/traffic.py` for the real live numbers behind that call.
 
@@ -53,10 +53,33 @@ ML dataset generation (`ml/generate_dataset.py`) and RF training are **not yet e
 Adding a new attack means adding one `AttackScenario` entry to the registry, plus its own traffic generator and rule-based detector — not touching every dependent file by hand.
 
 ## Defense actions
-Five actions are available to all three decision policies: `ALLOW`, `ALERT`, `ISOLATE`, `DECOY`, `THROTTLE`. `THROTTLE` rate-limits new incoming connection attempts to a target via a real `iptables hashlimit` rule — not a bandwidth cap (an earlier `tc qdisc`-based approach was built, measured against real traffic, and found to have no real effect: a single SYN packet is too small for byte-rate shaping to meaningfully delay, and egress shaping doesn't touch incoming traffic at all). Verified against real Mininet traffic: an unthrottled attacker completed 56/56 connection attempts in a 3-second window; the same traffic under a 2/sec hashlimit completed only 7.
+Ten actions are available to all three decision policies, all deriving their count and iteration order from the `DefenseAction` enum (`src/iot_defense/defense/decision.py`) — Stackelberg's strategy set, PPO's action space/observation size, and the dashboard's badge styling all grow automatically when a new action is added there; only `config/policies.yaml`'s own Stackelberg payoff numbers and each attack's `preferred_action` in the registry are deliberate per-action judgment calls, not auto-derived.
+
+| Action | Real mechanism | Verified by |
+|---|---|---|
+| `ALLOW` | No enforcement | N/A — real no-op |
+| `ALERT` | Log only, no network change | N/A |
+| `ISOLATE` | `ip link set dev <iface> down` on the target | Polls `ip link show` for `state DOWN` |
+| `DECOY` | Real TCP banner service + iptables NAT redirect to it | A real redirected socket connection and response |
+| `THROTTLE` | `iptables hashlimit` rate limit on new connection attempts to the target — protocol-aware (TCP SYN / UDP / ICMP echo-request) | Verified against real traffic: an unthrottled attacker completed 56/56 connection attempts in 3s; the same traffic under a 2/sec hashlimit completed only 7 |
+| `BLOCK_SOURCE` | `iptables` DROP on one specific, already-identified attacker source at the target — everyone else stays fully reachable | Polls `iptables -L INPUT` for the installed rule |
+| `QUARANTINE` | Default-deny `iptables` policy (INPUT+OUTPUT) with an explicit ACCEPT allowlist for the network's other known-legitimate hosts | Polls `iptables -L` on both chains for the DROP policy |
+| `RESET_SESSIONS` | `ss -K` — real kernel socket destruction, no standing rule left behind | Polls `ss -tn state established` until the connection is gone |
+| `FORENSIC_CAPTURE` | A dedicated timestamped `tcpdump` capture + a `ss -tapn`/`ip neigh` state snapshot, both real files — zero enforcement action | Polls for a real, non-empty pcap file |
+| `BANDWIDTH_CAP` | `tc tbf` egress rate cap installed on the **attacker's** own interface, not the target's | Polls `tc qdisc show` for the installed `tbf` qdisc |
+
+`THROTTLE`'s hashlimit approach was chosen over a `tc qdisc`-based bandwidth cap on the target's ingress after that was built, measured against real traffic, and found to have no real effect: a single SYN packet is too small for byte-rate shaping to meaningfully delay, and egress shaping doesn't touch incoming traffic at all. `BANDWIDTH_CAP` revisits that same `tc tbf` mechanism deliberately — applied instead to the *attacker's* egress, for attacks whose real mechanism is bulk byte volume (`dns_amplification`'s ~570-byte reflected UDP responses) rather than tiny per-packet floods, where it genuinely does bite.
+
+Five attacks were reassigned off their original preferred action once a better-fitting mechanism existed, each a real, live-verified improvement rather than churn:
+- `brute_force`, `replay_attack`: `THROTTLE` → `BLOCK_SOURCE`. Both this lab's traffic patterns come from one fixed, identifiable attacker host, so blocking it outright stops every attempt (not just most of them, the way a rate limit does) while every other source stays completely unaffected — the same "legitimate access preserved" property `THROTTLE` offers, done more completely. (This also sidesteps a real bug found and fixed this pass: `THROTTLE`'s `iptables` rule was originally hardcoded to TCP SYNs, so it silently matched none of `replay_attack`'s real UDP traffic despite reporting "success" — `THROTTLE` is now protocol-aware, which separately fixed the same gap for `icmp_flood`.)
+- `dns_amplification`: `ISOLATE` → `BANDWIDTH_CAP`. This attack's real mechanism is bulk byte volume from the reflector/attacker's own egress, not raw packet count — capping it at the source constrains the actual flood while the target stays fully reachable throughout, something full `ISOLATE` can't offer.
+- `firmware_tampering`: `ISOLATE` → `QUARANTINE`. A tampered device is one you want to *remediate*, not just cut off — `ISOLATE` blocks the very remediation path a corrective push would need; `QUARANTINE` keeps it reachable to the network's other known-legitimate peers while cutting it off from the attacker specifically.
+- `buffer_overflow`: `ISOLATE` → `RESET_SESSIONS`. This attack's entire campaign runs over one persistent TCP connection (see `generate_buffer_overflow_mininet_traffic`'s own docstring) — killing exactly that connection is more surgical than taking the whole interface down, with no standing rule left behind.
+
+Every one of the 16 registered threat types (`normal` + 15 attacks) has a full, reasoned Stackelberg payoff entry for all 10 actions in `config/policies.yaml` — the solver's own selection was verified to independently agree with each attack's registered `preferred_action` for all 16 after this expansion, not just for the five originally registered ones.
 
 ## PPO reinforcement-learned policy
-The PPO environment uses a deterministic normalized security-context observation and a five-action mapping: `ALLOW=0`, `ALERT=1`, `ISOLATE=2`, `DECOY=3`, `THROTTLE=4`. Reward coefficients are modelling assumptions, not objective security values.
+The PPO environment uses a deterministic normalized security-context observation and a ten-action mapping, derived from `DefenseAction`'s own declaration order: `ALLOW=0`, `ALERT=1`, `ISOLATE=2`, `DECOY=3`, `THROTTLE=4`, `BLOCK_SOURCE=5`, `QUARANTINE=6`, `RESET_SESSIONS=7`, `FORENSIC_CAPTURE=8`, `BANDWIDTH_CAP=9`. Reward coefficients are modelling assumptions, not objective security values.
 
 Two training passes exist:
 
@@ -136,7 +159,7 @@ Header (phase, connection status, attack-mode badge, clock) · pipeline flow str
 1. `STARTING_NETWORK` — Mininet topology comes up, all 5 nodes go `ONLINE`.
 2. `BASELINE` / `OBSERVING` — benign traffic is generated and captured; a normal `ThreatEvent` is built and `ALLOW`ed.
 3. `THREAT_DETECTED` / `DECIDING` — the selected attack's real traffic is generated and captured; Rule-Based, Stackelberg, and PPO policies are each evaluated against the same `SecurityContext`, without being told which attack was requested.
-4. `RESPONDING` → `DECOY_ACTIVE` / `ISOLATED` / `THROTTLED` — the selected action is actually executed inside Mininet (decoy redirect, interface isolation, or connection-rate limiting).
+4. `RESPONDING` → `DECOY_ACTIVE` / `ISOLATED` / `THROTTLED` / `BLOCKED_SOURCE` / `QUARANTINED` / `SESSIONS_RESET` / `FORENSICS_CAPTURED` / `BANDWIDTH_CAPPED` — the selected action is actually executed inside Mininet, one dedicated phase per registered `DefenseAction` beyond `ALLOW`/`ALERT`.
 5. `RESTORING` → `RESTORED` — connectivity is verified and restored.
 6. `COMPLETE` → `CLEANUP` — Mininet and any redirect/isolation/rate-limit state are torn down.
 
