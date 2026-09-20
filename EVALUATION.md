@@ -1,5 +1,16 @@
 # Evaluation
 
+> **Stale as of 2026-09-20 -- read before trusting any number below.** This report's numbers
+> (120 trials, generated 2026-09-10) describe a 6-condition, 5-defense-action version of this
+> system: `normal` + the original 5 attacks, `ALLOW`/`ALERT`/`ISOLATE`/`DECOY`/`THROTTLE` only.
+> The registry has since grown to 16 conditions (10 more attacks) and 10 defense actions (5 more,
+> plus 5 attacks reassigned to a better-fitting one -- see README's "Defense actions" section).
+> The `UnifiedRuleBasedDetector`/Stackelberg/PPO comparison mechanics below are all still
+> accurate and unchanged; only the specific numbers and per-condition table are out of date.
+> Regenerating this report against the full current registry is a real, multi-hour undertaking
+> (one of the new attacks alone runs ~110s per trial) and has not been done yet -- treat every
+> number below as historical, not current, until it is.
+
 This document reports how the 3-policy defense system (rule-based, Stackelberg, PPO) compares
 against two simpler baselines and a real signature-based IDS (Suricata), on real Mininet traffic,
 using a repeatable benchmark harness -- not individual anecdotal demo runs. It also situates the

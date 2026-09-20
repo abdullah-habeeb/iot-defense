@@ -113,15 +113,24 @@ def test_dos_flood_reward_favors_isolation_over_decoy_and_allow():
     assert isolate_reward > decoy_reward > allow_reward
 
 
-def test_brute_force_reward_favors_isolation_over_allow():
-    """Brute-force's preferred_action is ISOLATE (until Phase 3 adds
-    THROTTLE) -- letting repeated login attempts through must always score
-    worse than containing them."""
+def test_brute_force_reward_favors_its_current_preferred_action():
+    """Brute-force's registered preferred_action is BLOCK_SOURCE (reassigned
+    from THROTTLE -- this lab's traffic always comes from one fixed,
+    identifiable attacker host, so blocking it outright beats merely
+    rate-limiting it). Registry-driven: calculate_reward() never hardcodes
+    which action brute_force prefers, so this proves the synthetic training
+    env's reward genuinely reflects the registry's current state, not a
+    stale assumption -- BLOCK_SOURCE must outscore every other real
+    response, and any non-preferred, non-ALLOW response must still beat
+    letting the attack through outright."""
     environment = DefenseDecisionEnv()
     brute_force = context_for_scenario("brute_force")
+    block_source_reward, _ = environment.calculate_reward(brute_force, DefenseAction.BLOCK_SOURCE)
+    throttle_reward, _ = environment.calculate_reward(brute_force, DefenseAction.THROTTLE)
     isolate_reward, _ = environment.calculate_reward(brute_force, DefenseAction.ISOLATE)
     allow_reward, _ = environment.calculate_reward(brute_force, DefenseAction.ALLOW)
-    assert isolate_reward > allow_reward
+    assert block_source_reward > throttle_reward > allow_reward
+    assert block_source_reward > isolate_reward > allow_reward
 
 
 def test_environment_cycles_through_all_registered_scenarios():
