@@ -374,16 +374,39 @@ class _StrayOutputHost(FakeHost):
 
 
 class _PcapWritingHost(FakeHost):
-    """Stands in for a real tcpdump backgrounded via host.cmd() -- writes a
-    few bytes to the -w target path immediately, since nothing in this
-    fake actually runs tcpdump to produce them."""
+    """Stands in for a real tcpdump backgrounded via host.cmd() -- writes
+    bytes past the real libpcap header size to the -w target path
+    immediately, since nothing in this fake actually runs tcpdump to
+    produce them. Must write strictly more than _PCAP_HEADER_SIZE (24)
+    to represent a capture that actually saw traffic, not an empty one --
+    see forensic_capture()'s own docstring for the real bug a 24-byte
+    "non-empty" pcap caused."""
 
     def cmd(self, command):
         self.commands.append(command)
         if "tcpdump" in command and " -w " in command:
             path = command.split(" -w ", 1)[1].split(" ", 1)[0]
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            Path(path).write_bytes(b"\x00" * 16)
+            Path(path).write_bytes(b"\x00" * 48)
+            return ""
+        if command.startswith("ss -tapn") or command.startswith("ip neigh"):
+            return ""
+        return ""
+
+
+class _EmptyPcapWritingHost(FakeHost):
+    """Stands in for a real tcpdump that opens and closes having captured
+    nothing -- writes exactly a real libpcap global header's worth of
+    bytes (24), matching what a real live run actually produced when the
+    attack's own traffic had already finished by the time the capture
+    started."""
+
+    def cmd(self, command):
+        self.commands.append(command)
+        if "tcpdump" in command and " -w " in command:
+            path = command.split(" -w ", 1)[1].split(" ", 1)[0]
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_bytes(b"\x00" * 24)
             return ""
         if command.startswith("ss -tapn") or command.startswith("ip neigh"):
             return ""
@@ -493,22 +516,83 @@ def test_reset_sessions_raises_when_the_connection_never_clears(tmp_path):
     assert "still established" in result.message.lower()
 
 
-def test_forensic_capture_writes_a_pcap_and_state_snapshot(tmp_path):
-    """Called directly with a short duration (not through execute(), which
-    always uses the real 5s default) -- this exercises the same real
-    file-writing/polling logic without slowing the test suite down."""
+def test_forensic_capture_falls_back_to_a_live_capture_with_real_content(tmp_path):
+    """No prior detection capture exists at detection_capture_dir, so this
+    exercises the live-capture fallback path. Called directly with a
+    short duration (not through execute(), which always uses the real 5s
+    default) to keep the test fast."""
     network = FakeNetwork()
     network.hosts[0] = _PcapWritingHost("sensor", "10.0.0.10")
     executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
 
     details = executor.forensic_capture(
-        "10.0.0.10", "10.0.0.100", duration_seconds=0.05, evidence_dir=tmp_path / "forensics"
+        "10.0.0.10",
+        "10.0.0.100",
+        duration_seconds=0.05,
+        evidence_dir=tmp_path / "forensics",
+        detection_capture_dir=tmp_path / "no_detection_capture_here",
     )
 
     assert details["operation"] == "forensic_capture"
+    assert details["preserved_from_detection"] is False
     assert Path(details["pcap_path"]).exists()
-    assert Path(details["pcap_path"]).stat().st_size > 0
-    assert Path(details["state_path"]).exists()
+    assert Path(details["pcap_path"]).stat().st_size > 24
+
+
+def test_forensic_capture_preserves_the_real_detection_capture_when_available(tmp_path):
+    """Regression test for a real bug found via a live Mininet run: this
+    method originally always opened a FRESH live capture, but by the time
+    a response executes, detection has already run against the attack's
+    *complete* capture -- the attack's own traffic generation has already
+    finished, so a fresh capture opens onto a quiet network. Confirmed
+    live: several real rogue_config_beacon responses each produced an
+    exact 24-byte pcap (a valid but empty capture), and the original
+    `size > 0` check couldn't tell that apart from real evidence. The fix
+    preserves PacketMonitor's own already-captured, real-traffic pcap
+    (sitting at a fixed, predictable path) instead of trying to capture
+    traffic that's already gone."""
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    detection_dir = tmp_path / "detection"
+    detection_dir.mkdir()
+    (detection_dir / "sensor_capture.pcap").write_bytes(b"\x00" * 200)
+
+    details = executor.forensic_capture(
+        "10.0.0.10",
+        "10.0.0.100",
+        duration_seconds=0.05,
+        evidence_dir=tmp_path / "forensics",
+        detection_capture_dir=detection_dir,
+    )
+
+    assert details["preserved_from_detection"] is True
+    assert Path(details["pcap_path"]).stat().st_size == 200
+    # No live-capture command should have been issued at all -- the real
+    # detection capture was already sufficient.
+    sensor = network.hosts[0]
+    assert not any("tcpdump" in cmd for cmd in sensor.commands)
+
+
+def test_forensic_capture_raises_when_no_real_evidence_exists_anywhere(tmp_path):
+    """The exact bug scenario, end to end: no usable prior detection
+    capture (empty, 24-byte header only) AND a live capture that also
+    sees no traffic. Must raise, not silently report success on an empty
+    file the way the original size > 0 check did."""
+    network = FakeNetwork()
+    network.hosts[0] = _EmptyPcapWritingHost("sensor", "10.0.0.10")
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    detection_dir = tmp_path / "detection"
+    detection_dir.mkdir()
+    (detection_dir / "sensor_capture.pcap").write_bytes(b"\x00" * 24)
+
+    with pytest.raises(RuntimeError, match="no real evidence"):
+        executor.forensic_capture(
+            "10.0.0.10",
+            "10.0.0.100",
+            duration_seconds=0.05,
+            evidence_dir=tmp_path / "forensics",
+            detection_capture_dir=detection_dir,
+        )
 
 
 def test_bandwidth_cap_installs_tbf_on_the_attacker_and_restore_removes_it(tmp_path):

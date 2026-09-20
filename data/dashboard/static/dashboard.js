@@ -663,10 +663,12 @@ function renderResponse(state) {
 
   // FORENSIC_CAPTURE details
   if (action === 'FORENSIC_CAPTURE' && details.operation === 'forensic_capture') {
+    const evidenceSource = details.preserved_from_detection ? 'Detection capture (preserved)' : 'Live capture window';
     detailHtml = `
       <div class="response-detail-card" style="border-color:rgba(34,197,94,0.3)">
         <div class="rdc-title" style="color:var(--accent-green)">🔎 Forensic Capture (no network change)</div>
         <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Evidence Source</span><span class="rdc-val">${escHtml(evidenceSource)}</span></div>
         <div class="rdc-row"><span class="rdc-key">Pcap</span><span class="rdc-val" style="max-width:220px;white-space:normal">${escHtml(safe(details.pcap_path))}</span></div>
         <div class="rdc-row"><span class="rdc-key">State Snapshot</span><span class="rdc-val" style="max-width:220px;white-space:normal">${escHtml(safe(details.state_path))}</span></div>
       </div>`;
