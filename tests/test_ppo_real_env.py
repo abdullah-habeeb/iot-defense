@@ -72,25 +72,34 @@ def test_failed_execution_never_scores_as_well_as_verified_success():
     assert verified > failed
 
 
-def test_brute_force_rewards_verified_throttle_over_unverified():
-    """THROTTLE's own verified outcome (a real installed iptables rule)
-    must matter, the same way ISOLATE's real ping check and DECOY's real
-    interaction check already do."""
+def test_brute_force_rewards_verified_block_source_over_failed():
+    """BLOCK_SOURCE has no extra outcome key the way ISOLATE/DECOY/THROTTLE
+    do (see _preferred_action_verified's own docstring -- it falls through
+    to execution_ok for any preferred action without one), so its real
+    verified-vs-failed distinction comes entirely from status: block_source()
+    itself already raises (making execute() report "failed") if its own
+    live poll of `iptables -L INPUT` never shows the installed rule."""
     env = _env()
-    verified, _ = env.calculate_reward("brute_force", DefenseAction.THROTTLE, {"status": "success", "rule_installed": True})
-    unverified, _ = env.calculate_reward("brute_force", DefenseAction.THROTTLE, {"status": "success", "rule_installed": False})
-    assert verified > unverified
+    verified, _ = env.calculate_reward("brute_force", DefenseAction.BLOCK_SOURCE, {"status": "success"})
+    failed, _ = env.calculate_reward("brute_force", DefenseAction.BLOCK_SOURCE, {"status": "failed"})
+    assert verified > failed
 
 
-def test_brute_force_rewards_throttle_over_isolate_and_allow():
-    """brute_force's registered preferred_action is THROTTLE (not
-    ISOLATE) -- the real-Mininet reward must reflect that, not just the
-    synthetic training env."""
+def test_brute_force_rewards_block_source_over_throttle_isolate_and_allow():
+    """brute_force's registered preferred_action is BLOCK_SOURCE (not
+    THROTTLE or ISOLATE) -- the real-Mininet reward must reflect that, not
+    just the synthetic training env. Reassigned from THROTTLE this pass:
+    this lab's brute-force traffic always comes from one fixed,
+    identifiable attacker host, so blocking it outright stops every guess
+    rather than merely rate-limiting them, with the same "other sources
+    unaffected" property THROTTLE offers."""
     env = _env()
+    block_source, _ = env.calculate_reward("brute_force", DefenseAction.BLOCK_SOURCE, {"status": "success"})
     throttle, _ = env.calculate_reward("brute_force", DefenseAction.THROTTLE, {"status": "success", "rule_installed": True})
     isolate, _ = env.calculate_reward("brute_force", DefenseAction.ISOLATE, {"status": "success"})
     allow, _ = env.calculate_reward("brute_force", DefenseAction.ALLOW, {"status": "success"})
-    assert throttle > isolate > allow
+    assert block_source > throttle > allow
+    assert block_source > isolate > allow
 
 
 def test_data_exfiltration_rewards_verified_isolation_over_allow():

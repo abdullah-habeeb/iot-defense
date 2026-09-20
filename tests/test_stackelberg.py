@@ -41,7 +41,7 @@ def test_stackelberg_selection_for_normal_and_reconnaissance():
 
 def test_stackelberg_exposes_all_candidate_evaluations():
     solution = StackelbergGame().solve("RECONNAISSANCE_PORT_SCAN")
-    assert len(solution.candidates) == 5
+    assert len(solution.candidates) == len(DefenseAction)
     assert solution.selected_action == DefenseAction.DECOY
     assert solution.selected_defender_utility == 8.0
 
@@ -117,9 +117,9 @@ def test_stackelberg_selects_isolate_for_dos_flood():
     assert dos.context["stackelberg_reasoning"]["observed_threat"] == "DOS_FLOOD"
 
 
-def test_dos_flood_has_all_five_candidate_evaluations():
+def test_dos_flood_has_all_candidate_evaluations():
     solution = StackelbergGame().solve("DOS_FLOOD")
-    assert len(solution.candidates) == 5
+    assert len(solution.candidates) == len(DefenseAction)
     assert solution.selected_action == DefenseAction.ISOLATE
 
 

@@ -66,6 +66,11 @@ def test_action_mapping_matches_defense_actions():
         DefenseAction.ISOLATE: 2,
         DefenseAction.DECOY: 3,
         DefenseAction.THROTTLE: 4,
+        DefenseAction.BLOCK_SOURCE: 5,
+        DefenseAction.QUARANTINE: 6,
+        DefenseAction.RESET_SESSIONS: 7,
+        DefenseAction.FORENSIC_CAPTURE: 8,
+        DefenseAction.BANDWIDTH_CAP: 9,
     }
 
 

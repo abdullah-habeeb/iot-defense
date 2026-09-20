@@ -9,13 +9,28 @@ from typing import Any
 
 
 class DefenseAction(str, Enum):
-    """Allowed defense actions for the current decision phase."""
+    """Allowed defense actions for the current decision phase.
+
+    Every dependent module (Stackelberg's DEFENDER_STRATEGIES, PPO's
+    action space/observation size in ppo_env.py, the dashboard's action
+    badge styling) derives its size and iteration order from this enum
+    directly rather than a hardcoded count -- appending a member here is
+    enough to make it selectable everywhere except config/policies.yaml's
+    own Stackelberg payoff numbers, which are genuine judgment calls, not
+    something to auto-generate, and attacks/registry.py's per-scenario
+    preferred_action, which is a deliberate per-attack design choice.
+    """
 
     ALLOW = "ALLOW"
     ALERT = "ALERT"
     ISOLATE = "ISOLATE"
     DECOY = "DECOY"
     THROTTLE = "THROTTLE"
+    BLOCK_SOURCE = "BLOCK_SOURCE"
+    QUARANTINE = "QUARANTINE"
+    RESET_SESSIONS = "RESET_SESSIONS"
+    FORENSIC_CAPTURE = "FORENSIC_CAPTURE"
+    BANDWIDTH_CAP = "BANDWIDTH_CAP"
 
 
 @dataclass(slots=True)

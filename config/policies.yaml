@@ -7,6 +7,11 @@ policy:
     - "isolate"
     - "decoy"
     - "throttle"
+    - "block_source"
+    - "quarantine"
+    - "reset_sessions"
+    - "forensic_capture"
+    - "bandwidth_cap"
   isolation_timeout_seconds: 15
   logging:
     level: "INFO"
@@ -82,6 +87,29 @@ policy:
           # the connection still works, just slower.
           CONTINUE: {attacker: -1.0, defender: 4.0}
           RETREAT: {attacker: -2.0, defender: 3.0}
+        BLOCK_SOURCE:
+          CONTINUE: {attacker: -1.0, defender: 3.0}
+          RETREAT: {attacker: -2.0, defender: 2.0}
+        QUARANTINE:
+          # A default-deny policy against traffic that was never hostile
+          # cuts off real, legitimate peer communication -- close to
+          # ISOLATE's own unnecessary-disruption cost.
+          CONTINUE: {attacker: -3.0, defender: 1.5}
+          RETREAT: {attacker: -4.0, defender: 0.5}
+        RESET_SESSIONS:
+          # Disruptive but self-healing -- a legitimate connection just
+          # reopens, unlike a standing block or a downed interface.
+          CONTINUE: {attacker: 0.0, defender: 4.5}
+          RETREAT: {attacker: -1.0, defender: 3.5}
+        FORENSIC_CAPTURE:
+          # Zero enforcement action against the traffic itself -- as
+          # cheap as ALERT, since observing legitimate traffic costs
+          # nothing beyond the capture itself.
+          CONTINUE: {attacker: 0.5, defender: 6.5}
+          RETREAT: {attacker: -0.5, defender: 5.5}
+        BANDWIDTH_CAP:
+          CONTINUE: {attacker: -1.5, defender: 2.5}
+          RETREAT: {attacker: -2.5, defender: 1.5}
       RECONNAISSANCE_PORT_SCAN:
         ALLOW:
           CONTINUE: {attacker: 8.0, defender: -5.0}
@@ -100,6 +128,31 @@ policy:
           # -- a real mitigation, just a strictly worse one here.
           CONTINUE: {attacker: 0.0, defender: 4.0}
           RETREAT: {attacker: -3.0, defender: 5.0}
+        BLOCK_SOURCE:
+          # Stops the scan outright but ends the observation window --
+          # loses the intelligence DECOY gathers by letting it continue
+          # under watch.
+          CONTINUE: {attacker: -2.0, defender: 1.5}
+          RETREAT: {attacker: -3.0, defender: 0.5}
+        QUARANTINE:
+          CONTINUE: {attacker: -1.5, defender: 1.0}
+          RETREAT: {attacker: -2.5, defender: 0.0}
+        RESET_SESSIONS:
+          # A scan has no persistent session to kill -- each probe is
+          # already brief and independent.
+          CONTINUE: {attacker: 2.0, defender: 0.5}
+          RETREAT: {attacker: 1.0, defender: -0.5}
+        FORENSIC_CAPTURE:
+          # Real complementary value here -- evidence of the scan's own
+          # pattern -- but DECOY's active engagement gathers strictly
+          # more (the scanner's actual next moves, not just its traffic).
+          CONTINUE: {attacker: 1.5, defender: 3.0}
+          RETREAT: {attacker: 0.5, defender: 2.0}
+        BANDWIDTH_CAP:
+          # A scan's own traffic volume is trivially low -- capping
+          # bandwidth barely registers.
+          CONTINUE: {attacker: 3.0, defender: 1.0}
+          RETREAT: {attacker: 2.0, defender: 0.0}
       DOS_FLOOD:
         ALLOW:
           CONTINUE: {attacker: 9.0, defender: -8.0}
@@ -120,6 +173,34 @@ policy:
           # nowhere near as decisive as full containment.
           CONTINUE: {attacker: -2.0, defender: 5.0}
           RETREAT: {attacker: -3.0, defender: 4.0}
+        BLOCK_SOURCE:
+          # This lab's flood traffic happens to come from one host, so
+          # blocking it is a real mitigation -- but a real distributed
+          # flood has no single source to block, unlike ISOLATE's
+          # protocol-agnostic full containment.
+          CONTINUE: {attacker: -5.0, defender: 6.0}
+          RETREAT: {attacker: -6.0, defender: 5.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 4.0}
+          RETREAT: {attacker: -4.0, defender: 3.0}
+        RESET_SESSIONS:
+          # A raw flood has no established sessions to reset -- packets
+          # arrive faster than any connection state forms.
+          CONTINUE: {attacker: 1.0, defender: 0.5}
+          RETREAT: {attacker: 0.0, defender: -0.5}
+        FORENSIC_CAPTURE:
+          # An active flood keeps degrading service throughout a capture
+          # window that does nothing to stop it.
+          CONTINUE: {attacker: 3.0, defender: 1.0}
+          RETREAT: {attacker: 2.0, defender: 0.0}
+        BANDWIDTH_CAP:
+          # Genuinely close to ISOLATE's own effectiveness for a
+          # volumetric attack -- capping the source's egress directly
+          # constrains the flood's real bottleneck -- but leaves the
+          # decision of exactly how much to allow through as a tuning
+          # risk ISOLATE's clean binary cutoff doesn't have.
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
       BRUTE_FORCE:
         ALLOW:
           CONTINUE: {attacker: 9.0, defender: -8.0}
@@ -139,14 +220,46 @@ policy:
           CONTINUE: {attacker: -6.0, defender: 7.0}
           RETREAT: {attacker: -7.0, defender: 6.0}
         THROTTLE:
-          # The best response of any attack here: rate-limiting directly
-          # defeats a brute-force attack's actual mechanism (it needs a
-          # high guess rate to succeed) while the device stays reachable
-          # for a legitimate user -- strictly better than ISOLATE, which
-          # achieves the same containment at the cost of also blocking
-          # legitimate access.
+          # Still a real, live-verified mitigation (7/56 attempts got
+          # through under a 2/sec hashlimit) -- but BLOCK_SOURCE below
+          # does strictly better against this lab's single-source
+          # traffic, at the same "legitimate access preserved" cost.
           CONTINUE: {attacker: -7.0, defender: 8.5}
           RETREAT: {attacker: -8.0, defender: 7.5}
+        BLOCK_SOURCE:
+          # The best response of any attack here: this lab's brute-force
+          # traffic always comes from one fixed, identifiable attacker
+          # host, so blocking it outright stops every guess (0/N, not
+          # 7/56 under THROTTLE) while every other source stays
+          # completely unaffected -- not merely rate-limited. Not a
+          # general replacement for THROTTLE: a real distributed/
+          # botnet-driven brute force has no single source to block.
+          CONTINUE: {attacker: -8.0, defender: 9.0}
+          RETREAT: {attacker: -9.0, defender: 8.0}
+        QUARANTINE:
+          # Contains it about as well as ISOLATE, but with the same
+          # unnecessary complexity ISOLATE already carries here --
+          # nothing about a login-attempt flood benefits from an
+          # allowlist the way a compromised device needing remediation
+          # access would.
+          CONTINUE: {attacker: -6.5, defender: 6.5}
+          RETREAT: {attacker: -7.5, defender: 5.5}
+        RESET_SESSIONS:
+          # Each guess is its own short-lived attempt, not a persistent
+          # session -- killing "the" connection doesn't stop the next
+          # one from opening immediately after.
+          CONTINUE: {attacker: 1.0, defender: 2.0}
+          RETREAT: {attacker: 0.0, defender: 1.0}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 4.0, defender: 0.5}
+          RETREAT: {attacker: 3.0, defender: -0.5}
+        BANDWIDTH_CAP:
+          # The same lesson THROTTLE's own original bandwidth-cap attempt
+          # already established: a brute-force attempt is bottlenecked
+          # by how many guesses it can make, not how many bytes each
+          # guess consumes -- capping bytes barely slows it down.
+          CONTINUE: {attacker: 3.0, defender: 1.5}
+          RETREAT: {attacker: 2.0, defender: 0.5}
       DATA_EXFILTRATION:
         ALLOW:
           # Worst outcome of any attack here: a full, ongoing data breach
@@ -183,6 +296,40 @@ policy:
           # slower one. Meaningfully worse than ISOLATE here.
           CONTINUE: {attacker: 1.0, defender: 3.0}
           RETREAT: {attacker: -2.0, defender: 4.0}
+        BLOCK_SOURCE:
+          # This is a reversed-direction attack: the compromised device
+          # is the traffic *source*, and beliefs.source_device is the
+          # attacker's own address, the leak's *destination* -- an
+          # INPUT-chain drop of that address blocks the attacker's
+          # replies, not the device's own outbound leak. A real but
+          # nearly useless mitigation here.
+          CONTINUE: {attacker: 6.0, defender: -1.0}
+          RETREAT: {attacker: 3.0, defender: -2.0}
+        QUARANTINE:
+          # Genuinely strong here, unlike BLOCK_SOURCE: the default-deny
+          # OUTPUT policy stops the device's own outbound traffic to the
+          # attacker's address specifically, which is exactly the leak's
+          # actual path -- close to ISOLATE's own effectiveness, just
+          # with the added (here, unneeded) complexity of an allowlist.
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
+        RESET_SESSIONS:
+          # Kills the current connection carrying the leak, but nothing
+          # stops a fresh one from opening immediately after -- no
+          # standing rule is left behind.
+          CONTINUE: {attacker: 3.0, defender: 3.0}
+          RETREAT: {attacker: 2.0, defender: 2.0}
+        FORENSIC_CAPTURE:
+          # Data keeps leaving throughout the capture window -- evidence
+          # of a breach already in progress doesn't stop the breach.
+          CONTINUE: {attacker: 7.0, defender: -3.0}
+          RETREAT: {attacker: 4.0, defender: -1.0}
+        BANDWIDTH_CAP:
+          # Acts on the wrong host: this caps the attacker's own egress,
+          # but the attacker isn't sending the bulk data here -- the
+          # compromised device is. Doesn't touch the actual leak.
+          CONTINUE: {attacker: 6.0, defender: -1.5}
+          RETREAT: {attacker: 3.0, defender: -2.5}
       EXPLOIT_PAYLOAD_INJECTION:
         ALLOW:
           # A live exploit attempt reaching the real device risks genuine
@@ -217,6 +364,31 @@ policy:
           # real but essentially irrelevant mitigation here.
           CONTINUE: {attacker: -1.0, defender: 1.0}
           RETREAT: {attacker: -2.0, defender: 2.0}
+        BLOCK_SOURCE:
+          # Prevents a follow-up attempt but the single payload already
+          # sent has already landed by the time this reacts.
+          CONTINUE: {attacker: -2.0, defender: 3.0}
+          RETREAT: {attacker: -3.0, defender: 2.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -1.5, defender: 2.5}
+          RETREAT: {attacker: -2.5, defender: 1.5}
+        RESET_SESSIONS:
+          # Kills the connection the payload arrived on, but reacting
+          # after one request has already landed offers little the
+          # single-shot nature of this attack didn't already determine.
+          CONTINUE: {attacker: -1.0, defender: 1.5}
+          RETREAT: {attacker: -2.0, defender: 0.5}
+        FORENSIC_CAPTURE:
+          # Real complementary value -- preserves the actual payload for
+          # inspection -- but DECOY's active redirect captures strictly
+          # more (the attacker's full interaction, not just the one shot
+          # already sent).
+          CONTINUE: {attacker: -3.0, defender: 3.5}
+          RETREAT: {attacker: -2.0, defender: 7.5}
+        BANDWIDTH_CAP:
+          # Irrelevant to one small malformed request.
+          CONTINUE: {attacker: 0.0, defender: 0.0}
+          RETREAT: {attacker: -1.0, defender: -1.0}
       TCP_SYN_FLOOD:
         # Mirrors DOS_FLOOD's own table -- a resource-exhaustion flood,
         # same decisive-containment reasoning: ISOLATE wins.
@@ -238,6 +410,24 @@ policy:
           # it the way it does a guess-rate-limited attack.
           CONTINUE: {attacker: -2.0, defender: 5.0}
           RETREAT: {attacker: -3.0, defender: 4.0}
+        # Mirrors DOS_FLOOD's own new-action reasoning: a volumetric,
+        # protocol-uniform flood, not a single-source or session-based
+        # attack.
+        BLOCK_SOURCE:
+          CONTINUE: {attacker: -5.0, defender: 6.0}
+          RETREAT: {attacker: -6.0, defender: 5.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 4.0}
+          RETREAT: {attacker: -4.0, defender: 3.0}
+        RESET_SESSIONS:
+          CONTINUE: {attacker: 1.0, defender: 0.5}
+          RETREAT: {attacker: 0.0, defender: -0.5}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 3.0, defender: 1.0}
+          RETREAT: {attacker: 2.0, defender: 0.0}
+        BANDWIDTH_CAP:
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
       ICMP_PING_FLOOD:
         # Mirrors BRUTE_FORCE's own table -- rate-limiting directly
         # defeats this attack's mechanism while the device stays
@@ -259,8 +449,39 @@ policy:
           CONTINUE: {attacker: -5.0, defender: 6.0}
           RETREAT: {attacker: -6.0, defender: 5.0}
         THROTTLE:
+          # Was, until this pass, an iptables rule hardcoded to TCP SYNs
+          # -- meaning this attack's own THROTTLE response reported
+          # "success" while never matching a single one of its real
+          # ICMP packets. Now protocol-aware (an ICMP-specific rate
+          # limit on raw echo-request packets), this is the one
+          # registered attack that fix actually changes the live
+          # behavior of.
           CONTINUE: {attacker: -6.0, defender: 7.5}
           RETREAT: {attacker: -7.0, defender: 6.5}
+        BLOCK_SOURCE:
+          # This lab's ping flood also comes from one fixed source, so
+          # this would work about as well as THROTTLE -- kept as a
+          # strong runner-up rather than the winner here, since THROTTLE
+          # (now protocol-fixed) already covers this attack adequately.
+          CONTINUE: {attacker: -5.5, defender: 6.5}
+          RETREAT: {attacker: -6.5, defender: 5.5}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 4.0}
+          RETREAT: {attacker: -4.0, defender: 3.0}
+        RESET_SESSIONS:
+          # ICMP echo has no connection/session concept -- nothing for
+          # ss -K to find or kill.
+          CONTINUE: {attacker: 2.0, defender: 0.0}
+          RETREAT: {attacker: 1.0, defender: -1.0}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 2.5, defender: 1.0}
+          RETREAT: {attacker: 1.5, defender: 0.0}
+        BANDWIDTH_CAP:
+          # The same small-packet weakness THROTTLE's own original
+          # bandwidth-cap attempt already established -- an ICMP echo is
+          # tiny, so a byte-rate cap barely registers per packet.
+          CONTINUE: {attacker: 1.0, defender: 2.0}
+          RETREAT: {attacker: 0.0, defender: 1.0}
       SLOW_LORIS_EXHAUSTION:
         # Mirrors BRUTE_FORCE's own table -- rate-limiting new
         # connection attempts directly defeats a connection-exhaustion
@@ -283,6 +504,32 @@ policy:
         THROTTLE:
           CONTINUE: {attacker: -6.5, defender: 8.0}
           RETREAT: {attacker: -7.5, defender: 7.0}
+        BLOCK_SOURCE:
+          # A real, strong alternative here too -- this lab's slow-loris
+          # traffic is one attacker opening every held connection -- but
+          # kept just below THROTTLE, which already handles this well
+          # without needing to positively identify a single source.
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 5.0}
+          RETREAT: {attacker: -4.0, defender: 4.0}
+        RESET_SESSIONS:
+          # Could kill every one of the many held-open connections at
+          # once -- a real mitigation, though a fresh batch could be
+          # reopened immediately after with no standing rule to stop it,
+          # unlike THROTTLE's ongoing rate cap.
+          CONTINUE: {attacker: -4.5, defender: 6.5}
+          RETREAT: {attacker: -5.5, defender: 5.5}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 3.0, defender: 1.0}
+          RETREAT: {attacker: 2.0, defender: 0.0}
+        BANDWIDTH_CAP:
+          # This attack's real payloads are tiny and slow by design (the
+          # exhaustion is in held-open connection *count*, not bytes) --
+          # a byte-rate cap doesn't touch its actual mechanism.
+          CONTINUE: {attacker: 1.5, defender: 1.5}
+          RETREAT: {attacker: 0.5, defender: 0.5}
       DNS_AMPLIFICATION:
         # Mirrors DOS_FLOOD's own table -- a volumetric attack the
         # device cannot defend against itself: ISOLATE wins.
@@ -301,6 +548,36 @@ policy:
         THROTTLE:
           CONTINUE: {attacker: -2.0, defender: 5.0}
           RETREAT: {attacker: -3.0, defender: 4.0}
+        BLOCK_SOURCE:
+          # This lab simulates the reflector as the attacker's own host
+          # directly (no separate real reflector chain), so blocking it
+          # is a real, strong mitigation -- but a real amplification
+          # attack reflects through many innocent third-party resolvers,
+          # none of which are "the attacker" to block. BANDWIDTH_CAP
+          # constrains the actual generated volume regardless of how
+          # many reflectors are involved, which is why it wins here.
+          CONTINUE: {attacker: -5.0, defender: 7.0}
+          RETREAT: {attacker: -6.0, defender: 6.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 5.0}
+          RETREAT: {attacker: -4.0, defender: 4.0}
+        RESET_SESSIONS:
+          # UDP, connectionless -- no session for ss -K to find.
+          CONTINUE: {attacker: 1.0, defender: 0.0}
+          RETREAT: {attacker: 0.0, defender: -1.0}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 3.0, defender: 1.5}
+          RETREAT: {attacker: 2.0, defender: 0.5}
+        BANDWIDTH_CAP:
+          # Best response of any attack here: this attack's real
+          # mechanism is bulk byte volume from the reflector/attacker's
+          # own egress (~570-byte UDP responses sent rapidly), not raw
+          # packet count -- unlike a SYN flood's tiny packets, a
+          # byte-rate cap genuinely bites here, and it constrains the
+          # attack at its real source while leaving the target fully
+          # reachable throughout, something full ISOLATE can't offer.
+          CONTINUE: {attacker: -8.0, defender: 9.5}
+          RETREAT: {attacker: -9.0, defender: 8.5}
       DNS_TUNNELING_EXFILTRATION:
         # Mirrors EXPLOIT_PAYLOAD_INJECTION's own table -- unconfirmed
         # until the encoded queries are actually inspected, so
@@ -328,6 +605,38 @@ policy:
           # progress, just a slower one.
           CONTINUE: {attacker: 1.0, defender: 2.5}
           RETREAT: {attacker: -2.0, defender: 3.5}
+        BLOCK_SOURCE:
+          # Reversed direction, same as DATA_EXFILTRATION: the address
+          # this would block is the leak's destination, not the device
+          # doing the leaking -- a real but nearly useless mitigation.
+          CONTINUE: {attacker: 5.0, defender: -1.0}
+          RETREAT: {attacker: 2.0, defender: -2.0}
+        QUARANTINE:
+          # Genuinely useful here too, same reasoning as
+          # DATA_EXFILTRATION's own QUARANTINE entry -- the default-deny
+          # OUTPUT policy blocks the tunnel's own outbound queries -- but
+          # DECOY's intelligence value (seeing what's actually encoded
+          # in the queries) is prized more highly for a channel not yet
+          # confirmed.
+          CONTINUE: {attacker: -3.0, defender: 4.5}
+          RETREAT: {attacker: -4.0, defender: 3.5}
+        RESET_SESSIONS:
+          # UDP, connectionless -- no session to reset.
+          CONTINUE: {attacker: 1.5, defender: 0.5}
+          RETREAT: {attacker: 0.5, defender: -0.5}
+        FORENSIC_CAPTURE:
+          # Real complementary value, close to DECOY's own spirit --
+          # evidence of what's being tunneled -- but passive, unlike
+          # DECOY's active redirect which prevents the real channel
+          # from ever completing while still observing it.
+          CONTINUE: {attacker: -2.0, defender: 4.0}
+          RETREAT: {attacker: -1.0, defender: 3.0}
+        BANDWIDTH_CAP:
+          # This attack is deliberately low-rate, small-packet, built to
+          # evade volume-based detection -- a bandwidth cap has nothing
+          # to constrain.
+          CONTINUE: {attacker: 2.0, defender: 0.0}
+          RETREAT: {attacker: 1.0, defender: -1.0}
       MQTT_MESSAGE_FLOOD:
         # Mirrors BRUTE_FORCE's own table -- rate-limiting the publish
         # rate defeats this attack while the broker keeps serving real
@@ -350,6 +659,32 @@ policy:
         THROTTLE:
           CONTINUE: {attacker: -6.0, defender: 7.0}
           RETREAT: {attacker: -7.0, defender: 6.0}
+        BLOCK_SOURCE:
+          # This lab's flood also comes from one attacker host, so this
+          # would work about as well as THROTTLE -- kept as a strong
+          # runner-up, since THROTTLE already covers this adequately
+          # without needing to positively identify a single source.
+          CONTINUE: {attacker: -5.0, defender: 6.0}
+          RETREAT: {attacker: -6.0, defender: 5.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 4.0}
+          RETREAT: {attacker: -4.0, defender: 3.0}
+        RESET_SESSIONS:
+          # This flood uses many separate completed connections, not one
+          # persistent one -- killing them all is less surgical than
+          # buffer_overflow_probe's single-connection case, and a fresh
+          # batch reopens immediately with no standing rule to stop it.
+          CONTINUE: {attacker: -2.0, defender: 3.0}
+          RETREAT: {attacker: -3.0, defender: 2.0}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 2.5, defender: 1.0}
+          RETREAT: {attacker: 1.5, defender: 0.0}
+        BANDWIDTH_CAP:
+          # Individual MQTT messages here are modest-sized, not tiny
+          # like a SYN -- a real but moderate mitigation, weaker than
+          # rate-limiting the publish attempts directly.
+          CONTINUE: {attacker: -1.0, defender: 2.5}
+          RETREAT: {attacker: -2.0, defender: 1.5}
       FIRMWARE_TAMPERING:
         # Mirrors DATA_EXFILTRATION's own table -- the device is already
         # compromised and actively pushing unauthorized changes out;
@@ -372,6 +707,39 @@ policy:
           # compromised further -- still an active tampering breach.
           CONTINUE: {attacker: 1.0, defender: 3.0}
           RETREAT: {attacker: -2.0, defender: 4.0}
+        BLOCK_SOURCE:
+          # Reversed direction, same as DATA_EXFILTRATION: the address
+          # this would block is the tampering's destination, not the
+          # compromised device doing the pushing.
+          CONTINUE: {attacker: 6.0, defender: -1.0}
+          RETREAT: {attacker: 3.0, defender: -2.0}
+        QUARANTINE:
+          # Best response of any attack here: unlike DATA_EXFILTRATION,
+          # where full severance has no downside once the data's gone, a
+          # tampered device is one you actively want to *remediate* --
+          # ISOLATE cuts off the very path a corrective push would need.
+          # QUARANTINE's default-deny-with-allowlist keeps the device
+          # reachable to the network's other known-legitimate peers
+          # while cutting it off from the attacker specifically:
+          # contained, but not unreachable for recovery.
+          CONTINUE: {attacker: -8.5, defender: 10.0}
+          RETREAT: {attacker: -9.5, defender: 8.5}
+        RESET_SESSIONS:
+          # Kills the current push but the device could reopen and
+          # re-push moments later with no standing rule to stop it.
+          CONTINUE: {attacker: 2.0, defender: 3.5}
+          RETREAT: {attacker: 1.0, defender: 2.5}
+        FORENSIC_CAPTURE:
+          # Tampering keeps happening throughout the capture window --
+          # evidence of an active breach doesn't stop the breach.
+          CONTINUE: {attacker: 6.5, defender: -1.5}
+          RETREAT: {attacker: 3.5, defender: 0.0}
+        BANDWIDTH_CAP:
+          # Acts on the wrong host, same as DATA_EXFILTRATION's own
+          # entry: this caps the attacker/destination's egress, not the
+          # compromised device's own outbound pushes.
+          CONTINUE: {attacker: 6.0, defender: -1.0}
+          RETREAT: {attacker: 3.0, defender: -2.0}
       BUFFER_OVERFLOW_PROBE:
         # Unlike EXPLOIT_PAYLOAD_INJECTION's single uncertain shot, this
         # is a sustained, unambiguous campaign -- full containment is
@@ -395,6 +763,41 @@ policy:
         THROTTLE:
           CONTINUE: {attacker: -1.5, defender: 2.5}
           RETREAT: {attacker: -2.5, defender: 3.5}
+        BLOCK_SOURCE:
+          # This lab's campaign also comes from one attacker host, so
+          # this is a real, strong alternative -- but RESET_SESSIONS
+          # targets the attack's actual mechanism (one persistent
+          # connection) even more directly, without needing a standing
+          # firewall rule at all.
+          CONTINUE: {attacker: -6.0, defender: 7.0}
+          RETREAT: {attacker: -7.0, defender: 6.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -4.5, defender: 5.5}
+          RETREAT: {attacker: -5.5, defender: 4.5}
+        RESET_SESSIONS:
+          # Best response of any attack here: this attack's entire
+          # campaign runs over ONE persistent TCP connection (see
+          # generate_buffer_overflow_mininet_traffic's own docstring on
+          # why), making it this registry's one genuinely
+          # session-oriented attack -- ss -K kills exactly that
+          # connection outright, more surgical than taking the whole
+          # interface down, with no standing rule left behind
+          # afterward.
+          CONTINUE: {attacker: -7.5, defender: 9.0}
+          RETREAT: {attacker: -8.5, defender: 8.0}
+        FORENSIC_CAPTURE:
+          # The campaign keeps sending oversized requests throughout a
+          # capture window that does nothing to stop it.
+          CONTINUE: {attacker: 4.5, defender: 0.5}
+          RETREAT: {attacker: 3.5, defender: -0.5}
+        BANDWIDTH_CAP:
+          # The payloads here are genuinely bulky (600-700 bytes
+          # average), so a byte-rate cap is a real, plausible
+          # mitigation -- but this attack's actual bottleneck is
+          # persistence on one connection, not raw throughput, which is
+          # exactly what RESET_SESSIONS targets more directly.
+          CONTINUE: {attacker: -3.0, defender: 4.0}
+          RETREAT: {attacker: -4.0, defender: 3.0}
       CREDENTIAL_REPLAY:
         # Mirrors BRUTE_FORCE's own table -- rate-limiting directly
         # defeats a replay attack's mechanism (it needs to resend fast
@@ -413,8 +816,39 @@ policy:
           CONTINUE: {attacker: -5.5, defender: 6.0}
           RETREAT: {attacker: -6.5, defender: 5.0}
         THROTTLE:
+          # Was, until this pass, an iptables rule hardcoded to TCP SYNs
+          # -- meaning this attack's own THROTTLE response (this
+          # attack's traffic is UDP) reported "success" while never
+          # matching a single real packet. Now protocol-fixed, but
+          # BLOCK_SOURCE still wins on its own merits below.
           CONTINUE: {attacker: -6.0, defender: 7.0}
           RETREAT: {attacker: -7.0, defender: 6.0}
+        BLOCK_SOURCE:
+          # Best response of any attack here: this lab's replay traffic
+          # comes from one fixed, identifiable source resending a
+          # captured payload -- blocking it outright stops every replay
+          # attempt, not just slows them down, with the same "other
+          # sources unaffected" property THROTTLE offers.
+          CONTINUE: {attacker: -6.5, defender: 7.5}
+          RETREAT: {attacker: -7.5, defender: 6.5}
+        QUARANTINE:
+          CONTINUE: {attacker: -4.5, defender: 5.5}
+          RETREAT: {attacker: -5.5, defender: 4.5}
+        RESET_SESSIONS:
+          # This attack's traffic is one-way UDP sends, not a
+          # persistent connection -- no session for ss -K to find.
+          CONTINUE: {attacker: 1.0, defender: 0.5}
+          RETREAT: {attacker: 0.0, defender: -0.5}
+        FORENSIC_CAPTURE:
+          CONTINUE: {attacker: 2.5, defender: 0.5}
+          RETREAT: {attacker: 1.5, defender: -0.5}
+        BANDWIDTH_CAP:
+          # This attack's real payloads are small by design (the
+          # sub-1.0/s redesign, see the traffic generator's own
+          # docstring) -- the same small-packet weakness already
+          # established elsewhere, a byte-rate cap barely registers.
+          CONTINUE: {attacker: 2.0, defender: 1.5}
+          RETREAT: {attacker: 1.0, defender: 0.5}
       ROGUE_CONFIG_BEACON:
         # The lowest-confidence signature of any registered attack -- a
         # frequent-but-small outbound pattern that could still be
@@ -449,6 +883,41 @@ policy:
           # real but largely pointless mitigation here.
           CONTINUE: {attacker: -0.5, defender: 1.5}
           RETREAT: {attacker: -1.5, defender: 2.0}
+        BLOCK_SOURCE:
+          # Full containment over a low-confidence signal risks real
+          # cost against what is, most of the time, still legitimate
+          # traffic -- the same reasoning ISOLATE's own downgrade
+          # already establishes here, just as an address block instead
+          # of a full interface.
+          CONTINUE: {attacker: -2.5, defender: 1.0}
+          RETREAT: {attacker: -3.5, defender: 0.5}
+        QUARANTINE:
+          # Heavier still -- a default-deny policy is disruptive
+          # regardless of confidence, exactly the cost this signal's
+          # uncertainty doesn't justify.
+          CONTINUE: {attacker: -3.0, defender: 0.5}
+          RETREAT: {attacker: -4.0, defender: -0.5}
+        RESET_SESSIONS:
+          # This attack's traffic is brief UDP sends by design -- no
+          # persistent session for ss -K to find.
+          CONTINUE: {attacker: 0.5, defender: 1.0}
+          RETREAT: {attacker: -0.5, defender: 0.5}
+        FORENSIC_CAPTURE:
+          # Best response of any attack here: every disruptive response
+          # costs more legitimate-service value than this uncertain a
+          # signal warrants. A single ALERT log line is a weaker
+          # response to genuine uncertainty than actually gathering
+          # evidence -- a real pcap plus connection/neighbor state for
+          # later review -- while remaining just as non-disruptive to
+          # the device as ALERT is.
+          CONTINUE: {attacker: 0.5, defender: 3.5}
+          RETREAT: {attacker: -0.5, defender: 3.0}
+        BANDWIDTH_CAP:
+          # A low-rate beacon has nothing meaningful for a bandwidth cap
+          # to constrain -- a real but largely pointless mitigation
+          # here, the same reasoning THROTTLE's own entry establishes.
+          CONTINUE: {attacker: -0.5, defender: 0.5}
+          RETREAT: {attacker: -1.5, defender: 0.0}
   ppo:
     # model_path/fallback_policy document the convention every real call
     # site (train_ppo.py's own default output path, harness.py,

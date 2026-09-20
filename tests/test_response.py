@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -26,11 +27,20 @@ class FakeInterface:
 
 
 class FakeHost:
-    def __init__(self, name, ip):
+    def __init__(self, name, ip, session_killable=True):
         self.name = name
         self._ip = ip
         self.commands = []
         self._interface_up = True
+        self._input_rules = []
+        self._output_rules = []
+        self._session_established = True
+        # Real live-Mininet behavior: ss -K genuinely destroys the socket
+        # (confirmed directly against a real connection) -- this flag lets
+        # one specific regression test simulate the opposite, to prove the
+        # RuntimeError path still fires for a real unrecovered failure.
+        self._session_killable = session_killable
+        self._qdisc_installed = False
 
     def IP(self):
         return self._ip
@@ -48,6 +58,43 @@ class FakeHost:
         if command.startswith("ip link show"):
             state = "UP" if self._interface_up else "DOWN"
             return f"2: {self.name}-eth0: <BROADCAST,MULTICAST> mtu 1500 qdisc noqueue state {state} mode DEFAULT\r\n"
+        if command.startswith("iptables -A INPUT"):
+            self._input_rules.append(command)
+            return ""
+        if command.startswith("iptables -D INPUT"):
+            add_form = command.replace("-D INPUT", "-A INPUT", 1)
+            if add_form in self._input_rules:
+                self._input_rules.remove(add_form)
+            return ""
+        if command.startswith("iptables -A OUTPUT"):
+            self._output_rules.append(command)
+            return ""
+        if command.startswith("iptables -D OUTPUT"):
+            add_form = command.replace("-D OUTPUT", "-A OUTPUT", 1)
+            if add_form in self._output_rules:
+                self._output_rules.remove(add_form)
+            return ""
+        if command.startswith("iptables -L INPUT"):
+            return "Chain INPUT (policy ACCEPT)\n" + "\n".join(self._input_rules)
+        if command.startswith("iptables -L OUTPUT"):
+            return "Chain OUTPUT (policy ACCEPT)\n" + "\n".join(self._output_rules)
+        if command.startswith("ss -K"):
+            if self._session_killable:
+                self._session_established = False
+            return "Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:Port Process\ntcp   ESTAB  0      0          10.0.0.10:7100    10.0.0.100:54321\n"
+        if command.startswith("ss -tn"):
+            header = "Recv-Q Send-Q Local Address:Port  Peer Address:Port Process\n"
+            if self._session_established:
+                return header + "0      0          10.0.0.10:7100    10.0.0.100:54321\n"
+            return header
+        if command.startswith("tc qdisc add"):
+            self._qdisc_installed = True
+            return ""
+        if command.startswith("tc qdisc del"):
+            self._qdisc_installed = False
+            return ""
+        if command.startswith("tc qdisc show"):
+            return "qdisc tbf 8001: root refcnt 2 rate 50Kbit burst 5Kb lat 400ms\n" if self._qdisc_installed else "qdisc noqueue 0: root refcnt 2\n"
         return ""
 
     def popen(self, *args, **kwargs):
@@ -326,6 +373,23 @@ class _StrayOutputHost(FakeHost):
         return ""
 
 
+class _PcapWritingHost(FakeHost):
+    """Stands in for a real tcpdump backgrounded via host.cmd() -- writes a
+    few bytes to the -w target path immediately, since nothing in this
+    fake actually runs tcpdump to produce them."""
+
+    def cmd(self, command):
+        self.commands.append(command)
+        if "tcpdump" in command and " -w " in command:
+            path = command.split(" -w ", 1)[1].split(" ", 1)[0]
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_bytes(b"\x00" * 16)
+            return ""
+        if command.startswith("ss -tapn") or command.startswith("ip neigh"):
+            return ""
+        return ""
+
+
 def test_throttle_ignores_leaked_non_iptables_output(tmp_path):
     """Regression test: a real live run once raised "Unable to install
     traffic-control rate limit: 98 packets captured" -- tcpdump's own exit
@@ -356,3 +420,107 @@ def test_throttle_still_raises_on_a_real_iptables_error(tmp_path):
 
     assert result.status == "failed"
     assert "iptables" in result.message.lower()
+
+
+def test_block_source_installs_a_drop_rule_and_restore_removes_it(tmp_path):
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.BLOCK_SOURCE))
+
+    assert result.status == "success"
+    assert result.details["source_ip"] == "10.0.0.100"
+    sensor = network.hosts[0]
+    assert any("10.0.0.100" in rule and "DROP" in rule for rule in sensor._input_rules)
+
+    executor.restore("10.0.0.10")
+    assert sensor._input_rules == []
+
+
+def test_block_source_is_idempotent_for_the_same_source(tmp_path):
+    executor = MininetResponseExecutor(FakeNetwork(), log_path=tmp_path / "responses.jsonl")
+    executor.execute(decision(DefenseAction.BLOCK_SOURCE))
+    second = executor.execute(decision(DefenseAction.BLOCK_SOURCE))
+    assert second.status == "success"
+    assert second.details["status"] == "already_blocked"
+
+
+def test_quarantine_installs_default_deny_with_allowlist_and_restore_removes_it(tmp_path):
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.QUARANTINE))
+
+    assert result.status == "success"
+    sensor = network.hosts[0]
+    # The attacker (denied) must not appear in the allowlist; the decoy
+    # host (neither target nor attacker) must.
+    assert "10.0.0.100" not in result.details["allowed_ips"]
+    assert "10.0.0.200" in result.details["allowed_ips"]
+    assert any(rule.endswith("-j DROP") for rule in sensor._input_rules)
+    assert any(rule.endswith("-j DROP") for rule in sensor._output_rules)
+
+    executor.restore("10.0.0.10")
+    assert sensor._input_rules == []
+    assert sensor._output_rules == []
+
+
+def test_reset_sessions_clears_a_real_established_connection(tmp_path):
+    """Regression coverage for a real bug found via a live Mininet run:
+    the verification poll assumed ss -tn's header line started with
+    "State", which a real run showed was never true (the real header is
+    "Recv-Q Send-Q Local Address:Port ..."), so the header always
+    survived filtering and every call reported "still established" even
+    though ss -K had genuinely cleared the connection (confirmed
+    separately against a real socket)."""
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.RESET_SESSIONS))
+
+    assert result.status == "success"
+    assert result.details["source_ip"] == "10.0.0.100"
+
+
+def test_reset_sessions_raises_when_the_connection_never_clears(tmp_path):
+    network = FakeNetwork()
+    network.hosts[0] = FakeHost("sensor", "10.0.0.10", session_killable=False)
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.RESET_SESSIONS))
+
+    assert result.status == "failed"
+    assert "still established" in result.message.lower()
+
+
+def test_forensic_capture_writes_a_pcap_and_state_snapshot(tmp_path):
+    """Called directly with a short duration (not through execute(), which
+    always uses the real 5s default) -- this exercises the same real
+    file-writing/polling logic without slowing the test suite down."""
+    network = FakeNetwork()
+    network.hosts[0] = _PcapWritingHost("sensor", "10.0.0.10")
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    details = executor.forensic_capture(
+        "10.0.0.10", "10.0.0.100", duration_seconds=0.05, evidence_dir=tmp_path / "forensics"
+    )
+
+    assert details["operation"] == "forensic_capture"
+    assert Path(details["pcap_path"]).exists()
+    assert Path(details["pcap_path"]).stat().st_size > 0
+    assert Path(details["state_path"]).exists()
+
+
+def test_bandwidth_cap_installs_tbf_on_the_attacker_and_restore_removes_it(tmp_path):
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+
+    result = executor.execute(decision(DefenseAction.BANDWIDTH_CAP))
+
+    assert result.status == "success"
+    attacker = network.hosts[1]
+    assert attacker.name == "attacker"
+    assert attacker._qdisc_installed is True
+
+    executor.restore("10.0.0.10")
+    assert attacker._qdisc_installed is False

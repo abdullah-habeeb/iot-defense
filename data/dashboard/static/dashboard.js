@@ -65,17 +65,31 @@ const PHASE_CLASS = {
   OBSERVING: 'active', THREAT_DETECTED: 'threat', DECIDING: 'threat',
   RESPONDING: 'threat', DECOY_ACTIVE: 'decoy', ISOLATED: 'threat',
   THROTTLED: 'throttled',
+  BLOCKED_SOURCE: 'threat', QUARANTINED: 'threat',
+  SESSIONS_RESET: 'throttled', FORENSICS_CAPTURED: 'active',
+  BANDWIDTH_CAPPED: 'throttled',
   RESTORING: 'active', RESTORED: 'restored', COMPLETE: 'restored',
   ERROR: 'threat', CLEANUP: '',
 };
 
+// Response-phase names that follow RESPONDING/DECIDING in the pipeline --
+// one entry per registered DefenseAction that isn't ALLOW/ALERT (those
+// have no dedicated post-response phase, see controller.py's own
+// action -> post_phase dispatch). Listed once here and reused below
+// instead of repeating the same 8 names in every PIPE_STEPS/PIPE_ACTIVE
+// entry.
+const RESPONSE_PHASES = [
+  'DECOY_ACTIVE', 'ISOLATED', 'THROTTLED', 'BLOCKED_SOURCE',
+  'QUARANTINED', 'SESSIONS_RESET', 'FORENSICS_CAPTURED', 'BANDWIDTH_CAPPED',
+];
+
 // ── Pipeline phases ───────────────────────────────────────────
 const PIPE_STEPS = [
-  { id: 'pipe-network',  done: ['BASELINE','OBSERVING','THREAT_DETECTED','DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-observe',  done: ['THREAT_DETECTED','DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-detect',   done: ['DECIDING','RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-context',  done: ['RESPONDING','DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
-  { id: 'pipe-decision', done: ['DECOY_ACTIVE','ISOLATED','THROTTLED','RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-network',  done: ['BASELINE','OBSERVING','THREAT_DETECTED','DECIDING','RESPONDING',...RESPONSE_PHASES,'RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-observe',  done: ['THREAT_DETECTED','DECIDING','RESPONDING',...RESPONSE_PHASES,'RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-detect',   done: ['DECIDING','RESPONDING',...RESPONSE_PHASES,'RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-context',  done: ['RESPONDING',...RESPONSE_PHASES,'RESTORING','RESTORED','COMPLETE'] },
+  { id: 'pipe-decision', done: [...RESPONSE_PHASES,'RESTORING','RESTORED','COMPLETE'] },
   { id: 'pipe-response', done: ['RESTORING','RESTORED','COMPLETE'] },
   { id: 'pipe-recovery', done: ['COMPLETE'] },
 ];
@@ -87,9 +101,7 @@ const PIPE_ACTIVE = {
   'THREAT_DETECTED': 'pipe-detect',
   'DECIDING': 'pipe-context',
   'RESPONDING': 'pipe-decision',
-  'DECOY_ACTIVE': 'pipe-response',
-  'ISOLATED': 'pipe-response',
-  'THROTTLED': 'pipe-response',
+  ...Object.fromEntries(RESPONSE_PHASES.map((phase) => [phase, 'pipe-response'])),
   'RESTORING': 'pipe-recovery',
   'RESTORED': 'pipe-recovery',
   'COMPLETE': 'pipe-recovery',
@@ -160,25 +172,35 @@ const NODE_SVG_MAP = {
 };
 
 const STATUS_CSS = {
-  'ONLINE':       'online',
-  'OBSERVING':    'online',
-  'ATTACKED':     'attacked',
-  'ISOLATED':     'isolated',
-  'THROTTLED':    'throttled',
-  'DECOY ACTIVE': 'decoy',
-  'RESTORED':     'restored',
-  'OFFLINE':      '',
+  'ONLINE':          'online',
+  'OBSERVING':       'online',
+  'ATTACKED':        'attacked',
+  'ISOLATED':        'isolated',
+  'THROTTLED':       'throttled',
+  'SOURCE BLOCKED':  'isolated',
+  'QUARANTINED':     'isolated',
+  'SESSIONS RESET':  'throttled',
+  'MONITORED':       'online',
+  'BANDWIDTH CAPPED': 'throttled',
+  'DECOY ACTIVE':    'decoy',
+  'RESTORED':        'restored',
+  'OFFLINE':         '',
 };
 
 const STATUS_LINK = {
-  'ONLINE':       'active',
-  'OBSERVING':    'active',
-  'ATTACKED':     'attacked',
-  'ISOLATED':     'isolated',
-  'THROTTLED':    'throttled',
-  'DECOY ACTIVE': 'decoy',
-  'RESTORED':     'restored',
-  'OFFLINE':      '',
+  'ONLINE':          'active',
+  'OBSERVING':       'active',
+  'ATTACKED':        'attacked',
+  'ISOLATED':        'isolated',
+  'THROTTLED':       'throttled',
+  'SOURCE BLOCKED':  'isolated',
+  'QUARANTINED':     'isolated',
+  'SESSIONS RESET':  'throttled',
+  'MONITORED':       'active',
+  'BANDWIDTH CAPPED': 'throttled',
+  'DECOY ACTIVE':    'decoy',
+  'RESTORED':        'restored',
+  'OFFLINE':         '',
 };
 
 function renderTopology(state) {
@@ -605,6 +627,63 @@ function renderResponse(state) {
       </div>`;
   }
 
+  // BLOCK_SOURCE details
+  if (action === 'BLOCK_SOURCE' && details.operation === 'block_source') {
+    detailHtml = `
+      <div class="response-detail-card" style="border-color:rgba(239,68,68,0.3)">
+        <div class="rdc-title" style="color:var(--accent-red)">🚫 Source Block (real iptables DROP)</div>
+        <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Blocked Source</span><span class="rdc-val">${escHtml(safe(details.source_ip))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Mechanism</span><span class="rdc-val">${escHtml(safe(details.mechanism))}</span></div>
+      </div>`;
+  }
+
+  // QUARANTINE details
+  if (action === 'QUARANTINE' && details.operation === 'quarantine') {
+    detailHtml = `
+      <div class="response-detail-card" style="border-color:rgba(239,68,68,0.3)">
+        <div class="rdc-title" style="color:var(--accent-red)">🛑 Quarantine (default-deny + allowlist)</div>
+        <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Denied Source</span><span class="rdc-val">${escHtml(safe(details.denied_source))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Allowed Peers</span><span class="rdc-val" style="max-width:220px;white-space:normal">${escHtml(safe(JSON.stringify(details.allowed_ips)))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Mechanism</span><span class="rdc-val">${escHtml(safe(details.mechanism))}</span></div>
+      </div>`;
+  }
+
+  // RESET_SESSIONS details
+  if (action === 'RESET_SESSIONS' && details.operation === 'reset_sessions') {
+    detailHtml = `
+      <div class="response-detail-card" style="border-color:rgba(59,130,246,0.3)">
+        <div class="rdc-title" style="color:var(--accent-blue)">🔌 Session Reset (ss -K)</div>
+        <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Peer</span><span class="rdc-val">${escHtml(safe(details.source_ip))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Mechanism</span><span class="rdc-val">${escHtml(safe(details.mechanism))}</span></div>
+      </div>`;
+  }
+
+  // FORENSIC_CAPTURE details
+  if (action === 'FORENSIC_CAPTURE' && details.operation === 'forensic_capture') {
+    detailHtml = `
+      <div class="response-detail-card" style="border-color:rgba(34,197,94,0.3)">
+        <div class="rdc-title" style="color:var(--accent-green)">🔎 Forensic Capture (no network change)</div>
+        <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Pcap</span><span class="rdc-val" style="max-width:220px;white-space:normal">${escHtml(safe(details.pcap_path))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">State Snapshot</span><span class="rdc-val" style="max-width:220px;white-space:normal">${escHtml(safe(details.state_path))}</span></div>
+      </div>`;
+  }
+
+  // BANDWIDTH_CAP details
+  if (action === 'BANDWIDTH_CAP' && details.operation === 'bandwidth_cap') {
+    detailHtml = `
+      <div class="response-detail-card" style="border-color:rgba(59,130,246,0.3)">
+        <div class="rdc-title" style="color:var(--accent-blue)">📉 Bandwidth Cap (real tc tbf, attacker egress)</div>
+        <div class="rdc-row"><span class="rdc-key">Host</span><span class="rdc-val">${escHtml(safe(details.host))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Interface</span><span class="rdc-val">${escHtml(safe(details.interface))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Rate</span><span class="rdc-val">${escHtml(safe(details.rate))}</span></div>
+        <div class="rdc-row"><span class="rdc-key">Mechanism</span><span class="rdc-val">${escHtml(safe(details.mechanism))}</span></div>
+      </div>`;
+  }
+
   // RESTORE details
   if (details.operation === 'restore') {
     detailHtml = `
@@ -614,6 +693,9 @@ function renderResponse(state) {
         <div class="rdc-row"><span class="rdc-key">Interface</span><span class="rdc-val">${escHtml(safe(details.interface))}</span></div>
         <div class="rdc-row"><span class="rdc-key">Status</span><span class="rdc-val">${escHtml(safe(details.state || details.status))}</span></div>
         ${details.throttle_removed ? '<div class="rdc-row"><span class="rdc-key">Rate Limit</span><span class="rdc-val">Removed</span></div>' : ''}
+        ${details.block_source_removed ? '<div class="rdc-row"><span class="rdc-key">Source Block</span><span class="rdc-val">Removed</span></div>' : ''}
+        ${details.quarantine_removed ? '<div class="rdc-row"><span class="rdc-key">Quarantine</span><span class="rdc-val">Removed</span></div>' : ''}
+        ${details.bandwidth_cap_removed ? '<div class="rdc-row"><span class="rdc-key">Bandwidth Cap</span><span class="rdc-val">Removed</span></div>' : ''}
       </div>`;
   }
 
@@ -648,6 +730,9 @@ const PHASE_DOT_CLASS = {
   THREAT_DETECTED: 'phase-threat', DECIDING: 'phase-deciding',
   RESPONDING: 'phase-deciding', DECOY_ACTIVE: 'phase-decoy',
   ISOLATED: 'phase-isolated', THROTTLED: 'phase-throttled', RESTORING: 'phase-deciding',
+  BLOCKED_SOURCE: 'phase-isolated', QUARANTINED: 'phase-isolated',
+  SESSIONS_RESET: 'phase-throttled', BANDWIDTH_CAPPED: 'phase-throttled',
+  FORENSICS_CAPTURED: 'phase-deciding',
   RESTORED: 'phase-restored', COMPLETE: 'phase-complete', ERROR: 'phase-error',
 };
 
@@ -726,6 +811,11 @@ function renderAll(state) {
     if (phase === 'THREAT_DETECTED') showAlert('⚠️ Threat detected — evaluating policies', 'threat');
     else if (phase === 'DECOY_ACTIVE') showAlert('🪤 Decoy deployed — attacker redirected', 'info');
     else if (phase === 'ISOLATED') showAlert('🔒 Target isolated from network', 'info');
+    else if (phase === 'BLOCKED_SOURCE') showAlert('🚫 Attacker source blocked', 'info');
+    else if (phase === 'QUARANTINED') showAlert('🛑 Target quarantined to a default-deny allowlist', 'info');
+    else if (phase === 'SESSIONS_RESET') showAlert('🔌 Live connections to the attacker terminated', 'info');
+    else if (phase === 'FORENSICS_CAPTURED') showAlert('🔎 Evidence captured — no network change', 'info');
+    else if (phase === 'BANDWIDTH_CAPPED') showAlert('📉 Attacker egress bandwidth capped', 'info');
     else if (phase === 'RESTORED') showAlert('✅ Network restored', 'info');
     else if (phase === 'ERROR') showAlert('❌ Demo error — check console', 'threat');
     _lastPhase = phase;
