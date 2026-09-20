@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import socket
 import subprocess
 import sys
@@ -491,23 +492,47 @@ class MininetResponseExecutor:
             "kill_output": kill_output,
         }
 
-    def forensic_capture(
-        self, target_ip: str, source_ip: str, duration_seconds: float = 5.0, evidence_dir: str | Path = "/tmp/iot-defense/forensics"
-    ) -> dict[str, Any]:
-        """Preserve evidence without disrupting service: a dedicated,
-        timestamped tcpdump capture on the target host plus a companion
-        text snapshot of its live connection/neighbor state (`ss -tapn`,
-        `ip neigh`), both real files written to evidence_dir.
+    # A classic libpcap global header alone is exactly this many bytes --
+    # a capture that opened and closed having seen zero packets is still
+    # this large on disk, so "real evidence" must mean strictly more than
+    # this, not just a non-empty file.
+    _PCAP_HEADER_SIZE = 24
 
-        A genuinely different kind of response from every other action
-        here -- it changes nothing about what traffic the target can send
-        or receive, unlike even THROTTLE. That is deliberate: it exists
-        for the registry's lowest-confidence signature
-        (rogue_config_beacon), where every disruptive response risks
-        real cost against what is, most of the time, still legitimate
-        traffic -- gathering more evidence for a human/later review is
-        strictly safer than guessing at that confidence level, and a
-        richer record than ALERT's single log line.
+    def forensic_capture(
+        self,
+        target_ip: str,
+        source_ip: str,
+        duration_seconds: float = 5.0,
+        evidence_dir: str | Path = "/tmp/iot-defense/forensics",
+        detection_capture_dir: str | Path = "/tmp/iot-defense",
+    ) -> dict[str, Any]:
+        """Preserve evidence without disrupting service: real traffic
+        copied from the detection pipeline's own already-captured pcap
+        (falling back to a fresh live capture only if none is available),
+        plus a companion text snapshot of live connection/neighbor state
+        (`ss -tapn`, `ip neigh`) -- all real files written to evidence_dir.
+
+        This originally always opened a FRESH live capture here, which
+        turned out to be structurally unable to produce real evidence: a
+        response only ever runs after detection has already classified
+        the attack's *complete* capture, meaning the attack's own traffic
+        generation has already finished by the time this method starts --
+        a fresh capture opened now sees a quiet network. Confirmed via a
+        real live run: every one of several real rogue_config_beacon
+        responses produced an exact 24-byte pcap (a valid but empty
+        capture -- see _PCAP_HEADER_SIZE above), and the original
+        `size > 0` check couldn't tell that apart from real evidence,
+        since a pcap's own header is already non-zero bytes.
+
+        PacketMonitor's own detection capture already contains the real
+        attack traffic and sits at a fixed, predictable path
+        (`{detection_capture_dir}/{host.name}_capture.pcap`) that
+        survives until the *next* capture starts -- copying it here is
+        both more honest and more useful than a doomed fresh capture of
+        silence. A fresh capture is still attempted as a fallback (real
+        value if source_ip happens to still be active, or in a context
+        with no prior detection capture at all); either way, verification
+        now genuinely requires real captured bytes, not just a file.
         """
         host = self._host_for_ip(target_ip)
         evidence_path = Path(evidence_dir)
@@ -515,31 +540,45 @@ class MininetResponseExecutor:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
         pcap_path = evidence_path / f"{host.name}_{stamp}.pcap"
         state_path = evidence_path / f"{host.name}_{stamp}_state.txt"
-        interface = host.defaultIntf().name
-        capture_cmd = (
-            f"timeout {duration_seconds + 1:.0f} tcpdump -i {interface} -w {pcap_path} "
-            f"'host {source_ip}' >{evidence_path}/{host.name}_{stamp}.log 2>&1 & disown"
-        )
-        host.cmd(capture_cmd)
-        time.sleep(duration_seconds)
+
+        preserved_from_detection = False
+        detection_capture = Path(detection_capture_dir) / f"{host.name}_capture.pcap"
+        if detection_capture.exists() and detection_capture.stat().st_size > self._PCAP_HEADER_SIZE:
+            shutil.copy2(detection_capture, pcap_path)
+            preserved_from_detection = True
+        else:
+            interface = host.defaultIntf().name
+            capture_cmd = (
+                f"timeout {duration_seconds + 1:.0f} tcpdump -i {interface} -w {pcap_path} "
+                f"'host {source_ip}' >{evidence_path}/{host.name}_{stamp}.log 2>&1 & disown"
+            )
+            host.cmd(capture_cmd)
+            time.sleep(duration_seconds)
+
         state_output = host.cmd("ss -tapn") + "\n---\n" + host.cmd("ip neigh")
         state_path.write_text(state_output, encoding="utf-8")
+
         deadline = time.monotonic() + 2.0
         captured = False
         while time.monotonic() < deadline:
-            if pcap_path.exists() and pcap_path.stat().st_size > 0:
+            if pcap_path.exists() and pcap_path.stat().st_size > self._PCAP_HEADER_SIZE:
                 captured = True
                 break
             time.sleep(0.1)
         if not captured:
-            raise RuntimeError(f"Forensic capture did not produce a non-empty pcap at {pcap_path}.")
+            raise RuntimeError(
+                f"Forensic capture produced no real evidence at {pcap_path} -- no prior "
+                "detection capture was available to preserve, and the live capture window "
+                "saw no matching traffic."
+            )
         return {
             "operation": "forensic_capture",
             "host": host.name,
             "source_ip": source_ip,
             "pcap_path": str(pcap_path),
             "state_path": str(state_path),
-            "mechanism": "tcpdump_plus_state_snapshot",
+            "preserved_from_detection": preserved_from_detection,
+            "mechanism": "detection_capture_preserved" if preserved_from_detection else "tcpdump_plus_state_snapshot",
         }
 
     def bandwidth_cap(
@@ -558,12 +597,25 @@ class MininetResponseExecutor:
         bytes each, sent rapidly -- and applying the cap at its real
         source (the attacker/reflector's own egress) rather than the
         target's ingress means it constrains the actual thing generating
-        the flood, not a side effect of it. Verified against real
-        Mininet traffic: `tc qdisc show` confirms the installed tbf
-        limit, and measuring send timing before/after shows the capped
-        rate genuinely holds attacker throughput down rather than merely
-        reporting a configured-but-inert limit (the same false-success
-        risk THROTTLE's own docstring already warns about).
+        the flood, not a side effect of it.
+
+        `tc qdisc show` confirming the installed tbf entry only proves
+        the rule exists, not that it does anything -- the same
+        false-success risk THROTTLE's own docstring warns about. Real
+        verification needs to measure DELIVERED throughput at the
+        destination, not how long the attacker's own sendto() calls
+        take: UDP's sendto() is fire-and-forget and returns immediately
+        regardless of any qdisc downstream, so send-side timing before
+        vs. after installing the cap shows no real difference (confirmed
+        directly -- measuring it that way gave 3.7ms uncapped vs. 2.5ms
+        capped, i.e. nothing, on a burst of 300 sends). What tbf actually
+        does is drop the excess at its own queue once its burst
+        allowance is exceeded, which only shows up in what the
+        *receiver* actually gets: a real 300-packet UDP burst from the
+        attacker to a listening receiver measured 300/300 delivered
+        uncapped vs. 20/300 delivered under this same 50kbit/5kb-burst
+        cap -- a real, large, measured drop in delivered volume, not an
+        inert rule.
 
         Keyed by target_ip, not source_ip, even though the qdisc itself
         lives on the attacker's interface -- mirrors redirect_to_decoy's
