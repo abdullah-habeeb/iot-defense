@@ -384,7 +384,7 @@ policy:
           # more (the attacker's full interaction, not just the one shot
           # already sent).
           CONTINUE: {attacker: -3.0, defender: 3.5}
-          RETREAT: {attacker: -2.0, defender: 7.5}
+          RETREAT: {attacker: -4.0, defender: 2.5}
         BANDWIDTH_CAP:
           # Irrelevant to one small malformed request.
           CONTINUE: {attacker: 0.0, defender: 0.0}

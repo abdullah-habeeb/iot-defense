@@ -9,8 +9,12 @@ from typing import Any
 # than just observing (ALERT) or diverting (DECOY) it. Kept as an explicit
 # set rather than "not in {allow, alert, decoy}" so a future containment
 # action must be added here deliberately, the same way ISOLATE and
-# THROTTLE were.
-_BLOCKING_ACTIONS = {"isolate", "throttle"}
+# THROTTLE were. block_source, quarantine, reset_sessions, and
+# bandwidth_cap all genuinely restrict connectivity too (a standing rule
+# for the first three, a real forced disconnection for reset_sessions);
+# forensic_capture is deliberately excluded -- it takes zero enforcement
+# action, the same reason ALERT and DECOY are excluded.
+_BLOCKING_ACTIONS = {"isolate", "throttle", "block_source", "quarantine", "reset_sessions", "bandwidth_cap"}
 
 
 class MetricsCollector:
