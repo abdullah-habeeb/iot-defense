@@ -194,6 +194,67 @@ to match or beat:
   training and evaluating PPO against real, verified Mininet outcomes rather than only a
   synthetic simulator (see README's "PPO reinforcement-learned policy" section).
 
+## Adaptive-attacker evaluation
+
+Every result above treats one attack attempt as one independent event: detect, decide,
+respond, done -- the right model for measuring detection and response-execution
+correctness, but it cannot answer a different, real question: when the deployed
+policy's own preferred response is per-source (`BLOCK_SOURCE`, registered for
+`brute_force` and `replay_attack`), does a persistent attacker actually get contained
+across repeated attempts, or does each new source IP simply start over unblocked?
+
+`src/iot_defense/evaluation/adaptive.py` runs a real, multi-round campaign against a
+single, persistent Mininet network, in two modes: **fixed** (every round reuses the
+same source IP, a control) and **rotate** (every round uses a source IP not yet
+blocked in this campaign, reusing `simulation/traffic.py`'s existing distributed-
+spoofing generator built for the item-6 work rather than duplicating it). Neither
+mode restores the block between rounds -- doing so would erase exactly the cross-round
+containment state this module exists to measure; cleanup runs once, at the end.
+
+One real methodological issue was found and fixed during this evaluation's own
+development, not papered over: a zero-packet capture is ambiguous for a source that
+was *not* already blocked -- it could mean the block is somehow broader than intended
+(a real, important finding if true), or it could be this project's own already-
+documented Mininet/tcpdump capture flakiness under repeated back-to-back capture
+cycling on this 2-CPU VM (the same failure class `monitor.py`'s `read_capture` and
+`generate_dataset.py` already tolerate elsewhere). Conflating the two would misreport
+measurement noise as a security finding. The module now retries once (mirroring
+`read_capture`'s own established one-retry pattern) and marks the round
+`capture_reliable` so a still-empty second attempt stays visible rather than hidden.
+
+### Results (2026-09-21, `--rounds 5`)
+
+| Mode | Round | Source | Packets | Reliable | Result |
+|---|---|---|---|---|---|
+| fixed | 0 | `.100` | 17 | yes | detected, `BLOCK_SOURCE` |
+| fixed | 1-4 | `.100` | 0 | yes | blocked -- stayed contained for all 4 remaining rounds |
+| rotate | 0 | `.100` | 17 | yes | detected, `BLOCK_SOURCE` |
+| rotate | 1 | `.121` | 17 | yes | detected, `BLOCK_SOURCE` -- a fresh source got through |
+| rotate | 2-4 | `.122` | 0 | **no** | capture unreliable (retry also empty) -- not counted either way |
+
+**The fixed-mode control is unambiguous**: once `BLOCK_SOURCE` takes effect, the same
+attacker gets zero packets through for every subsequent round, for real, not assumed.
+
+**The rotate-mode result is the real finding**: a second, entirely fresh source
+(`.121`) reached the sensor and was independently detected and blocked, exactly like
+the first. Because `BLOCK_SOURCE` installs `iptables -A INPUT -s <source_ip> -d
+<target_ip> -j DROP` (confirmed by reading `executor.py`'s own implementation, not
+assumed), it is inherently scoped to the *claimed* IP in the packet header, not the
+physical attacker -- so an attacker able to spoof or genuinely rotate source addresses
+is not contained by this response at all, only whichever single address it has
+already been caught using. Two independent rounds already demonstrate this cleanly;
+the third source's result was inconclusive (flagged, not discarded), and a larger
+future run should push past this VM's own capture-reliability ceiling to get a
+cleaner distinct-sources-per-campaign count.
+
+**This is not a flaw unique to this project's implementation** -- any purely
+identity-based (as opposed to behavior-based) containment has the same structural
+limit. It is, however, a real, now-measured gap between "the registered
+`preferred_action` was executed and verified" (this evaluation's other results) and
+"the attacker is actually contained" (a stronger claim this module shows does not
+automatically follow), worth stating plainly rather than assuming BLOCK_SOURCE's
+per-event success generalizes to real persistence.
+
 ## Limitations
 
 - **`c2_beacon`, the 16th registered attack, is not included in this run.** It was registered
