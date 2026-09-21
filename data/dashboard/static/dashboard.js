@@ -888,9 +888,96 @@ async function loadInitialState() {
   }
 }
 
+// ── Run-attack control ──────────────────────────────────────────
+// The one place this dashboard stops being purely read-only: it POSTs an
+// attack key to /run and lets the existing state.json + SSE machinery
+// carry everything from there — no attack/defense logic is duplicated
+// here, only the choice of which registered key to launch.
+let _runStatusPoll = null;
+
+async function loadAttackOptions() {
+  const select = $('run-attack-select');
+  if (!select) return;
+  try {
+    const resp = await fetch('/attacks');
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const attacks = await resp.json();
+    select.innerHTML = attacks.map(a => `<option value="${escHtml(a.key)}">${escHtml(a.label)}</option>`).join('');
+  } catch (e) {
+    console.warn('[run-control] /attacks fetch failed:', e);
+    select.innerHTML = '<option value="">Attack list unavailable</option>';
+  }
+}
+
+function setRunButtonState(running, attackLabel) {
+  const btn = $('run-attack-btn');
+  const select = $('run-attack-select');
+  if (!btn) return;
+  if (running) {
+    btn.textContent = attackLabel ? `Running ${attackLabel}…` : 'Running…';
+    btn.disabled = true;
+    btn.classList.add('running');
+    if (select) select.disabled = true;
+  } else {
+    btn.textContent = 'Run attack';
+    btn.disabled = false;
+    btn.classList.remove('running');
+    if (select) select.disabled = false;
+  }
+}
+
+async function pollRunStatus() {
+  try {
+    const resp = await fetch('/run/status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    setRunButtonState(!!data.running, data.attack);
+    if (data.running) {
+      _runStatusPoll = setTimeout(pollRunStatus, 2000);
+    } else {
+      _runStatusPoll = null;
+    }
+  } catch (e) {
+    _runStatusPoll = null;
+  }
+}
+
+async function triggerRun() {
+  const select = $('run-attack-select');
+  const attack = select ? select.value : null;
+  if (!attack) return;
+  setRunButtonState(true, attack);
+  try {
+    const resp = await fetch('/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attack }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      showAlert(`⚠️ ${data.error || 'Could not start the run'}`, 'threat');
+      setRunButtonState(false);
+      return;
+    }
+    showAlert(`▶️ Started ${attack}`, 'info');
+    if (!_runStatusPoll) pollRunStatus();
+  } catch (e) {
+    showAlert('⚠️ Could not reach the server to start the run', 'threat');
+    setRunButtonState(false);
+  }
+}
+
+function initRunControl() {
+  const btn = $('run-attack-btn');
+  if (btn) btn.addEventListener('click', triggerRun);
+  loadAttackOptions();
+  pollRunStatus(); // picks up a run already in progress on page load
+}
+
 // ── Boot ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   startClock();
   loadInitialState();
   connectSSE();
+  initRunControl();
 });

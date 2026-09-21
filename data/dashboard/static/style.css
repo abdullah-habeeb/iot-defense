@@ -139,6 +139,47 @@ body {
   gap: 1.25rem;
 }
 
+/* Run-attack control */
+.run-control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+#run-attack-select {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  padding: 0.3rem 0.5rem;
+  max-width: 180px;
+}
+#run-attack-btn {
+  background: var(--accent-blue-dim);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#run-attack-btn:hover:not(:disabled) { background: var(--accent-blue); }
+#run-attack-btn:disabled {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+#run-attack-btn.running {
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
 /* Connection indicator */
 .conn-indicator {
   display: flex;
