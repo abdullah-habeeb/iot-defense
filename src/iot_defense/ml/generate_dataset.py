@@ -26,14 +26,14 @@ from iot_defense.simulation.traffic import start_multi_connection_listener
 # *count*, which grows automatically as ATTACK_SCENARIOS grows.
 _ATTACK_KEYS = tuple(ATTACK_SCENARIOS.keys())
 
-# The 10 attacks added after the original 5 reuse their own registered
+# Every attack registered after the original 5 reuses its own registered
 # AttackScenario.generate_traffic directly (see the dispatch in
 # generate_dataset() below) instead of a second, bespoke host.cmd() script
 # per attack the way the original 5 each have -- deliberately, not out of
 # laziness: those five generators were each calibrated against real
 # Mininet timing across many live-run iterations (documented at length in
 # each _*_traffic() function's own docstring above), and simulation/
-# traffic.py's own generators for these ten attacks already went through
+# traffic.py's own generators for these later attacks already went through
 # that exact same calibration process for the live demo. Hand-writing a
 # second bespoke copy here would re-risk every timing bug that process
 # already found and fixed once, and would silently drift from the live
@@ -43,10 +43,18 @@ _ATTACK_KEYS = tuple(ATTACK_SCENARIOS.keys())
 # describe). Reusing the registry's own callable means there is only ever
 # one real implementation of "how syn_flood traffic looks", not two.
 #
-# Three of the ten reverse traffic direction (the compromised device is
-# the source, not the destination) -- mirrors exfiltration's own existing
-# special-cased labeling condition below.
-_REVERSED_DIRECTION_NEW_KEYS = frozenset({"dns_tunneling", "firmware_tampering", "rogue_beacon"})
+# A subset reverse traffic direction (the compromised device is the
+# source, not the destination) -- mirrors exfiltration's own existing
+# special-cased labeling condition below. This set is NOT auto-derived
+# from the registry (AttackScenario has no reversed-direction flag) --
+# found the hard way once already: c2_beacon was added to the registry
+# without being added here, so a real captured c2_beacon flow (sensor ->
+# attacker, per generate_c2_beacon_mininet_traffic) silently failed
+# is_new_attack's direction check below and was dropped from the dataset
+# entirely, not mislabeled -- fixed, but a reminder that a new reversed-
+# direction attack MUST be added to this set by hand, there is no
+# structural guard against forgetting again.
+_REVERSED_DIRECTION_NEW_KEYS = frozenset({"dns_tunneling", "firmware_tampering", "rogue_beacon", "c2_beacon"})
 _NEW_ATTACK_KEYS = frozenset(_ATTACK_KEYS[5:])
 
 # get_scenario_type()'s own sub-scenario strings for the original 5 attacks
