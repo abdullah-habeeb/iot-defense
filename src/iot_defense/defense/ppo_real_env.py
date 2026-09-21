@@ -18,7 +18,7 @@ small (tens, not thousands). Requires root (Mininet) to run.
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 import gymnasium as gym
 import numpy as np
@@ -112,7 +112,9 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
 
     # ─── Real observation for one scenario ─────────────────────────────────
 
-    def _observe_scenario(self, scenario: str) -> ThreatEvent:
+    def _observe_scenario(
+        self, scenario: str, traffic_override: Callable[[Any], Any] | None = None
+    ) -> ThreatEvent:
         """Generate real traffic for one scenario, capture it, and classify
         it with the same attack-type-agnostic detector the live demo uses.
 
@@ -123,10 +125,18 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
         while *labeling* it brute_force/data_exfiltration in training data
         the moment this env was first actually used -- caught and fixed
         here, before that first real use, not after.
+
+        traffic_override, when given, replaces the registry's own
+        `generate_traffic` call for this one observation (capture sizing
+        still comes from the matched attack's own registry entry) -- used
+        by evaluation/adaptive.py to send the *same* attack's traffic from
+        a different (real or spoofed) source per round without
+        duplicating this method's capture/aggregate/detect logic, the
+        exact un-synced-copy bug class this project has hit before.
         """
         if scenario == "normal":
             session = self.monitor.start_capture(self.net, "sensor", 20)
-            self.traffic_gen.generate_normal_mininet_traffic(self.net)
+            (traffic_override or self.traffic_gen.generate_normal_mininet_traffic)(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, 3.0)
         else:
             from iot_defense.attacks.registry import ATTACK_SCENARIOS
@@ -138,7 +148,7 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             if attack is None:
                 raise ValueError(f"No registered attack scenario for training scenario: {scenario!r}")
             session = self.monitor.start_capture(self.net, "sensor", attack.capture_packet_limit)
-            attack.generate_traffic(self.net)
+            (traffic_override or attack.generate_traffic)(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, attack.capture_completion_timeout)
 
         try:

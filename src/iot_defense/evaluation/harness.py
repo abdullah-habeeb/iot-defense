@@ -173,7 +173,10 @@ def run_harness(
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    started = time.time()
+    # monotonic: immune to wall-clock jumps (VM suspend/NTP resync),
+    # unlike time.time() -- found via a real one during development
+    # (see evaluation/adaptive.py for the same fix).
+    started = time.monotonic()
     total_conditions_run = 0
     total_conditions = trials_per_condition * len(CONDITIONS)
     try:
@@ -194,7 +197,7 @@ def run_harness(
     finally:
         env.close()
 
-    elapsed = time.time() - started
+    elapsed = time.monotonic() - started
     summary = {
         "trials_per_condition": trials_per_condition,
         "conditions": list(CONDITIONS),
