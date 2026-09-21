@@ -936,6 +936,14 @@ async function pollRunStatus() {
       _runStatusPoll = setTimeout(pollRunStatus, 2000);
     } else {
       _runStatusPoll = null;
+      // A run that crashed before ever reaching state.json (bad sudo
+      // auth, an import error, Mininet left dirty by a previous
+      // unclean shutdown) used to leave the button silently
+      // re-enabled with zero indication anything went wrong -- surface
+      // it plainly instead of pretending the run just quietly finished.
+      if (data.last_run_failed) {
+        showAlert(`\u274c Last run exited with code ${data.last_run_exit_code} -- see ${data.last_run_log} on the server`, 'threat');
+      }
     }
   } catch (e) {
     _runStatusPoll = null;
