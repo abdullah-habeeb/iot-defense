@@ -182,3 +182,50 @@ def test_ppo_action_output_is_valid():
     policy.fallback = None
     decision = policy.decide(context_for_scenario("reconnaissance_port_scan"))
     assert decision.action == DefenseAction.DECOY
+
+
+def test_synthetic_training_converges_every_scenario_to_its_preferred_action(tmp_path):
+    """Regression guard for a real bug class this project has now hit
+    twice: train_ppo.py's model quietly stops converging every scenario
+    to its own registered preferred_action as the registry grows,
+    without anything failing loudly. Found the second time via a direct
+    3-seed sweep (not assumed): net_arch=[32, 32] with more timesteps
+    made convergence *worse* (a real, reproduced finding, see
+    train_ppo.py's own comment), and even the net_arch=[64, 64] fix
+    later found to work was NOT reliably seed-independent at the
+    project's own default timestep budget -- 2 of 3 sampled seeds
+    (13, 42) still produced 1-2 mismatches, only the project's actual
+    hardcoded seed=7 (and, separately, seed=1) converged cleanly. That
+    means train_ppo.py's own fixed seed=7 is currently load-bearing for
+    correctness, not just a determinism convenience -- worth a real test
+    that fails loudly if that stops being true, rather than relying on
+    the ad-hoc verification script this bug was actually caught with.
+
+    Trains for real (not mocked) using the project's own actual
+    train_ppo.py entry point and config -- slower than this file's other
+    tests, but a fast, deterministic, non-Mininet training run (a few
+    tens of seconds), and this is exactly the kind of bug a mocked test
+    cannot catch."""
+    from iot_defense.attacks.registry import ATTACK_SCENARIOS
+    from iot_defense.defense.decision import DefenseAction
+    from iot_defense.defense.ppo_env import context_for_scenario
+    from iot_defense.defense.ppo_policy import PPODefensePolicy
+    from iot_defense.simulation.train_ppo import train
+
+    output_path = tmp_path / "ppo_convergence_check"
+    train(output_path=output_path)
+    policy = PPODefensePolicy(model_path=str(output_path))
+
+    mismatches = []
+    normal_decision = policy.decide(context_for_scenario("normal"))
+    if normal_decision.action != DefenseAction.ALLOW:
+        mismatches.append(("normal", normal_decision.action.name, "ALLOW"))
+    for key, scenario in ATTACK_SCENARIOS.items():
+        decision = policy.decide(context_for_scenario(scenario.attack_type))
+        if decision.action != scenario.preferred_action:
+            mismatches.append((key, decision.action.name, scenario.preferred_action.name))
+
+    assert not mismatches, (
+        f"train_ppo.py's own real training run (seed=7, the project's fixed seed) "
+        f"no longer converges every scenario to its registered preferred_action: {mismatches}"
+    )

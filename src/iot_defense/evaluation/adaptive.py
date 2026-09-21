@@ -44,7 +44,7 @@ import argparse
 import json
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.defense.context import build_security_context
@@ -149,7 +149,18 @@ def run_round(
     }
 
 
-def run_campaign(env: RealMininetDefenseEnv, rounds: int, mode: Mode) -> list[dict[str, Any]]:
+def run_campaign(
+    env: RealMininetDefenseEnv, rounds: int, mode: Mode, on_row: "Callable[[dict[str, Any]], None] | None" = None
+) -> list[dict[str, Any]]:
+    """on_row, when given, is called with each row as soon as it is
+    produced -- run_evaluation uses this to write+flush every round to
+    disk immediately, matching harness.py's own established convention
+    (a mid-run failure there still leaves every completed trial's real
+    data on disk). Without this, a crash partway through a later mode
+    would silently lose an earlier mode's already-completed results
+    too, since they would still only exist in an in-memory list never
+    written until the very end.
+    """
     policy = StackelbergDefensePolicy()
     blocked_sources: set[str] = set()
     rows: list[dict[str, Any]] = []
@@ -165,6 +176,8 @@ def run_campaign(env: RealMininetDefenseEnv, rounds: int, mode: Mode) -> list[di
             blocked_sources.add(source_ip)
         row["cumulative_blocked_sources"] = sorted(blocked_sources)
         rows.append(row)
+        if on_row is not None:
+            on_row(row)
         print(
             f"[adaptive:{mode}] round={round_num} source={source_ip} "
             f"detected={row['detected']} action={row['action']} blocked={sorted(blocked_sources)}",
@@ -180,21 +193,23 @@ def run_evaluation(
     output.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()  # monotonic: immune to wall-clock jumps (VM suspend/NTP resync), unlike time.time()
     all_rows: list[dict[str, Any]] = []
-    for mode in modes:
-        env = RealMininetDefenseEnv()
-        env._ensure_network()
-        try:
-            all_rows.extend(run_campaign(env, rounds, mode))
-        finally:
-            try:
-                env.executor.restore(TARGET_IP)
-            except Exception:  # noqa: BLE001
-                pass
-            env.close()
-
     with output.open("w", encoding="utf-8") as fh:
-        for row in all_rows:
+
+        def _write_row(row: dict[str, Any]) -> None:
             fh.write(json.dumps(row) + "\n")
+            fh.flush()
+
+        for mode in modes:
+            env = RealMininetDefenseEnv()
+            env._ensure_network()
+            try:
+                all_rows.extend(run_campaign(env, rounds, mode, on_row=_write_row))
+            finally:
+                try:
+                    env.executor.restore(TARGET_IP)
+                except Exception:  # noqa: BLE001
+                    pass
+                env.close()
 
     summary = {
         "rounds": rounds,
