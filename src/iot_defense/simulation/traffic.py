@@ -846,6 +846,100 @@ class TrafficGenerator:
         )
         return {"attacker": attacker.name, "target": target_ip, "output": attacker.cmd(command)}
 
+    def generate_replay_attack_distributed_mininet_traffic(
+        self, net: Any, duration_seconds: int = 20, spoofed_source_ips: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        """Same credential/command-replay burst as generate_replay_attack_
+        mininet_traffic, but cycling through several distinct, spoofed
+        source addresses from the single physical attacker host instead
+        of sending from its own real IP -- a real, if bounded, stand-in
+        for a distributed/botnet-style source pattern, not a single
+        identifiable attacker.
+
+        Built for UDP specifically because it's genuinely spoofable in a
+        lab: UDP is fire-and-forget, so a crafted packet claiming a
+        source address the sending host doesn't actually own still
+        arrives and still looks, to a receiver, exactly like traffic
+        from that address. TCP would need a completed handshake -- the
+        SYN-ACK would have to come back to the spoofed address, not this
+        host -- so it can't be faithfully spoofed from a single
+        cooperating host the way brute_force's own TCP traffic works;
+        that's a real, structural reason this variant exists for
+        replay_attack (UDP) and not brute_force (TCP).
+
+        Sends a real, raw IP+UDP packet per attempt (IP_HDRINCL, this
+        project's Mininet hosts already run as root) with its own source
+        address field set to whichever spoofed IP that attempt's turn
+        lands on -- a genuinely different wire packet per source, not a
+        single flow relabeled after the fact. UDP's own IPv4 checksum
+        field is left as 0 ("no checksum computed"), a standard, valid
+        choice Linux accepts by default -- avoids needing the UDP
+        pseudo-header checksum's extra complexity for a lab traffic
+        generator with nothing to gain from it.
+
+        The resulting capture forms one *separate* flow per distinct
+        source/destination pair (FeatureAggregator groups by exactly
+        that), so this exercises -- for real, not just in theory --
+        MininetResponseExecutor.block_source()'s own per-target *list* of
+        blocked sources (block_source() has supported more than one
+        source per target since it was first written, precisely for this
+        eventual case): each detected source gets its own real DROP rule,
+        and restore() cleans up every one of them together.
+        """
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        target_port = 6668
+        sources = spoofed_source_ips or ("10.0.0.121", "10.0.0.122", "10.0.0.123", "10.0.0.124")
+        sources_literal = repr(list(sources))
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, struct, time\n"
+            "\n"
+            "def checksum(data):\n"
+            "    if len(data) % 2:\n"
+            "        data += b'\\x00'\n"
+            "    total = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))\n"
+            "    total = (total >> 16) + (total & 0xffff)\n"
+            "    total += total >> 16\n"
+            "    return (~total) & 0xffff\n"
+            "\n"
+            "def build_packet(src_ip, dst_ip, dst_port, payload, packet_id):\n"
+            "    udp_len = 8 + len(payload)\n"
+            "    udp_header = struct.pack('!HHHH', 51000, dst_port, udp_len, 0)\n"
+            "    ip_header_no_checksum = struct.pack(\n"
+            "        '!BBHHHBBH4s4s', 0x45, 0, 20 + udp_len, packet_id, 0, 64, socket.IPPROTO_UDP, 0,\n"
+            "        socket.inet_aton(src_ip), socket.inet_aton(dst_ip),\n"
+            "    )\n"
+            "    ip_checksum = checksum(ip_header_no_checksum)\n"
+            "    ip_header = struct.pack(\n"
+            "        '!BBHHHBBH4s4s', 0x45, 0, 20 + udp_len, packet_id, 0, 64, socket.IPPROTO_UDP, ip_checksum,\n"
+            "        socket.inet_aton(src_ip), socket.inet_aton(dst_ip),\n"
+            "    )\n"
+            "    return ip_header + udp_header + payload\n"
+            "\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)\n"
+            "sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)\n"
+            f"sources = {sources_literal}\n"
+            "payload = b'TOKEN=stale-session-abc123'\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 18:\n"
+            "    source_ip = sources[sent % len(sources)]\n"
+            f"    packet = build_packet(source_ip, '{target_ip}', {target_port}, payload, 1000 + sent)\n"
+            f"    sock.sendto(packet, ('{target_ip}', 0))\n"
+            "    sent += 1\n"
+            "    time.sleep(1.2)\n"
+            "sock.close()\n"
+            "print('replay_attack_distributed_done')\n"
+            "PY"
+        )
+        return {
+            "attacker": attacker.name,
+            "target": target_ip,
+            "spoofed_sources": list(sources),
+            "output": attacker.cmd(command),
+        }
+
     def generate_rogue_beacon_mininet_traffic(self, net: Any, duration_seconds: int = 10) -> dict[str, Any]:
         """Generate a bounded rogue-configuration-beacon attempt: an
         already-compromised device periodically pushing small,
@@ -875,6 +969,53 @@ class TrafficGenerator:
             "    time.sleep(0.11)\n"
             "sock.close()\n"
             "print('rogue_beacon_done')\n"
+            "PY"
+        )
+        return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}
+
+    def generate_c2_beacon_mininet_traffic(self, net: Any, duration_seconds: int = 33) -> dict[str, Any]:
+        """Generate a bounded command-and-control beaconing attempt: an
+        already-compromised device checking in with a fixed external host
+        on a near-perfectly regular schedule -- direction reversed, like
+        every other tampering/beaconing generator in this file.
+
+        Unlike rogue_beacon (a high-*frequency* but still essentially
+        irregularly-timed push) or firmware_tampering (occasional,
+        larger pushes), this attack's real signature is TIMING
+        REGULARITY specifically: RuleBasedC2BeaconDetector's own
+        inter_arrival_cv condition needs consecutive gaps between sends
+        to be close to uniform, not just frequent. A plain fixed
+        `time.sleep(interval)` between sends is deliberately NOT jittered
+        (every other timing-sensitive generator in this file paces with
+        some randomness; this one specifically must not) -- real
+        scheduling variance on this VM already introduces a small amount
+        of natural jitter on its own, and a real live run is what
+        confirmed the resulting inter_arrival_cv lands comfortably under
+        RuleBasedC2BeaconDetector's own 0.15 ceiling without needing to
+        add any more.
+
+        20 sends at a 1.5s interval (33s duration, with margin) keeps
+        packet_count comfortably above the detector's own 15 floor even
+        if a send or two is lost to real scheduling delay, and
+        average_packet_size (380-byte payload) real margin inside its
+        300-500 window on both sides.
+        """
+        sensor = net.get("sensor")
+        attacker_ip = "10.0.0.100"
+        target_port = 8443
+        command = (
+            "python3 - <<'PY'\n"
+            "import socket, time\n"
+            "sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n"
+            "payload = b'C' * 380\n"
+            "start = time.time()\n"
+            "sent = 0\n"
+            f"while time.time() - start < {duration_seconds} and sent < 20:\n"
+            f"    sock.sendto(payload, ('{attacker_ip}', {target_port}))\n"
+            "    sent += 1\n"
+            "    time.sleep(1.5)\n"
+            "sock.close()\n"
+            "print('c2_beacon_done')\n"
             "PY"
         )
         return {"source": sensor.name, "target": attacker_ip, "output": sensor.cmd(command)}

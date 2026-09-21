@@ -127,3 +127,36 @@ def test_tcp_syn_ack_counts_reflect_real_flags_not_port_presence():
     assert tcp_flow.packet_count == 4
     assert tcp_flow.tcp_syn_count == 2  # SYN and SYN+ACK
     assert tcp_flow.tcp_ack_count == 2  # SYN+ACK and PSH+ACK
+
+
+def test_inter_arrival_cv_is_near_zero_for_perfectly_regular_timing():
+    """A near-0 coefficient of variation is the whole point of this
+    feature -- it's the one real signal C2 beaconing needs and no
+    rate/size/count-based detector provides."""
+    events = [
+        {"timestamp": t, "src_ip": "10.0.0.10", "dst_ip": "10.0.0.200", "protocol": "UDP", "packet_length": 60}
+        for t in (0.0, 3.0, 6.0, 9.0, 12.0, 15.0)
+    ]
+    features = FeatureAggregator().aggregate(events)
+    assert features[0].inter_arrival_cv < 0.01
+
+
+def test_inter_arrival_cv_is_high_for_bursty_irregular_timing():
+    events = [
+        {"timestamp": t, "src_ip": "10.0.0.100", "dst_ip": "10.0.0.10", "protocol": "UDP", "packet_length": 60}
+        for t in (0.0, 0.1, 3.5, 3.6, 3.7, 9.2)
+    ]
+    features = FeatureAggregator().aggregate(events)
+    assert features[0].inter_arrival_cv > 0.5
+
+
+def test_inter_arrival_cv_defaults_to_the_insufficient_data_sentinel():
+    """Fewer than 3 packets can't produce a real variance -- must not be
+    silently reported as 0.0 ("perfectly regular"), the opposite of what
+    too little data actually tells you."""
+    events = [
+        {"timestamp": t, "src_ip": "10.0.0.100", "dst_ip": "10.0.0.10", "protocol": "UDP", "packet_length": 60}
+        for t in (0.0, 1.0)
+    ]
+    features = FeatureAggregator().aggregate(events)
+    assert features[0].inter_arrival_cv == 999.0

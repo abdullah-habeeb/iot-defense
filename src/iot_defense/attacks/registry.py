@@ -109,6 +109,7 @@ def _build_registry() -> dict[str, AttackScenario]:
     from iot_defense.detection.detector import (
         RuleBasedBruteForceDetector,
         RuleBasedBufferOverflowDetector,
+        RuleBasedC2BeaconDetector,
         RuleBasedDnsAmplificationDetector,
         RuleBasedDnsTunnelingDetector,
         RuleBasedDosDetector,
@@ -521,6 +522,36 @@ def _build_registry() -> dict[str, AttackScenario]:
             ppo_example_features={"packets_per_second": 7.0, "unique_destination_ports": 1},
             ppo_threat_score=0.6,
             ppo_confidence=0.55,
+        ),
+        "c2_beacon": AttackScenario(
+            key="c2_beacon",
+            label="Command-and-control beaconing",
+            attack_type="c2_beaconing",
+            observed_threat_key="C2_BEACONING",
+            build_detector=RuleBasedC2BeaconDetector,
+            generate_traffic=lambda net: traffic.generate_c2_beacon_mininet_traffic(net, duration_seconds=33),
+            capture_packet_limit=60,
+            capture_duration_seconds=33.0,
+            capture_completion_timeout=35.0,
+            # The first attack in this registry whose real signature is
+            # timing REGULARITY (FlowFeatures.inter_arrival_cv), not
+            # volume, size, or port count -- every detector before this
+            # one is shape-based, and a slow, low-volume, small-payload
+            # periodic check-in to one fixed external host looks
+            # completely ordinary on every one of those axes. Once
+            # confirmed (a near-0 inter_arrival_cv is a real, structural
+            # tell few benign services produce), it's about as decisive a
+            # signal as this registry has -- full containment, the same
+            # reasoning DOS_FLOOD/DATA_EXFILTRATION's own ISOLATE choice
+            # establishes. The Stackelberg payoff table below
+            # independently agrees.
+            preferred_action=DefenseAction.ISOLATE,
+            action_score_min=0.75,
+            action_confidence_min=0.75,
+            intention="contain_malicious_activity",
+            ppo_example_features={"packets_per_second": 0.6, "unique_destination_ports": 1},
+            ppo_threat_score=0.9,
+            ppo_confidence=0.85,
         ),
     }
 

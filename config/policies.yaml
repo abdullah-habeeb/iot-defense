@@ -918,6 +918,63 @@ policy:
           # here, the same reasoning THROTTLE's own entry establishes.
           CONTINUE: {attacker: -0.5, defender: 0.5}
           RETREAT: {attacker: -1.5, defender: 0.0}
+      C2_BEACONING:
+        # Mirrors DOS_FLOOD's own table -- once confirmed (a near-0
+        # inter_arrival_cv is a real, structural tell), this is as
+        # decisive a signal as this registry has, the same full-
+        # containment reasoning DOS_FLOOD/DATA_EXFILTRATION's own
+        # ISOLATE choice establishes: ISOLATE wins.
+        ALLOW:
+          CONTINUE: {attacker: 9.0, defender: -8.0}
+          RETREAT: {attacker: -1.0, defender: 1.0}
+        ALERT:
+          CONTINUE: {attacker: 6.0, defender: -3.0}
+          RETREAT: {attacker: -1.0, defender: 2.0}
+        DECOY:
+          # A live C2 channel doesn't need deception to learn anything
+          # new -- the beacon's own regularity already told the whole
+          # story; redirecting it gains little an already-confirmed
+          # signal needs.
+          CONTINUE: {attacker: 2.0, defender: -2.0}
+          RETREAT: {attacker: -2.0, defender: 3.0}
+        ISOLATE:
+          CONTINUE: {attacker: -7.0, defender: 9.0}
+          RETREAT: {attacker: -8.0, defender: 6.0}
+        THROTTLE:
+          # Slows the beacon's cadence but a live C2 channel is still a
+          # live C2 channel -- real mitigation, nowhere near as decisive
+          # as full containment.
+          CONTINUE: {attacker: -2.0, defender: 5.0}
+          RETREAT: {attacker: -3.0, defender: 4.0}
+        BLOCK_SOURCE:
+          # This lab's beacon also comes from one fixed device to one
+          # fixed C2 host, so blocking the C2 destination is a real,
+          # strong alternative -- but a real C2 operator can rotate to a
+          # new destination far more easily than ISOLATE's own full
+          # containment can be worked around.
+          CONTINUE: {attacker: -5.0, defender: 6.0}
+          RETREAT: {attacker: -6.0, defender: 5.0}
+        QUARANTINE:
+          CONTINUE: {attacker: -3.0, defender: 4.0}
+          RETREAT: {attacker: -4.0, defender: 3.0}
+        RESET_SESSIONS:
+          # UDP, connectionless -- no session for ss -K to find, and a
+          # beacon simply resumes on its next scheduled check-in anyway.
+          CONTINUE: {attacker: 1.0, defender: 0.5}
+          RETREAT: {attacker: 0.0, defender: -0.5}
+        FORENSIC_CAPTURE:
+          # Real complementary value -- evidence of the C2 traffic
+          # itself -- but the channel stays live throughout a capture
+          # window that does nothing to stop it, unlike a genuinely
+          # low-confidence signal where gathering more evidence first is
+          # actually the safer choice.
+          CONTINUE: {attacker: 3.0, defender: 1.0}
+          RETREAT: {attacker: 2.0, defender: 0.0}
+        BANDWIDTH_CAP:
+          # This attack's payloads are small and infrequent by design --
+          # a byte-rate cap has nothing meaningful to constrain.
+          CONTINUE: {attacker: -1.5, defender: 2.5}
+          RETREAT: {attacker: -2.5, defender: 1.5}
   ppo:
     # model_path/fallback_policy document the convention every real call
     # site (train_ppo.py's own default output path, harness.py,

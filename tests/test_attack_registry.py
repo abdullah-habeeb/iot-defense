@@ -61,6 +61,13 @@ DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
     "buffer_overflow": {"protocol": "TCP", "average_packet_size": 570.0},
     "replay_attack": {"protocol": "UDP", "average_packet_size": 100.0},
     "rogue_beacon": {"protocol": "UDP", "average_packet_size": 220.0},
+    # RuleBasedC2BeaconDetector's own primary signal, inter_arrival_cv,
+    # isn't in ppo_example_features at all (a synthetic PPO training
+    # template, not a real captured timing measurement) -- must be
+    # overridden explicitly, or this scenario's own generic feature
+    # record would default to inter_arrival_cv=999.0 (the "not enough
+    # data" sentinel) and never trip its own detector.
+    "c2_beacon": {"protocol": "UDP", "average_packet_size": 380.0, "inter_arrival_cv": 0.05},
 }
 
 
