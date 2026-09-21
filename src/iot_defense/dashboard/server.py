@@ -6,17 +6,27 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.demo.controller import DemoController
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-_STATIC_DIR = Path("/home/abdullah/iot-defense/data/dashboard/static")
+_REPO_ROOT = Path("/home/abdullah/iot-defense")
+_STATIC_DIR = _REPO_ROOT / "data" / "dashboard" / "static"
 _STATIC_DIR.mkdir(parents=True, exist_ok=True)
-_STATE_FILE = Path("/home/abdullah/iot-defense/data/dashboard/state.json")
+_STATE_FILE = _REPO_ROOT / "data" / "dashboard" / "state.json"
+# The venv's own python3, not sys.executable -- this process is already
+# running inside that venv (uvicorn is installed there), but spelling it
+# out explicitly here matches the one, sole sudoers rule every other real
+# Mininet entry point in this project already depends on: passwordless
+# sudo is scoped to exactly this interpreter path, not to "whatever
+# python launched the caller".
+_VENV_PYTHON = _REPO_ROOT / ".venv" / "bin" / "python3"
 
 # Ensure state file exists before first request
 if not _STATE_FILE.exists():
@@ -52,6 +62,83 @@ async def get_state() -> JSONResponse:
         return JSONResponse(content=data)
     except (OSError, json.JSONDecodeError):
         return JSONResponse(content={"phase": "IDLE"})
+
+
+@app.get("/attacks")
+async def list_attacks() -> JSONResponse:
+    """The registry's own attack keys and display labels -- the dashboard's
+    run-trigger control builds its options from this, not a hand-maintained
+    list, so it can never drift out of sync with what's actually registered."""
+    return JSONResponse(
+        content=[{"key": key, "label": scenario.label} for key, scenario in ATTACK_SCENARIOS.items()]
+    )
+
+
+# Guards the one real Mininet network this project's every live entry point
+# already assumes is exclusive -- a second concurrent run would collide on
+# the same fixed switch/host names in config/topology.yaml. Holds the
+# subprocess handle, not just a boolean, so /run/status can report whether
+# the process genuinely exited (poll()) rather than trusting a flag no one
+# ever cleared.
+_active_run: dict[str, Any] = {"process": None, "attack": None}
+_run_lock = asyncio.Lock()
+
+
+@app.post("/run")
+async def trigger_run(request: Request) -> JSONResponse:
+    """Launch one real demo run for a registered attack key -- the same
+    `sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <key>`
+    every real live-verification in this project's own history has used
+    from a terminal, just started from this endpoint instead. The demo
+    controller's own writes to state.json are what /stream already picks
+    up from any process, so nothing else here needs to know how a run
+    actually progresses.
+
+    The attack key is validated against ATTACK_SCENARIOS before it ever
+    reaches a shell -- never pass a request body value into a command
+    unchecked, even when the surrounding call is a fixed argv list (no
+    shell=True, no string interpolation) that isn't itself injectable.
+    """
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse(status_code=400, content={"error": "Request body must be JSON."})
+
+    attack = body.get("attack") if isinstance(body, dict) else None
+    if attack not in ATTACK_SCENARIOS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Unknown attack key: {attack!r}.", "valid_keys": sorted(ATTACK_SCENARIOS)},
+        )
+
+    async with _run_lock:
+        current = _active_run["process"]
+        if current is not None and current.returncode is None:
+            return JSONResponse(
+                status_code=409,
+                content={"error": f"A run ({_active_run['attack']}) is already in progress.", "attack": _active_run["attack"]},
+            )
+        process = await asyncio.create_subprocess_exec(
+            "sudo", "-n", str(_VENV_PYTHON), "-m", "iot_defense.demo.controller", "--attack", attack,
+            cwd=str(_REPO_ROOT),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        _active_run["process"] = process
+        _active_run["attack"] = attack
+
+    return JSONResponse(content={"status": "started", "attack": attack})
+
+
+@app.get("/run/status")
+async def run_status() -> JSONResponse:
+    """Whether a triggered run is still in flight -- the frontend polls this
+    to know when it's safe to offer another run, rather than guessing from
+    a fixed timeout that would be wrong for every attack's real, very
+    different duration (icmp_flood ~4s vs. mqtt_flood ~110s)."""
+    process = _active_run["process"]
+    running = process is not None and process.returncode is None
+    return JSONResponse(content={"running": running, "attack": _active_run["attack"] if running else None})
 
 
 # How often /stream polls state.json for changes made by an external process
