@@ -40,13 +40,37 @@ def train(total_timesteps: int | None = None, output_path: str | Path = "models/
     reward_config = RewardConfig.from_mapping(ppo_config.get("reward", {}))
     environment = DefenseDecisionEnv(episode_length=episode_length, reward_config=reward_config)
     start = time.perf_counter()
+    # net_arch=[64, 64] and ent_coef=0.01: both found necessary by direct
+    # reproduction after the registry grew to 17 training scenarios (16
+    # attacks + normal) / 10 actions, not assumed. The reward function
+    # gives identical -3.5 for *any* non-preferred, non-ALLOW action (see
+    # calculate_reward's service_disruption branch) -- nothing in the
+    # reward landscape distinguishes one wrong action from another, so
+    # this is effectively a 17-state, 10-action contextual-bandit problem.
+    # With the previous net_arch=[32, 32] and ent_coef=0.0, raising
+    # training_timesteps from 12750 to 30000 made convergence *worse* (5
+    # scenario mismatches against each scenario's own preferred_action
+    # became 7, the policy collapsing onto THROTTLE for several unrelated
+    # scenarios) -- more training without exploration pressure just
+    # locked in an early, wrong generalization faster. Adding
+    # ent_coef=0.01 alone got to 3 mismatches at 12750 timesteps and only
+    # 1 (the "normal" scenario, misrouted to DECOY) even at 35000 -- a
+    # single, *persistent* miss across three different timestep budgets,
+    # not noise, pointing at capacity rather than training time: DECOY is
+    # the optimal action for 3 of the 17 states (reconnaissance, exploit,
+    # dns_tunneling) with a large reward (+6.5), and [32, 32] wasn't
+    # reliably separating the "normal" state from those in the shared
+    # policy network. Doubling to [64, 64] converged all 17 scenarios to
+    # their own registered preferred_action, confirmed at both 12750 and
+    # 20000 timesteps -- see train_ppo's own verification run.
     model = PPO(
         "MlpPolicy",
         environment,
-        policy_kwargs={"net_arch": [32, 32]},
+        policy_kwargs={"net_arch": [64, 64]},
         n_steps=32,
         batch_size=32,
         learning_rate=0.001,
+        ent_coef=0.01,
         device="cpu",
         verbose=0,
         seed=7,
