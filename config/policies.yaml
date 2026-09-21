@@ -947,13 +947,19 @@ policy:
           CONTINUE: {attacker: -2.0, defender: 5.0}
           RETREAT: {attacker: -3.0, defender: 4.0}
         BLOCK_SOURCE:
-          # This lab's beacon also comes from one fixed device to one
-          # fixed C2 host, so blocking the C2 destination is a real,
-          # strong alternative -- but a real C2 operator can rotate to a
-          # new destination far more easily than ISOLATE's own full
-          # containment can be worked around.
-          CONTINUE: {attacker: -5.0, defender: 6.0}
-          RETREAT: {attacker: -6.0, defender: 5.0}
+          # Reversed direction, same as DATA_EXFILTRATION/
+          # DNS_TUNNELING_EXFILTRATION/FIRMWARE_TAMPERING: the address
+          # this would block is the C2 host (the beacon's destination),
+          # not the compromised device actually sending it -- block_source()
+          # installs an INPUT-chain drop on the *target* (the compromised
+          # sensor) for packets claiming to be *from* that address, which
+          # does nothing to the sensor's own outbound beacon traffic. A
+          # real but nearly useless mitigation, corrected from an earlier
+          # draft of this table that scored it as a strong alternative --
+          # it structurally is not one, matching every other reversed-
+          # direction attack's own BLOCK_SOURCE row in this file.
+          CONTINUE: {attacker: 5.0, defender: -1.0}
+          RETREAT: {attacker: 2.0, defender: -2.0}
         QUARANTINE:
           CONTINUE: {attacker: -3.0, defender: 4.0}
           RETREAT: {attacker: -4.0, defender: 3.0}
