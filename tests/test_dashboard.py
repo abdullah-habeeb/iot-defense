@@ -216,6 +216,77 @@ class TestStreamEndpoint:
             else:
                 pytest.fail("No data frame received from /stream")
 
+    def test_stream_recovers_from_a_state_file_caught_mid_write(self, live_server_url):
+        """Regression test for a real bug found via a live Mininet run: the
+        dashboard visibly froze mid-run in a real browser — stuck on an
+        early phase — even though state.json (checked directly over SSH)
+        had already reached the run's final phase. Root cause: the poll
+        loop advanced last_mtime as soon as it observed a changed mtime,
+        BEFORE confirming the read+parse actually succeeded. If a poll
+        tick caught the file mid-write on what turned out to be the LAST
+        write in a fast burst of phase transitions (RESPONDING →
+        FORENSICS_CAPTURED → RESTORING → RESTORED → COMPLETE → CLEANUP
+        landed within a few hundred ms in the real run that surfaced
+        this), that update was silently dropped and never retried — the
+        stream stayed stuck on the last state it did manage to send.
+
+        Reproduced deterministically by pinning the malformed write and
+        the final valid write to the EXACT SAME mtime via os.utime() --
+        this is precisely the bug's real precondition (a poll tick fails
+        to parse a given mtime, and no *later* mtime ever arrives to
+        "accidentally" force a retry). Two writes at genuinely different
+        real timestamps would always produce different mtimes and never
+        actually exercise the bug -- confirmed the hard way: an earlier
+        version of this test using a real time.sleep()-separated write
+        passed against the unpatched code too, because the second write's
+        later mtime differed from the wrongly-committed one and forced a
+        retry anyway, silently defeating the reproduction.
+        """
+        backup = _STATE_FILE.read_text(encoding="utf-8")
+        try:
+            with httpx.stream("GET", f"{live_server_url}/stream", timeout=10.0) as resp:
+                lines = resp.iter_lines()
+                for line in lines:
+                    if line.startswith("data: "):
+                        break  # initial frame drained
+
+                marker = f"mid_write_regression_{time.time()}"
+                pinned_mtime = time.time()
+
+                def write_pinned(content: str) -> None:
+                    with _STATE_FILE.open("w", encoding="utf-8") as fh:
+                        fh.write(content)
+                        fh.flush()
+                        os.fsync(fh.fileno())
+                    os.utime(_STATE_FILE, (pinned_mtime, pinned_mtime))
+
+                write_pinned("{not valid json, simulating a torn mid-write read")
+                time.sleep(0.6)  # let at least one real poll tick observe and fail on this
+                write_pinned(json.dumps({"phase": "COMPLETE", "marker": marker}))
+
+                deadline = time.monotonic() + 5.0
+                seen_marker = False
+                try:
+                    for line in lines:
+                        if not line.startswith("data: "):
+                            if time.monotonic() > deadline:
+                                break
+                            continue
+                        try:
+                            payload = json.loads(line[len("data: "):])
+                        except json.JSONDecodeError:
+                            continue
+                        if payload.get("marker") == marker:
+                            seen_marker = True
+                            break
+                        if time.monotonic() > deadline:
+                            break
+                except httpx.ReadTimeout:
+                    pass  # the bug's own real symptom: the stream just stops delivering
+                assert seen_marker, "state written after a mid-write read failure was never delivered"
+        finally:
+            _STATE_FILE.write_text(backup, encoding="utf-8")
+
 
 # ── DemoController unit tests ──────────────────────────────────────────────────
 

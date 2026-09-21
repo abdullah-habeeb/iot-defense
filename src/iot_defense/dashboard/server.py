@@ -120,12 +120,28 @@ async def message_stream(request: Request) -> StreamingResponse:
                 break
 
             # 2) Check state.json for changes made by any process.
+            #
+            # last_mtime is only committed AFTER a successful read+parse,
+            # not as soon as a changed mtime is observed -- a real bug
+            # found by watching a live demo run visibly freeze mid-stream
+            # (stuck on an early phase in the browser while state.json,
+            # confirmed separately, had already reached "CLEANUP"). During
+            # a burst of rapid writes (several phase transitions can land
+            # within a few hundred ms), a poll tick can catch a *mid-write*
+            # file: json.loads() raises, correctly caught below -- but if
+            # last_mtime had already been advanced to that mtime, the next
+            # tick's `mtime != last_mtime` check is now false even though
+            # this update was never actually sent, so the stream never
+            # retries it and permanently stalls one state behind. Keeping
+            # last_mtime at its old value until the read genuinely
+            # succeeds means the very next tick (0.4s later, by which time
+            # the write has finished) retries and catches up correctly.
             try:
                 mtime = _STATE_FILE.stat().st_mtime
                 if mtime != last_mtime:
-                    last_mtime = mtime
                     text = _STATE_FILE.read_text(encoding="utf-8")
                     json.loads(text)  # guard against a mid-write partial read
+                    last_mtime = mtime
                     if text != last_sent:
                         yield f"data: {text}\n\n"
                         last_sent = text
