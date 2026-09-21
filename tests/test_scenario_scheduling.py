@@ -35,34 +35,22 @@ ATTACK_ASSERTIONS = {
     "brute_force": _assert_fixed_value_bucket("brute_force"),
     "exfiltration": _assert_fixed_value_bucket("exfiltration"),
     "exploit": _assert_fixed_value_bucket("exploit_payload_injection"),
-    # These ten were registered for the live detection/decision/response
-    # pipeline without extending generate_dataset.py's own bespoke
-    # per-attack dispatch (see get_scenario_type()'s docstring for why:
-    # deliberately deferred, since none of them are ever consulted by the
-    # RF model this dataset trains). Every one of their buckets must
-    # consistently return the unsupported sentinel, not silently fall
-    # through to some other scenario's dispatch branch.
-    "syn_flood": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "icmp_flood": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "slow_loris": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "dns_amplification": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "dns_tunneling": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "mqtt_flood": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "firmware_tampering": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "buffer_overflow": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "replay_attack": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-    "rogue_beacon": _assert_fixed_value_bucket(_DATASET_GENERATION_UNSUPPORTED),
-}
-
-# Keys whose dataset-generation dispatch is deliberately not yet
-# implemented (see ATTACK_ASSERTIONS above) -- their scenario values are
-# the unsupported sentinel, not a name derived from the attack key, so
-# test_all_registered_scenarios_appear_over_a_larger_sample's "does this
-# key's own name appear in the scenario set" check doesn't apply to them.
-_DATASET_GENERATION_DEFERRED_KEYS = {
-    "syn_flood", "icmp_flood", "slow_loris", "dns_amplification",
-    "dns_tunneling", "mqtt_flood", "firmware_tampering", "buffer_overflow",
-    "replay_attack", "rogue_beacon",
+    # These ten reuse their own registered AttackScenario.generate_traffic
+    # directly (see generate_dataset.py's own _NEW_ATTACK_KEYS comment for
+    # why they don't get a second bespoke traffic function the way the
+    # original 5 above each have) -- their scenario string is simply their
+    # own registry key, not a derived sub-variation name.
+    "syn_flood": _assert_fixed_value_bucket("syn_flood"),
+    "icmp_flood": _assert_fixed_value_bucket("icmp_flood"),
+    "slow_loris": _assert_fixed_value_bucket("slow_loris"),
+    "dns_amplification": _assert_fixed_value_bucket("dns_amplification"),
+    "dns_tunneling": _assert_fixed_value_bucket("dns_tunneling"),
+    "mqtt_flood": _assert_fixed_value_bucket("mqtt_flood"),
+    "firmware_tampering": _assert_fixed_value_bucket("firmware_tampering"),
+    "buffer_overflow": _assert_fixed_value_bucket("buffer_overflow"),
+    "replay_attack": _assert_fixed_value_bucket("replay_attack"),
+    "rogue_beacon": _assert_fixed_value_bucket("rogue_beacon"),
+    "c2_beacon": _assert_fixed_value_bucket("c2_beacon"),
 }
 
 
@@ -103,12 +91,10 @@ class TestScenarioScheduling(unittest.TestCase):
     @patch('iot_defense.ml.generate_dataset.validate_dataset', MagicMock())
     def test_all_registered_scenarios_appear_over_a_larger_sample(self):
         scenarios = {get_scenario_type(i) for i in range(NUM_BUCKETS * 20)}
+        self.assertNotIn(_DATASET_GENERATION_UNSUPPORTED, scenarios)
         top_level = {s.split('_')[0] for s in scenarios}
         self.assertIn('normal', top_level)
         for key in ATTACK_KEYS:
-            if key in _DATASET_GENERATION_DEFERRED_KEYS:
-                self.assertIn(_DATASET_GENERATION_UNSUPPORTED, scenarios)
-                continue
             # Every registered attack's own top-level prefix (its key, or
             # for multi-word keys the first underscore-separated segment)
             # must appear somewhere in the generated scenario set.

@@ -26,6 +26,43 @@ from iot_defense.simulation.traffic import start_multi_connection_listener
 # *count*, which grows automatically as ATTACK_SCENARIOS grows.
 _ATTACK_KEYS = tuple(ATTACK_SCENARIOS.keys())
 
+# The 10 attacks added after the original 5 reuse their own registered
+# AttackScenario.generate_traffic directly (see the dispatch in
+# generate_dataset() below) instead of a second, bespoke host.cmd() script
+# per attack the way the original 5 each have -- deliberately, not out of
+# laziness: those five generators were each calibrated against real
+# Mininet timing across many live-run iterations (documented at length in
+# each _*_traffic() function's own docstring above), and simulation/
+# traffic.py's own generators for these ten attacks already went through
+# that exact same calibration process for the live demo. Hand-writing a
+# second bespoke copy here would re-risk every timing bug that process
+# already found and fixed once, and would silently drift from the live
+# generators over time -- exactly the "un-synced-copy" bug class this
+# project has hit more than once (see e.g. the exploit/brute_force
+# TCP-vs-UDP payload-delivery bugs this file's own docstrings above
+# describe). Reusing the registry's own callable means there is only ever
+# one real implementation of "how syn_flood traffic looks", not two.
+#
+# Three of the ten reverse traffic direction (the compromised device is
+# the source, not the destination) -- mirrors exfiltration's own existing
+# special-cased labeling condition below.
+_REVERSED_DIRECTION_NEW_KEYS = frozenset({"dns_tunneling", "firmware_tampering", "rogue_beacon"})
+_NEW_ATTACK_KEYS = frozenset(_ATTACK_KEYS[5:])
+
+# get_scenario_type()'s own sub-scenario strings for the original 5 attacks
+# ("reconnaissance_known", "dos_flood", ...) back to their real registry
+# key, for computing each row's label below -- the 10 new attacks need no
+# entry here since their own scenario string already *is* their registry
+# key (see get_scenario_type()'s own dispatch).
+_SCENARIO_TO_REGISTRY_KEY = {
+    "reconnaissance_known": "reconnaissance",
+    "reconnaissance_unseen": "reconnaissance",
+    "dos_flood": "dos",
+    "brute_force": "brute_force",
+    "exfiltration": "exfiltration",
+    "exploit_payload_injection": "exploit",
+}
+
 
 def _start_tcp_listener(host: Any, port: int) -> str:
     """Start a temporary TCP listener inside the host namespace."""
@@ -313,22 +350,12 @@ def get_scenario_type(run_number: int) -> str:
 
     Bucket 0 is always normal traffic; each subsequent bucket is one
     registered attack, in ATTACK_SCENARIOS order -- so the bucket count
-    grows automatically as new attacks are registered. Registering a new
-    attack key still requires adding its own dispatch branch below, since
-    each attack's sub-variations and traffic shape are attack-specific.
-
-    Attacks registered but not yet given their own dataset-generation
-    branch return the _DATASET_GENERATION_UNSUPPORTED sentinel rather
-    than raising: ten new attacks (syn_flood through rogue_beacon) were
-    added to the live detection/decision/response pipeline without
-    extending this file's own bespoke per-attack traffic/labeling logic
-    -- deliberately deferred scope, since none of them are ever consulted
-    by the RF model this dataset trains (RF is only ever consulted as a
-    reconnaissance confirmation step, never for any other attack). Making
-    generate_dataset() skip those buckets keeps existing 5-attack dataset
-    generation working exactly as it always has, rather than crashing the
-    moment ATTACK_SCENARIOS grew past the six buckets this file already
-    knew how to handle.
+    grows automatically as new attacks are registered. The original 5
+    attacks each still get their own bespoke sub-variation logic below
+    (matching their own dedicated _*_traffic() functions' calibration);
+    the 10 added since reuse their own registered AttackScenario key
+    directly as the scenario string -- see _NEW_ATTACK_KEYS' own comment
+    above for why they don't get a second bespoke generator here.
     """
     num_buckets = 1 + len(_ATTACK_KEYS)
     bucket = run_number % num_buckets
@@ -352,6 +379,8 @@ def get_scenario_type(run_number: int) -> str:
         return 'exfiltration'
     if attack_key == "exploit":
         return 'exploit_payload_injection'
+    if attack_key in _NEW_ATTACK_KEYS:
+        return attack_key
     return _DATASET_GENERATION_UNSUPPORTED
 
 def generate_dataset(
@@ -412,7 +441,15 @@ def generate_dataset(
             # it cleanly (no Mininet network is even started for it)
             # rather than crashing or mislabeling it as something else.
             continue
-        target_name, target_ip = rng.choice(target_options)
+        # The 10 new attacks' own registered generate_traffic (reused
+        # below, not re-implemented) always targets the sensor host
+        # directly -- unlike the original 5's own bespoke functions above,
+        # they take no target parameter to vary, matching how the live
+        # demo itself always exercises them.
+        if scenario in _NEW_ATTACK_KEYS:
+            target_name, target_ip = "sensor", "10.0.0.10"
+        else:
+            target_name, target_ip = rng.choice(target_options)
         net = None
         listener_pids = []
 
@@ -509,13 +546,21 @@ def generate_dataset(
                 source = net.get("attacker")
                 exploit_port = rng.choice(exploit_target_ports)
                 _exploit_traffic(source, target_ip, exploit_port, duration=4.0)
-            else:
+            elif scenario == "exfiltration":
                 # Exfiltration traffic -- direction reversed: the chosen
                 # target device is the compromised traffic *source*, not
                 # the destination.
                 source = net.get(target_name)
                 exfil_port = rng.choice(exfiltration_target_ports)
                 _exfiltration_traffic(source, attacker_ip, exfil_port, duration=5.0)
+            elif scenario in _NEW_ATTACK_KEYS:
+                # Reuses the registry's own real, already-calibrated
+                # generator directly -- see _NEW_ATTACK_KEYS' own comment
+                # above for why this file doesn't hand-write a second
+                # bespoke copy the way the original 5 attacks each have.
+                ATTACK_SCENARIOS[scenario].generate_traffic(net)
+            else:  # pragma: no cover - every registered scenario string is handled above
+                raise ValueError(f"No dataset-generation traffic dispatch for scenario: {scenario!r}")
 
             current_stage = "process_capture"
             capture_path = monitor.stop_capture(net, capture_session, completion_timeout=4.0)
@@ -571,16 +616,37 @@ def generate_dataset(
                     and feature.destination_ip == target_ip
                     and feature.source_ip in {"10.0.0.30", "10.0.0.20"}
                 )
-
-                if is_recon or is_dos or is_brute_force or is_exfiltration or is_exploit or is_normal:
-                    label = (
-                        5 if is_exploit
-                        else 4 if is_exfiltration
-                        else 3 if is_brute_force
-                        else 2 if is_dos
-                        else 1 if is_recon
-                        else 0
+                # The 10 new attacks: reversed-direction ones (the
+                # compromised sensor is the flow's source, matching
+                # exfiltration's own condition above) vs. the rest
+                # (attacker -> sensor, matching every other attack above).
+                is_new_attack = scenario in _NEW_ATTACK_KEYS and (
+                    (
+                        scenario in _REVERSED_DIRECTION_NEW_KEYS
+                        and feature.source_ip == target_ip
+                        and feature.destination_ip == "10.0.0.100"
                     )
+                    or (
+                        scenario not in _REVERSED_DIRECTION_NEW_KEYS
+                        and feature.destination_ip == target_ip
+                        and feature.source_ip == "10.0.0.100"
+                    )
+                )
+
+                if is_recon or is_dos or is_brute_force or is_exfiltration or is_exploit or is_normal or is_new_attack:
+                    # Registry-driven: every attack's label is 1 + its own
+                    # position in ATTACK_SCENARIOS, exactly matching
+                    # ml/schema.py's own LABEL_NAMES construction
+                    # (enumerate(ATTACK_SCENARIOS.values(), start=1)) --
+                    # replaces what was a hardcoded 5-way ternary before
+                    # the 10 new attacks needed labels 6-15 too.
+                    if is_normal:
+                        registry_key = None
+                    elif is_new_attack:
+                        registry_key = scenario
+                    else:
+                        registry_key = _SCENARIO_TO_REGISTRY_KEY[scenario]
+                    label = 0 if registry_key is None else _ATTACK_KEYS.index(registry_key) + 1
                     rows.append(
                         flow_to_dataset_row(
                             feature,
