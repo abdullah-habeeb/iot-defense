@@ -32,6 +32,20 @@ class FlowFeatures:
     tcp_ack_count: int = 0
     udp_packet_count: int = 0
     icmp_packet_count: int = 0
+    # Coefficient of variation (stddev / mean) of consecutive inter-packet
+    # arrival gaps within this flow -- a real timing-regularity signal,
+    # not a rate/size/count one, so it can catch what none of the
+    # detectors above can: a device that talks to the same destination on
+    # a near-perfectly regular schedule (classic C2 beaconing) looks
+    # completely ordinary on every other axis here -- low volume, modest
+    # size, nothing a rate or port-count threshold would ever flag. A
+    # value near 0.0 means near-uniform spacing (suspicious); real organic
+    # or bursty traffic has a much higher one. 999.0 (not 0.0) is the
+    # default/insufficient-data sentinel deliberately -- fewer than 3
+    # packets can't produce a real variance, and 0.0 would misread as
+    # "perfectly regular" instead of "no signal", the opposite of what a
+    # too-short flow actually tells you.
+    inter_arrival_cv: float = 999.0
     window_start: float | None = None
     window_end: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -110,6 +124,7 @@ class FeatureAggregator:
             )
             udp_packet_count = sum(1 for event in group if event.get("protocol") == "UDP")
             icmp_packet_count = sum(1 for event in group if event.get("protocol") == "ICMP")
+            inter_arrival_cv = self._interarrival_cv(timestamps)
 
             features.append(
                 FlowFeatures(
@@ -127,12 +142,29 @@ class FeatureAggregator:
                     tcp_ack_count=tcp_ack_count,
                     udp_packet_count=udp_packet_count,
                     icmp_packet_count=icmp_packet_count,
+                    inter_arrival_cv=inter_arrival_cv,
                     window_start=start,
                     window_end=end,
                     metadata={"event_count": packet_count},
                 )
             )
         return features
+
+    @staticmethod
+    def _interarrival_cv(timestamps: list[float]) -> float:
+        """Coefficient of variation of consecutive inter-packet gaps --
+        see FlowFeatures.inter_arrival_cv's own field comment for what a
+        low vs. high value means and why the insufficient-data default is
+        999.0, not 0.0."""
+        ordered = sorted(timestamps)
+        if len(ordered) < 3:
+            return 999.0
+        gaps = [ordered[i + 1] - ordered[i] for i in range(len(ordered) - 1)]
+        mean_gap = sum(gaps) / len(gaps)
+        if mean_gap <= 0:
+            return 999.0
+        variance = sum((gap - mean_gap) ** 2 for gap in gaps) / len(gaps)
+        return (variance ** 0.5) / mean_gap
 
     def calculate_packets_per_second(self, events: list[dict[str, Any]]) -> float:
         if not events:

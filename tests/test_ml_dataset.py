@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from iot_defense.detection.detector import UnifiedRuleBasedDetector
 from iot_defense.detection.flow_features import FlowFeatures
 from iot_defense.ml.evaluation import classification_metrics, split_by_run
 from iot_defense.ml.random_forest import RandomForestDetector
@@ -208,6 +209,19 @@ def flow_for_label(label_name: str) -> FlowFeatures:
             average_packet_size=220.0, unique_destination_ports=1, unique_source_ports=1,
             tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=50, icmp_packet_count=0,
         )
+    if label_name == "c2_beaconing":
+        # Direction-reversed, and the one label whose real distinguishing
+        # feature is inter_arrival_cv, not volume/size/ports -- every
+        # other axis here overlaps comfortably with ordinary low-rate
+        # traffic; a near-0 coefficient of variation is what actually
+        # makes this a threat.
+        return FlowFeatures(
+            source_ip="10.0.0.10", destination_ip="10.0.0.100", protocol="UDP",
+            duration=30.0, packet_count=20, packets_per_second=0.65, bytes_total=7600,
+            average_packet_size=380.0, unique_destination_ports=1, unique_source_ports=1,
+            tcp_syn_count=0, tcp_ack_count=0, udp_packet_count=20, icmp_packet_count=0,
+            inter_arrival_cv=0.05,
+        )
     raise ValueError(f"no fixture defined for label {label_name!r}")
 
 
@@ -327,12 +341,46 @@ def test_random_forest_training_is_genuinely_five_class(tmp_path: Path):
     # Mininet dataset in data/ml/ is for).
     assert "tn" not in metrics["random_forest"]
     assert metrics["random_forest"]["accuracy"] == 1.0
-    assert metrics["rule_based"]["accuracy"] == 1.0
+    # rule_based's own accuracy here is NOT 1.0, for a real, understood,
+    # single-class reason: RuleBasedC2BeaconDetector's defining signal is
+    # inter_arrival_cv, a genuine timing-regularity feature that is
+    # deliberately NOT among ml/schema.py's own FEATURE_COLUMNS (adding
+    # it would invalidate the already-generated, already-committed real
+    # Mininet dataset CSV, which predates this feature and has no such
+    # column -- the same kind of deliberate ml-pipeline scope boundary
+    # this project already draws around the RF model's own narrow role).
+    # flow_to_dataset_row() only keeps FEATURE_COLUMNS, so c2_beaconing's
+    # own defining signal never survives this CSV round-trip -- see the
+    # dedicated, split-independent test below for the precise, verified
+    # shape of that gap (every c2_beaconing row, and only those, reads as
+    # "normal" once inter_arrival_cv is gone). RF is unaffected: it was
+    # never trained on inter_arrival_cv either, and still separates
+    # c2_beaconing perfectly on its other features alone (checked below).
+    assert metrics["rule_based"]["accuracy"] < 1.0
+    assert metrics["rule_based"]["accuracy"] >= 15 / 16
 
     detector = RandomForestDetector(model_path)
     for label_name in LABEL_NAMES.values():
         result = detector.detect(flow_for_label(label_name).to_dict())
         assert result.attack_type == label_name
+
+
+def test_rule_based_baseline_misclassifies_only_c2_beaconing_via_the_csv_pipeline():
+    """Split-independent companion to the accuracy check above: proves the
+    known rule_based gap is EXACTLY c2_beaconing (every one of its rows,
+    reading as "normal") and nothing else -- not an opaque accuracy
+    number that happens to be "close enough" to 1.0, a precise,
+    understood shape confirmed directly against the full dataset rather
+    than whatever happened to land in one particular train/test split."""
+    data = dataset_5class()
+    detector = UnifiedRuleBasedDetector()
+    misclassified_labels = set()
+    for _, row in data.iterrows():
+        event = detector.detect(row.to_dict())
+        if event.attack_type != row["label_name"]:
+            misclassified_labels.add(row["label_name"])
+            assert event.attack_type == "normal"
+    assert misclassified_labels == {"c2_beaconing"}
 
 
 def test_reconnaissance_traffic_no_bind():

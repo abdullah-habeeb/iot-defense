@@ -468,6 +468,40 @@ def test_block_source_is_idempotent_for_the_same_source(tmp_path):
     assert second.details["status"] == "already_blocked"
 
 
+def test_block_source_handles_multiple_distinct_sources_against_one_target(tmp_path):
+    """block_source() has always kept a per-target *list*, not a single
+    slot, specifically so a distributed/multi-source attack against one
+    target gets every real source blocked, not just the first one seen --
+    see simulation/traffic.py's generate_replay_attack_distributed_
+    mininet_traffic for the real spoofed-multi-source traffic this is
+    meant to eventually face. Real detection currently reports one source
+    per detected flow (FeatureAggregator groups by (src, dst, protocol)),
+    so a distributed attack would call block_source() once per distinct
+    source it sees, not once with a list -- this proves that repeated
+    calling pattern already accumulates correctly rather than overwriting
+    the previous source's block."""
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    sensor = network.hosts[0]
+    spoofed_sources = ["10.0.0.121", "10.0.0.122", "10.0.0.123", "10.0.0.124"]
+
+    for source_ip in spoofed_sources:
+        details = executor.block_source("10.0.0.10", source_ip)
+        assert details.get("status") != "already_blocked"
+
+    for source_ip in spoofed_sources:
+        assert any(source_ip in rule and "DROP" in rule for rule in sensor._input_rules)
+    assert len(sensor._input_rules) == len(spoofed_sources)
+
+    # A source already blocked doesn't get a duplicate rule.
+    repeat = executor.block_source("10.0.0.10", spoofed_sources[0])
+    assert repeat["status"] == "already_blocked"
+    assert len(sensor._input_rules) == len(spoofed_sources)
+
+    executor.restore("10.0.0.10")
+    assert sensor._input_rules == []
+
+
 def test_quarantine_installs_default_deny_with_allowlist_and_restore_removes_it(tmp_path):
     network = FakeNetwork()
     executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")

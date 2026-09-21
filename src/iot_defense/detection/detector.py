@@ -1061,6 +1061,100 @@ class RuleBasedRogueBeaconDetector(Detector):
         )
 
 
+class RuleBasedC2BeaconDetector(Detector):
+    """A command-and-control beaconing detector -- the first (and, as of
+    this writing, only) detector in this file whose primary signal is
+    timing REGULARITY, not rate, size, or port count. Every other
+    detector here is shape-based over volume/size/ports; a slow,
+    low-volume, small-payload periodic check-in to one fixed external
+    host looks completely ordinary on every one of those axes -- which
+    is exactly why real C2 beaconing is hard to catch with shape-based
+    detection alone, and why FlowFeatures.inter_arrival_cv (the
+    coefficient of variation of consecutive inter-packet gaps) exists:
+    a device checking in on a near-perfectly regular schedule produces a
+    near-0 value there, something no organic or bursty traffic pattern
+    -- benign or malicious -- realistically produces by chance.
+
+    Direction reversed, like every other tampering/beaconing detector in
+    this file: the already-compromised device is the flow's source, the
+    C2 host its destination. The volume/size/port window here (UDP,
+    <=2 ports, packet_count>=15, 0.1<=pps<=1.5, 300<avg<500) was
+    confirmed empty against a wide sweep of every other registered
+    detector's own real conditions before being chosen -- not picked
+    for looking unclaimed on paper, checked against the actual code.
+    inter_arrival_cv is what makes this detector fire at all, though:
+    every one of these volume/size/port thresholds alone would just as
+    happily describe an ordinary low-rate control-plane heartbeat: a
+    real device benignly checking in every few seconds for something
+    else entirely.
+    """
+
+    def __init__(
+        self,
+        max_unique_ports: int | None = None,
+        min_packet_count: int | None = None,
+        min_packets_per_second: float | None = None,
+        max_packets_per_second: float | None = None,
+        min_average_packet_size: float | None = None,
+        max_average_packet_size: float | None = None,
+        max_inter_arrival_cv: float | None = None,
+    ) -> None:
+        config = _load_detection_policy()
+        self.max_unique_ports = int(config.get("c2_beacon_max_unique_destination_ports", max_unique_ports if max_unique_ports is not None else 2))
+        self.min_packet_count = int(config.get("c2_beacon_min_packet_count", min_packet_count if min_packet_count is not None else 15))
+        self.min_packets_per_second = float(config.get("c2_beacon_min_packets_per_second", min_packets_per_second if min_packets_per_second is not None else 0.1))
+        self.max_packets_per_second = float(config.get("c2_beacon_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 1.5))
+        self.min_average_packet_size = float(config.get("c2_beacon_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 300.0))
+        self.max_average_packet_size = float(config.get("c2_beacon_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 500.0))
+        self.max_inter_arrival_cv = float(config.get("c2_beacon_max_inter_arrival_cv", max_inter_arrival_cv if max_inter_arrival_cv is not None else 0.15))
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        protocol = str(features.get("protocol", "")).upper()
+        unique_ports = int(features.get("unique_destination_ports", 0))
+        packet_count = int(features.get("packet_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+        average_packet_size = float(features.get("average_packet_size", 0.0))
+        # 999.0 is FlowFeatures' own "not enough packets to compute a real
+        # variance" sentinel (see its field comment) -- deliberately never
+        # treated as "regular" here, the same reason that default exists.
+        inter_arrival_cv = float(features.get("inter_arrival_cv", 999.0))
+
+        is_threat = (
+            protocol == "UDP"
+            and unique_ports <= self.max_unique_ports
+            and packet_count >= self.min_packet_count
+            and self.min_packets_per_second <= packets_per_second <= self.max_packets_per_second
+            and self.min_average_packet_size < average_packet_size < self.max_average_packet_size
+            and inter_arrival_cv <= self.max_inter_arrival_cv
+        )
+
+        if is_threat:
+            source_ip = str(features.get("destination_ip", "unknown"))
+            destination_ip = str(features.get("source_ip", "unknown"))
+            attack_type = "c2_beaconing"
+            threat_score = 0.9
+            confidence = 0.85
+            reason = "near-perfectly regular periodic outbound check-ins to one external host, consistent with command-and-control beaconing"
+        else:
+            source_ip = str(features.get("source_ip", "unknown"))
+            destination_ip = str(features.get("destination_ip", "unknown"))
+            attack_type = "normal"
+            threat_score = 0.05
+            confidence = 0.9
+            reason = "traffic pattern does not meet c2-beacon criteria"
+
+        return ThreatEvent.from_result(
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            attack_type=attack_type,
+            threat_score=threat_score,
+            confidence=confidence,
+            detection_reason=reason,
+            features=features,
+            detector_name="RuleBasedC2BeaconDetector",
+        )
+
+
 class UnifiedRuleBasedDetector(Detector):
     """Classify captured flow features without being told which attack (if
     any) is actually happening.
