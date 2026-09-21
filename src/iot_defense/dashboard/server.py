@@ -27,6 +27,15 @@ _STATE_FILE = _REPO_ROOT / "data" / "dashboard" / "state.json"
 # sudo is scoped to exactly this interpreter path, not to "whatever
 # python launched the caller".
 _VENV_PYTHON = _REPO_ROOT / ".venv" / "bin" / "python3"
+# A run triggered from here used to redirect both stdout and stderr to
+# DEVNULL -- fine while the controller was already writing everything
+# that mattered to state.json, but a crash *before* it ever gets that
+# far (a sudo auth failure, an import error, Mininet left dirty by a
+# previous unclean shutdown) left literally no trace anywhere, not
+# even in a server log -- the process just silently vanished and the
+# button quietly re-enabled. Captured to a real file instead, so
+# `/run/status` can point at it the moment a run ends non-zero.
+_LAST_RUN_LOG = _REPO_ROOT / "data" / "dashboard" / "last_run.log"
 
 # Ensure state file exists before first request
 if not _STATE_FILE.exists():
@@ -80,7 +89,7 @@ async def list_attacks() -> JSONResponse:
 # subprocess handle, not just a boolean, so /run/status can report whether
 # the process genuinely exited (poll()) rather than trusting a flag no one
 # ever cleared.
-_active_run: dict[str, Any] = {"process": None, "attack": None}
+_active_run: dict[str, Any] = {"process": None, "attack": None, "log_file": None}
 _run_lock = asyncio.Lock()
 
 
@@ -118,12 +127,21 @@ async def trigger_run(request: Request) -> JSONResponse:
                 status_code=409,
                 content={"error": f"A run ({_active_run['attack']}) is already in progress.", "attack": _active_run["attack"]},
             )
-        process = await asyncio.create_subprocess_exec(
-            "sudo", "-n", str(_VENV_PYTHON), "-m", "iot_defense.demo.controller", "--attack", attack,
-            cwd=str(_REPO_ROOT),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        # Truncated fresh each run (one run at a time, guarded by
+        # _run_lock above) -- only needs to survive until the *next*
+        # run starts, long enough to diagnose "why did my last run fail".
+        log_file = _LAST_RUN_LOG.open("wb")
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "sudo", "-n", str(_VENV_PYTHON), "-m", "iot_defense.demo.controller", "--attack", attack,
+                cwd=str(_REPO_ROOT),
+                stdout=log_file,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        finally:
+            # The child keeps its own duplicated copy of the fd; this
+            # process's own handle is done once the subprocess exists.
+            log_file.close()
         _active_run["process"] = process
         _active_run["attack"] = attack
 
@@ -138,7 +156,17 @@ async def run_status() -> JSONResponse:
     different duration (icmp_flood ~4s vs. mqtt_flood ~110s)."""
     process = _active_run["process"]
     running = process is not None and process.returncode is None
-    return JSONResponse(content={"running": running, "attack": _active_run["attack"] if running else None})
+    content: dict[str, Any] = {"running": running, "attack": _active_run["attack"] if running else None}
+    if process is not None and not running and process.returncode != 0:
+        # A run that has ended non-zero -- surface that plainly instead
+        # of letting the frontend silently re-enable the button with no
+        # explanation. stdout/stderr for exactly this run are in
+        # _LAST_RUN_LOG (see trigger_run's own comment for why that
+        # capture exists at all).
+        content["last_run_failed"] = True
+        content["last_run_exit_code"] = process.returncode
+        content["last_run_log"] = str(_LAST_RUN_LOG)
+    return JSONResponse(content=content)
 
 
 # How often /stream polls state.json for changes made by an external process
