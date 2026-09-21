@@ -12,7 +12,7 @@ an exhaustive one.
 
 SAFE BY DEFAULT: saves to a separate file (models/ppo_defense_real.zip) and
 never overwrites the currently-deployed models/ppo_defense.zip. Promote it
-manually only after verifying it still behaves sensibly across all five
+manually only after verifying it still behaves sensibly across every registered
 scenarios.
 """
 
