@@ -175,3 +175,35 @@ def test_inter_arrival_cv_defaults_to_the_insufficient_data_sentinel():
     ]
     features = FeatureAggregator().aggregate(events)
     assert features[0].inter_arrival_cv == 999.0
+
+
+def test_lowercase_protocol_events_are_still_counted_correctly():
+    """Regression test for a real bug found by a system review: the
+    per-packet tcp_syn_count/tcp_ack_count/udp_packet_count/
+    icmp_packet_count counters used to compare each event's own raw
+    "protocol" field case-sensitively against a literal like "TCP",
+    even though the flow's own grouping key normalizes protocol to
+    uppercase first -- a lower/mixed-case source would silently zero
+    all four counters despite the flow itself being correctly grouped
+    under that protocol."""
+    events = [
+        {
+            "timestamp": 1.0 + i * 0.1,
+            "src_ip": "10.0.0.100",
+            "dst_ip": "10.0.0.10",
+            "protocol": "tcp",  # deliberately lowercase
+            "src_port": 40000 + i,
+            "dst_port": 80,
+            "packet_length": 60,
+            "tcp_flags": 0x02,  # SYN
+        }
+        for i in range(5)
+    ]
+
+    aggregator = FeatureAggregator(window_seconds=3.0)
+    features = aggregator.aggregate(events)
+
+    assert len(features) == 1
+    assert features[0].protocol == "TCP"  # grouping key already normalizes this
+    assert features[0].tcp_syn_count == 5
+    assert features[0].packet_count == 5

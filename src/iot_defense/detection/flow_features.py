@@ -114,16 +114,26 @@ class FeatureAggregator:
 
             ports = [event.get("src_port") for event in group if event.get("src_port") is not None]
             dest_ports = [event.get("dst_port") for event in group if event.get("dst_port") is not None]
+            # protocol here is already the uppercased grouping key (see
+            # the loop above), not a re-read of each event's own raw
+            # field -- found by a system review that these four
+            # counters used to compare event.get("protocol") directly,
+            # case-sensitively, against the grouping key's own
+            # normalized value: every current real producer already
+            # emits uppercase so this was dormant, but a future lower/
+            # mixed-case source would have silently zeroed all four
+            # counters (fail-open, not fail-loud) despite the flow
+            # itself being correctly grouped as that protocol.
             tcp_syn_count = sum(
                 1 for event in group
-                if event.get("protocol") == "TCP" and (event.get("tcp_flags") or 0) & _TCP_FLAG_SYN
+                if protocol == "TCP" and (event.get("tcp_flags") or 0) & _TCP_FLAG_SYN
             )
             tcp_ack_count = sum(
                 1 for event in group
-                if event.get("protocol") == "TCP" and (event.get("tcp_flags") or 0) & _TCP_FLAG_ACK
+                if protocol == "TCP" and (event.get("tcp_flags") or 0) & _TCP_FLAG_ACK
             )
-            udp_packet_count = sum(1 for event in group if event.get("protocol") == "UDP")
-            icmp_packet_count = sum(1 for event in group if event.get("protocol") == "ICMP")
+            udp_packet_count = sum(1 for event in group if protocol == "UDP")
+            icmp_packet_count = sum(1 for event in group if protocol == "ICMP")
             inter_arrival_cv = self._interarrival_cv(timestamps)
 
             features.append(

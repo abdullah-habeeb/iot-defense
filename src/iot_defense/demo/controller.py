@@ -14,7 +14,6 @@ from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.policy import (
     RuleBasedDefensePolicy,
     StackelbergDefensePolicy,
-    compare_policies,
 )
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent

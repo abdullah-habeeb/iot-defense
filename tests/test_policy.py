@@ -185,3 +185,47 @@ def test_defense_decision_serialization():
     assert serialized["action"] == "ALERT"
     assert serialized["target_ip"] == "10.0.0.10"
     assert serialized["context"]["beliefs"]["threat_type"] == "normal"
+
+
+class TestStackelbergDefensePolicyUnknownThreatType:
+    """Regression test for a real inconsistency found by a system review:
+    RuleBasedDefensePolicy.decide() gracefully falls back to ALERT for an
+    attack_type it doesn't recognize, but StackelbergDefensePolicy.decide()
+    used to raise a bare ValueError from StackelbergGame.solve() for the
+    same case -- unreachable through the real detection pipeline today,
+    but a real asymmetry between the two policies' own resilience."""
+
+    def test_unrecognized_threat_type_falls_back_to_alert_not_an_exception(self):
+        from iot_defense.defense.policy import StackelbergDefensePolicy
+
+        threat_event = ThreatEvent.from_result(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10",
+            attack_type="totally_unregistered_attack_type",
+            threat_score=0.5, confidence=0.5, detection_reason="test fixture",
+            features={}, detector_name="test",
+        )
+        context = build_security_context(threat_event, device_criticality="high")
+
+        decision = StackelbergDefensePolicy().decide(context)
+
+        assert decision.action == DefenseAction.ALERT
+        assert "TOTALLY_UNREGISTERED_ATTACK_TYPE" in decision.reason.upper()
+
+    def test_recognized_threat_type_still_solves_normally(self):
+        """Confirms the new pre-check doesn't accidentally short-circuit
+        real, valid threat types."""
+        from iot_defense.defense.policy import StackelbergDefensePolicy
+        from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+        dos_scenario = ATTACK_SCENARIOS["dos"]
+        threat_event = ThreatEvent.from_result(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10",
+            attack_type=dos_scenario.attack_type,
+            threat_score=0.92, confidence=0.9, detection_reason="test fixture",
+            features=dict(dos_scenario.ppo_example_features), detector_name="test",
+        )
+        context = build_security_context(threat_event, device_criticality="high")
+
+        decision = StackelbergDefensePolicy().decide(context)
+
+        assert decision.action == dos_scenario.preferred_action

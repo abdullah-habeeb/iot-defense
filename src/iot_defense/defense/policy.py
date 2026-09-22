@@ -10,7 +10,7 @@ import yaml
 
 from iot_defense.defense.context import SecurityContext
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
-from iot_defense.defense.stackelberg import StackelbergGame
+from iot_defense.defense.stackelberg import StackelbergGame, _observed_threat_types
 
 # ATTACK_SCENARIOS is imported lazily inside __init__/decide below, not at
 # module level: this module is eagerly imported by iot_defense.defense's
@@ -104,6 +104,15 @@ class RuleBasedDefensePolicy(DefensePolicy):
                 "continuing legitimate IoT service is preferred."
             )
         elif threat_score >= self.severe_threat_score_min and confidence >= self.severe_confidence_min:
+            # Currently unreachable with this project's own registered
+            # detectors -- checked during a system review: the highest
+            # threat_score/confidence any of the 16 detectors hardcodes is
+            # 0.92/0.9 (dos_flood), both below the 0.95/0.95 default here.
+            # Left as deliberate headroom for a future higher-confidence
+            # signal source (e.g. a corroborating external feed) rather
+            # than tightened to match today's detectors exactly -- not a
+            # bug, just worth a comment so a future reader doesn't assume
+            # it's reachable today.
             action = DefenseAction.ISOLATE
             reason = (
                 "Threat score and confidence exceed severe thresholds; "
@@ -154,6 +163,36 @@ class StackelbergDefensePolicy(DefensePolicy):
     def decide(self, context: SecurityContext) -> DefenseDecision:
         beliefs = context.beliefs
         observed_threat = beliefs.threat_type.upper()
+        if observed_threat not in _observed_threat_types():
+            # Found by a system review: RuleBasedDefensePolicy.decide()
+            # gracefully falls back to ALERT for an attack_type it
+            # doesn't recognize (no matching scenario -> a safe
+            # default, not an exception), but this policy raised a
+            # bare ValueError from StackelbergGame.solve() for the
+            # same case -- an inconsistency with no real trigger today
+            # (UnifiedRuleBasedDetector can only ever emit "normal" or
+            # a registered attack_type, both always valid observed
+            # threat keys), but worth closing for the same reason the
+            # rule-based policy already does: a threat_type this
+            # policy genuinely doesn't recognize should degrade to a
+            # safe default, not abort the whole decision. Deliberately
+            # scoped to exactly this one pre-check, not a blanket
+            # try/except around solve() itself, so a real bug inside
+            # the game-solving logic still raises loudly.
+            return DefenseDecision.create(
+                action=DefenseAction.ALERT,
+                target_ip=beliefs.destination_device,
+                source_ip=beliefs.source_device,
+                reason=(
+                    f"Stackelberg game has no payoff table for observed threat "
+                    f"{observed_threat!r}; falling back to ALERT rather than "
+                    f"failing the decision outright."
+                ),
+                confidence=beliefs.confidence,
+                threat_score=beliefs.threat_score,
+                policy_name=self.name,
+                context=context.to_dict(),
+            )
         solution = self.game.solve(observed_threat)
         reasoning = solution.to_dict()
         reason = (
