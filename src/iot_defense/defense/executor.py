@@ -142,8 +142,18 @@ class MininetResponseExecutor:
         # so this is a list per target, not a single tuple -- mirrors
         # _redirect_rules' own reasoning above.
         self._blocked_sources: dict[str, list[tuple[Any, str, str]]] = {}
-        self._quarantined: dict[str, tuple[Any, list[str]]] = {}
-        self._bandwidth_capped: dict[str, tuple[Any, str]] = {}
+        # (host, delete_rules, known_sources) -- known_sources tracks
+        # every distinct source_ip this target has been quarantined
+        # against, so a second call for a genuinely new source can
+        # revoke that source's own ACCEPT rule instead of silently
+        # no-opping while it stays allowlisted (see quarantine()'s
+        # own docstring for the real leak this fixes).
+        self._quarantined: dict[str, tuple[Any, list[str], set[str]]] = {}
+        # A list per target, mirroring _blocked_sources' own reasoning:
+        # a second, distinct attacker source hitting an already-capped
+        # target needs its own qdisc installed on its own interface,
+        # not a silent no-op (see bandwidth_cap()'s own docstring).
+        self._bandwidth_capped: dict[str, list[tuple[Any, str]]] = {}
 
     def execute(self, decision: DefenseDecision) -> ResponseResult:
         """Execute the already-selected action without re-evaluating threat data."""
@@ -349,6 +359,7 @@ class MininetResponseExecutor:
         itself.
         """
         host = self._host_for_ip(target_ip)
+        source_ip = self._validate_ip_literal(source_ip)
         existing = self._blocked_sources.get(target_ip, [])
         if any(blocked_source == source_ip for _, _, blocked_source in existing):
             return {"operation": "block_source", "status": "already_blocked", "host": host.name, "source_ip": source_ip}
@@ -396,8 +407,31 @@ class MininetResponseExecutor:
         matter in practice, not the specific 5-host lab network.
         """
         host = self._host_for_ip(target_ip)
+        source_ip = self._validate_ip_literal(source_ip)
         if target_ip in self._quarantined:
-            return {"operation": "quarantine", "status": "already_quarantined", "host": host.name}
+            existing_host, delete_rules, known_sources = self._quarantined[target_ip]
+            if source_ip in known_sources:
+                return {"operation": "quarantine", "status": "already_quarantined", "host": existing_host.name}
+            # A new, distinct source hitting an already-quarantined
+            # target. The original allowlist was built excluding only
+            # the *first* source -- if this new source is a real
+            # Mininet host that was baked into that allowlist before it
+            # was known to be an attacker, it would otherwise stay
+            # explicitly ACCEPTed forever, a real, previously-confirmed
+            # leak (a second quarantine call used to silently no-op
+            # here). Revoke its ACCEPT rules now; -D on a rule that was
+            # never installed (a spoofed/non-host source, never in the
+            # original allowlist) is a harmless no-op, since the
+            # existing default-DROP already covers it.
+            existing_host.cmd(f"iptables -D INPUT -s {source_ip} -j ACCEPT")
+            existing_host.cmd(f"iptables -D OUTPUT -d {source_ip} -j ACCEPT")
+            known_sources.add(source_ip)
+            return {
+                "operation": "quarantine",
+                "status": "success",
+                "host": existing_host.name,
+                "revoked_source": source_ip,
+            }
         allowed_ips = sorted(
             {h.IP() for h in self.net.hosts if h.IP() not in (target_ip, source_ip)}
         )
@@ -426,7 +460,7 @@ class MininetResponseExecutor:
             time.sleep(0.05)
         if not installed:
             raise RuntimeError(f"Quarantine default-deny policy did not appear on host {host.name}.")
-        self._quarantined[target_ip] = (host, delete_rules)
+        self._quarantined[target_ip] = (host, delete_rules, {source_ip})
         return {
             "operation": "quarantine",
             "host": host.name,
@@ -455,6 +489,7 @@ class MininetResponseExecutor:
         way brute_force or a flood is.
         """
         host = self._host_for_ip(target_ip)
+        source_ip = self._validate_ip_literal(source_ip)
         kill_output = host.cmd(f"ss -K dst {source_ip}").strip()
         deadline = time.monotonic() + 2.0
         cleared = False
@@ -626,9 +661,16 @@ class MininetResponseExecutor:
         response happens to act on.
         """
         host = self._host_for_ip(source_ip)
-        if target_ip in self._bandwidth_capped:
-            return {"operation": "bandwidth_cap", "status": "already_capped", "host": host.name}
         interface = host.defaultIntf().name
+        existing = self._bandwidth_capped.get(target_ip, [])
+        # Idempotency is keyed on the actual (host, interface) pair, not
+        # just target_ip -- a second, distinct attacker source hitting
+        # an already-capped target has its own interface and genuinely
+        # needs its own qdisc; only a repeat call for the *same* source
+        # is a real no-op (installing a second root qdisc on the same
+        # interface would fail outright, since tc only allows one).
+        if any(capped_host is host for capped_host, _ in existing):
+            return {"operation": "bandwidth_cap", "status": "already_capped", "host": host.name}
         add_qdisc = f"tc qdisc add dev {interface} root tbf rate {rate} burst {burst} latency {latency}"
         command_output = host.cmd(add_qdisc).strip()
         if command_output and ("error" in command_output.lower() or "invalid" in command_output.lower()):
@@ -643,7 +685,7 @@ class MininetResponseExecutor:
             time.sleep(0.05)
         if not installed:
             raise RuntimeError(f"tbf qdisc did not appear on {interface} after installation.")
-        self._bandwidth_capped[target_ip] = (host, interface)
+        self._bandwidth_capped.setdefault(target_ip, []).append((host, interface))
         return {"operation": "bandwidth_cap", "host": host.name, "interface": interface, "rate": rate, "mechanism": "tc_tbf_egress"}
 
     def restore(self, target_ip: str) -> dict[str, Any]:
@@ -680,12 +722,12 @@ class MininetResponseExecutor:
             for rule_host, delete_rule, _source_ip in blocked_sources:
                 rule_host.cmd(delete_rule)
         if quarantined is not None:
-            _, delete_rules = quarantined
+            _, delete_rules, _known_sources = quarantined
             for delete_rule in reversed(delete_rules):
                 host.cmd(delete_rule)
-        if bandwidth_capped is not None:
-            capped_host, capped_interface = bandwidth_capped
-            capped_host.cmd(f"tc qdisc del dev {capped_interface} root")
+        if bandwidth_capped:
+            for capped_host, capped_interface in bandwidth_capped:
+                capped_host.cmd(f"tc qdisc del dev {capped_interface} root")
         decoy_removed = False
         if redirect_rules:
             for rule_host, delete_rule in reversed(redirect_rules):
@@ -703,7 +745,7 @@ class MininetResponseExecutor:
             "throttle_removed": throttled is not None,
             "block_source_removed": bool(blocked_sources),
             "quarantine_removed": quarantined is not None,
-            "bandwidth_cap_removed": bandwidth_capped is not None,
+            "bandwidth_cap_removed": bool(bandwidth_capped),
             "decoy_removed": decoy_removed,
         }
 
@@ -750,6 +792,28 @@ class MininetResponseExecutor:
             if host.IP() == target_ip:
                 return host
         raise MininetSafetyError(f"Target IP is not a known Mininet host: {target_ip}")
+
+    @staticmethod
+    def _validate_ip_literal(ip: str) -> str:
+        """Confirm ip is a syntactically well-formed IPv4 address before
+        it is ever interpolated into a shell command -- unlike
+        _host_for_ip(), this does NOT require ip to belong to a known
+        Mininet host, since block_source(), reset_sessions(), and
+        quarantine()'s repeat-source path all legitimately accept
+        addresses that were never registered as a real host (a spoofed
+        or distributed-attack source -- see generate_replay_attack_
+        distributed_mininet_traffic). Every other place source_ip
+        reaches a shell string already goes through _host_for_ip() (a
+        host lookup that validates as a side effect); this closes the
+        gap for the call sites that can't use that path, so a
+        malformed source_ip (e.g. '10.0.0.100; rm -rf /') fails loudly
+        here instead of reaching host.cmd() as a second shell statement.
+        """
+        try:
+            socket.inet_aton(ip)
+        except OSError as exc:
+            raise MininetSafetyError(f"Invalid source IP for a shell-interpolated command: {ip!r}") from exc
+        return ip
 
     def _decoy_host(self) -> Any:
         for host in self.net.hosts:
