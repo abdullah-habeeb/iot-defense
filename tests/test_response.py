@@ -642,3 +642,82 @@ def test_bandwidth_cap_installs_tbf_on_the_attacker_and_restore_removes_it(tmp_p
 
     executor.restore("10.0.0.10")
     assert attacker._qdisc_installed is False
+
+def test_quarantine_revokes_a_second_distinct_sources_earlier_accept_rule(tmp_path):
+    """Regression test for a real, confirmed leak: a second quarantine()
+    call for a target already quarantined against a *different* source
+    used to silently no-op, leaving that new source's own earlier ACCEPT
+    rule (baked in when it still looked like a legitimate peer) active."""
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    sensor = network.hosts[0]
+
+    first = executor.quarantine("10.0.0.10", "10.0.0.100")
+    assert "10.0.0.200" in first["allowed_ips"]
+    assert any("10.0.0.200" in rule and "ACCEPT" in rule for rule in sensor._input_rules)
+
+    second = executor.quarantine("10.0.0.10", "10.0.0.200")
+    assert second["status"] == "success"
+    assert not any("10.0.0.200" in rule and "ACCEPT" in rule for rule in sensor._input_rules)
+    assert not any("10.0.0.200" in rule and "ACCEPT" in rule for rule in sensor._output_rules)
+
+    third = executor.quarantine("10.0.0.10", "10.0.0.200")
+    assert third["status"] == "already_quarantined"
+
+    executor.restore("10.0.0.10")
+    assert sensor._input_rules == []
+    assert sensor._output_rules == []
+
+
+def test_bandwidth_cap_installs_a_qdisc_for_a_second_distinct_source(tmp_path):
+    """Regression test for a real, confirmed gap: a second bandwidth_cap()
+    call for an already-capped target used to silently skip installing a
+    qdisc for a genuinely different attacker source."""
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    attacker = network.hosts[1]
+    decoy = network.hosts[2]
+
+    first = executor.bandwidth_cap("10.0.0.10", "10.0.0.100")
+    assert first["host"] == "attacker"
+    assert attacker._qdisc_installed is True
+    assert decoy._qdisc_installed is False
+
+    second = executor.bandwidth_cap("10.0.0.10", "10.0.0.200")
+    assert second.get("status") != "already_capped"
+    assert decoy._qdisc_installed is True
+
+    repeat = executor.bandwidth_cap("10.0.0.10", "10.0.0.100")
+    assert repeat["status"] == "already_capped"
+
+    executor.restore("10.0.0.10")
+    assert attacker._qdisc_installed is False
+    assert decoy._qdisc_installed is False
+
+
+def test_block_source_rejects_a_malformed_source_ip_before_reaching_the_shell(tmp_path):
+    """Regression test: source_ip used to reach host.cmd() as a raw
+    f-string with no format validation, an injection-shaped primitive."""
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    with pytest.raises(MininetSafetyError):
+        executor.block_source("10.0.0.10", "10.0.0.100; touch /tmp/pwned")
+    sensor = network.hosts[0]
+    assert not any("pwned" in c for c in sensor.commands)
+
+
+def test_reset_sessions_rejects_a_malformed_source_ip_before_reaching_the_shell(tmp_path):
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    with pytest.raises(MininetSafetyError):
+        executor.reset_sessions("10.0.0.10", "10.0.0.100; touch /tmp/pwned")
+    sensor = network.hosts[0]
+    assert not any("pwned" in c for c in sensor.commands)
+
+
+def test_quarantine_rejects_a_malformed_source_ip_on_the_repeat_source_path(tmp_path):
+    network = FakeNetwork()
+    executor = MininetResponseExecutor(network, log_path=tmp_path / "responses.jsonl")
+    executor.quarantine("10.0.0.10", "10.0.0.100")
+    with pytest.raises(MininetSafetyError):
+        executor.quarantine("10.0.0.10", "10.0.0.200; touch /tmp/pwned")
