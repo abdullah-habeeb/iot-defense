@@ -603,6 +603,17 @@ class TrafficGenerator:
         A real listener runs on the target port for the duration of this
         call, the same pattern generate_brute_force_mininet_traffic and
         generate_slow_loris_mininet_traffic already rely on.
+
+        registry.py's own capture_packet_limit=120 margin against this
+        attack's ~18 connections was flagged by a system review as
+        possibly thin under a worst-case full-TCP-teardown packet count
+        estimate (~9/attempt, ~162 total) -- checked directly with two
+        live captures rather than left as a theoretical worry: real
+        totals (both directions, tcpdump captures the sensor's own ACK
+        replies too) measured 77 and 80 packets across two separate
+        runs, comfortably under 120 with real margin. The worst-case
+        estimate doesn't materialize in practice on this VM's own real
+        TCP behavior for these short-lived connections.
         """
         attacker = net.get("attacker")
         sensor = net.get("sensor")

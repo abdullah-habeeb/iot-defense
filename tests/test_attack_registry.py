@@ -50,7 +50,14 @@ def test_every_scenario_has_distinct_attack_type_and_observed_threat_key():
 # for any future attack whose detector inspects additional fields.
 DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
     "exfiltration": {"packet_count": 10, "average_packet_size": 1200.0},
-    "exploit": {"packet_count": 4, "average_packet_size": 350.0},
+    # 442.0 is the real, live-measured average_packet_size documented in
+    # README.md's own known-limitations section (framing overhead means
+    # this is NOT the same as the generator's raw payload byte count --
+    # see that section for the full real-vs-window margin analysis). Was
+    # 350.0, a value that still landed inside this detector's own
+    # [250, 550) window but didn't match the real captured traffic --
+    # found by a system review.
+    "exploit": {"packet_count": 4, "average_packet_size": 442.0},
     "syn_flood": {"protocol": "TCP", "tcp_syn_count": 15, "tcp_ack_count": 0},
     "icmp_flood": {"protocol": "ICMP", "icmp_packet_count": 30, "average_packet_size": 220.0},
     "slow_loris": {"protocol": "TCP", "unique_source_ports": 20, "tcp_ack_count": 20, "average_packet_size": 225.0},
@@ -58,7 +65,16 @@ DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
     "dns_tunneling": {"protocol": "UDP", "average_packet_size": 220.0},
     "mqtt_flood": {"protocol": "TCP", "tcp_ack_count": 20, "average_packet_size": 80.0},
     "firmware_tampering": {"protocol": "UDP", "average_packet_size": 570.0},
-    "buffer_overflow": {"protocol": "TCP", "average_packet_size": 570.0},
+    # 675.6 is a real, live-measured average_packet_size from a direct
+    # capture of generate_buffer_overflow_mininet_traffic (was 570.0, a
+    # value that still landed inside this detector's own [550, 700)
+    # window but didn't match real captured traffic -- found by a system
+    # review). The real capture actually produces two flows -- one
+    # ~675-byte (the oversized-payload data, what this detector keys on)
+    # and one ~66-byte (handshake/ACK-only packets, below this
+    # detector's own 550 floor and therefore never classified as
+    # buffer_overflow) -- this override is the former.
+    "buffer_overflow": {"protocol": "TCP", "average_packet_size": 675.6},
     "replay_attack": {"protocol": "UDP", "average_packet_size": 100.0},
     "rogue_beacon": {"protocol": "UDP", "average_packet_size": 220.0},
     # RuleBasedC2BeaconDetector's own primary signal, inter_arrival_cv,
