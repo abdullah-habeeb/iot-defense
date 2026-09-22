@@ -262,3 +262,55 @@ class TestStackelbergFallback:
         assert stack_decision is not None
         assert comparison["stackelberg"] is not None
         assert comparison["stackelberg_fallback_used"] is False
+
+
+class TestEveryDefenseActionHasAPostResponsePhaseBranch:
+    """Regression test for a real design gap found by a system review:
+    _run_evaluate_and_respond's action-to-phase dispatch is a hardcoded
+    if/elif chain, not derived from the DefenseAction enum -- so a new
+    action could silently fall through to the generic "no network
+    change" phase even if it really does something, unless every member
+    is explicitly accounted for. A source-level completeness check
+    (rather than a full response-execution mock, which nothing in this
+    file currently sets up) is cheap and still catches the real failure
+    mode: forgetting to add a branch for a newly-registered action."""
+
+    def test_every_action_name_is_referenced_in_the_dispatch_method(self):
+        import inspect
+
+        from iot_defense.defense.decision import DefenseAction
+        from iot_defense.demo import controller as controller_module
+
+        source = inspect.getsource(controller_module.DemoController._run_evaluate_and_respond)
+        missing = [
+            action.name for action in DefenseAction
+            if f"DefenseAction.{action.name}" not in source
+        ]
+        assert not missing, (
+            f"DefenseAction member(s) {missing} are never referenced in "
+            "_run_evaluate_and_respond's action-to-phase dispatch -- add an "
+            "explicit branch (the method itself now raises NotImplementedError "
+            "at runtime for exactly this case, but this test catches it earlier)."
+        )
+
+
+class TestNodeIpsMatchesRealTopologyConfig:
+    """Regression guard for a real drift risk found by a system review:
+    controller.py's own NODE_IPS dict used to be one of three independent
+    sources of truth for the 5 host IPs (config/topology.yaml, this dict,
+    and ~8 raw string literals scattered through run_demo() -- the
+    literals are now replaced with NODE_IPS lookups, reducing this to
+    two, but nothing previously verified NODE_IPS itself stays in sync
+    with the real config TopologyConfig/create_mininet_network() actually
+    read from. This reads the real config the same way and compares."""
+
+    def test_node_ips_matches_topology_yaml(self):
+        from iot_defense.demo.controller import NODE_IPS
+        from iot_defense.network.topology import TopologyConfig
+
+        config = TopologyConfig()
+        real_ips = {host["name"]: host["ip"].split("/")[0] for host in config.hosts}
+        assert NODE_IPS == real_ips, (
+            f"NODE_IPS has drifted from config/topology.yaml: "
+            f"NODE_IPS={NODE_IPS} vs real config={real_ips}"
+        )

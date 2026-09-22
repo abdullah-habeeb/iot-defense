@@ -311,7 +311,7 @@ class DemoController:
             # attack rather than guessing, so the system fails safe.
             features = {
                 "source_ip": "unknown",
-                "destination_ip": "10.0.0.10",
+                "destination_ip": NODE_IPS["sensor"],
                 "unique_destination_ports": 0,
                 "packet_count": 0,
                 "packets_per_second": 0.0,
@@ -497,11 +497,32 @@ class DemoController:
             decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
             bandwidth_details = result_dict.get("details", {})
             tl_msg = f"Attacker egress bandwidth capped ({bandwidth_details.get('rate', '?')}, real tc tbf)"
-        else:
+        elif action in (DefenseAction.ALLOW, DefenseAction.ALERT):
+            # The only two actions this chain deliberately never gives
+            # their own phase -- neither has a real network effect to
+            # report (see DefenseAction's own docstring for the two
+            # named exceptions to "every dependent module derives from
+            # the enum"). Every other action is handled explicitly
+            # above; test_demo_controller.py's own completeness test
+            # enforces that this stays true as the enum grows.
             post_phase = "OBSERVING"
             node_updates = {}
             decoy_interactions = self.state["metrics"].get("decoy_interactions", 0)
             tl_msg = f"Response executed: {action.value} — no network change"
+        else:
+            # Found by a system review: this branch used to be a silent
+            # catch-all for ANY unhandled action, so a new DefenseAction
+            # with a real network effect would fall through to "no
+            # network change" instead of failing loudly. A genuinely
+            # new action needs its own branch above -- this is a real
+            # safety net, not routine behavior, and should never fire
+            # for any of this project's own 10 currently-registered
+            # actions.
+            raise NotImplementedError(
+                f"DefenseAction.{action.name} has no post-response phase branch in "
+                "_run_evaluate_and_respond -- add one (or add it to the ALLOW/ALERT "
+                "no-op case above if it genuinely has no network effect)."
+            )
 
         new_metrics = {
             **self.state["metrics"],
@@ -636,8 +657,8 @@ class DemoController:
                 )
             else:
                 normal_event = ThreatEvent.from_result(
-                    source_ip="10.0.0.10",
-                    destination_ip="10.0.0.20",
+                    source_ip=NODE_IPS["sensor"],
+                    destination_ip=NODE_IPS["camera"],
                     attack_type="normal",
                     threat_score=0.05,
                     confidence=0.92,
@@ -749,8 +770,8 @@ class DemoController:
                 pinger_host = self.net.get("camera")
                 isolate_decision = DefenseDecision.create(
                     action=DefenseAction.ISOLATE,
-                    target_ip="10.0.0.30",
-                    source_ip="10.0.0.100",
+                    target_ip=NODE_IPS["smart_plug"],
+                    source_ip=NODE_IPS["attacker"],
                     reason=(
                         "Isolation capability validation — demonstrates containment "
                         "independently of the action selected for the current threat."
@@ -772,9 +793,9 @@ class DemoController:
                     },
                     timeline_message=f"Isolation applied to smart_plug — {isolate_result.status}",
                 )
-                after_ping = pinger_host.cmd("ping -c 1 -W 1 10.0.0.30")
-                self.executor.restore("10.0.0.30")
-                after_restore_ping = pinger_host.cmd("ping -c 1 -W 1 10.0.0.30")
+                after_ping = pinger_host.cmd(f"ping -c 1 -W 1 {NODE_IPS['smart_plug']}")
+                self.executor.restore(NODE_IPS["smart_plug"])
+                after_restore_ping = pinger_host.cmd(f"ping -c 1 -W 1 {NODE_IPS['smart_plug']}")
                 connectivity_lost = "100% packet loss" in after_ping
                 connectivity_recovered = "0% packet loss" in after_restore_ping
                 await self.update_state(
@@ -793,7 +814,7 @@ class DemoController:
                 self.event_logger.log(
                     {
                         "event": "isolation_validation",
-                        "target_ip": "10.0.0.30",
+                        "target_ip": NODE_IPS["smart_plug"],
                         "connectivity_lost": connectivity_lost,
                         "connectivity_recovered": connectivity_recovered,
                     }

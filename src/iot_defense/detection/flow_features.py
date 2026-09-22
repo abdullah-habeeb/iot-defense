@@ -167,11 +167,21 @@ class FeatureAggregator:
         return (variance ** 0.5) / mean_gap
 
     def calculate_packets_per_second(self, events: list[dict[str, Any]]) -> float:
+        """Kept consistent with aggregate()'s own inline packets_per_second
+        computation on purpose -- found by a system review that this
+        public helper's zero-duration fallback (float(len(events)), i.e.
+        the raw packet count) silently disagreed with aggregate()'s own
+        real path (0.0), which would have misreported an ordinary
+        single-packet or simultaneous-timestamp flow as an extreme rate
+        for any caller reaching for this method instead of .aggregate().
+        No such caller currently exists, but the disagreement itself was
+        the bug worth closing, not just documenting.
+        """
         if not events:
             return 0.0
         timestamps = [float(event.get("timestamp", 0.0)) for event in events]
         duration = max(max(timestamps) - min(timestamps), 0.0)
-        return (len(events) / duration) if duration > 0 else float(len(events))
+        return (len(events) / duration) if duration > 0 else 0.0
 
     def calculate_unique_ports(self, events: list[dict[str, Any]], field_name: str) -> int:
         values = {event.get(field_name) for event in events if event.get(field_name) is not None}

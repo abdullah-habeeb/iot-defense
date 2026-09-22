@@ -351,7 +351,10 @@ class MininetResponseExecutor:
         Only meaningful when source_ip is genuinely the attacker's own
         address, which is why this is never the preferred_action for the
         registry's reversed-direction attacks (data_exfiltration,
-        dns_tunneling_exfiltration, firmware_tampering): for those,
+        dns_tunneling_exfiltration, firmware_tampering, rogue_config_beacon,
+        c2_beaconing -- all five, not the three this comment used to name
+        before a system review found rogue_beacon/c2_beacon were added to
+        the registry without this list ever being updated): for those,
         beliefs.source_device is the attacker's *destination* for the
         leak, and the actual malicious traffic is the compromised
         device's own outbound flow -- an INPUT-chain drop of the
