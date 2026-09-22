@@ -33,13 +33,30 @@ class PacketMonitor:
         time.sleep(capture_seconds)
         return capture_path
 
-    def start_capture(self, net: Any, host_name: str, packet_limit: int = 25) -> dict[str, Any]:
+    def start_capture(
+        self, net: Any, host_name: str, packet_limit: int = 25, watchdog_seconds: float | None = None
+    ) -> dict[str, Any]:
         """Launch tcpdump and block only until it confirms it is actually listening.
 
         Unlike capture_host_packets, this does not sleep for a fixed window --
         it waits for tcpdump's own "listening on ..." line, so the caller can
         safely start generating traffic the moment capture is truly active
         instead of guessing how long startup takes.
+
+        watchdog_seconds, when given, wraps tcpdump in `timeout` -- a real,
+        previously-missing safety net for a genuinely hung capture or a
+        generate_traffic() call that never returns, neither of which
+        anything currently bounds (stop_capture()'s own completion_timeout
+        only starts counting *after* generate_traffic() has already
+        returned). Deliberately NOT AttackScenario.capture_duration_seconds'
+        own value directly -- that field is consistently *smaller* than
+        capture_completion_timeout for every registered attack (it predates
+        that field and was never reconciled with it; see
+        test_capture_duration_seconds_stays_under_completion_timeout in
+        test_attack_registry.py for the newly-enforced invariant), so using
+        it here directly would kill every capture before stop_capture() ever
+        gets a fair chance. Callers should pass something safely larger than
+        their own completion_timeout instead (e.g. completion_timeout + 60).
         """
         host = net.get(host_name)
         interface = host.defaultIntf().name
@@ -62,10 +79,10 @@ class PacketMonitor:
         # packets captured" -- tcpdump's own exit summary, misread as
         # iptables error output. disown removes the job from the shell's
         # job table so its completion is never reported at all.
-        command = (
-            f"tcpdump -i {interface} -nn -s 0 -c {packet_limit} -w {capture_path} "
-            f">{log_path} 2>&1 & disown; echo $!"
-        )
+        tcpdump_cmd = f"tcpdump -i {interface} -nn -s 0 -c {packet_limit} -w {capture_path}"
+        if watchdog_seconds is not None:
+            tcpdump_cmd = f"timeout {watchdog_seconds}s {tcpdump_cmd}"
+        command = f"{tcpdump_cmd} >{log_path} 2>&1 & disown; echo $!"
         pid = host.cmd(command).strip()
         self._wait_for_log_marker(host, log_path, "listening on", timeout=2.0)
         return {"capture_path": capture_path, "log_path": log_path, "pid": pid, "host_name": host_name}

@@ -135,7 +135,7 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
         exact un-synced-copy bug class this project has hit before.
         """
         if scenario == "normal":
-            session = self.monitor.start_capture(self.net, "sensor", 20)
+            session = self.monitor.start_capture(self.net, "sensor", 20, watchdog_seconds=63.0)
             (traffic_override or self.traffic_gen.generate_normal_mininet_traffic)(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, 3.0)
         else:
@@ -147,7 +147,10 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             )
             if attack is None:
                 raise ValueError(f"No registered attack scenario for training scenario: {scenario!r}")
-            session = self.monitor.start_capture(self.net, "sensor", attack.capture_packet_limit)
+            session = self.monitor.start_capture(
+                self.net, "sensor", attack.capture_packet_limit,
+                watchdog_seconds=attack.capture_completion_timeout + 60.0,
+            )
             (traffic_override or attack.generate_traffic)(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, attack.capture_completion_timeout)
 

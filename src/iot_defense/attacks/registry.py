@@ -84,8 +84,32 @@ class AttackScenario:
     destination_ip on the resulting ThreatEvent."""
 
     capture_packet_limit: int
+    """The real, live enforcement mechanism: tcpdump is launched with
+    `-c capture_packet_limit` and exits on its own once that many
+    packets are captured. Every other capture-sizing field below
+    exists to support or document this one."""
     capture_duration_seconds: float
+    """Historical/documentation value, not read by any runtime code
+    path -- confirmed by a full-repo grep during a system review.
+    Records roughly how long this attack's own generate_traffic()
+    call is expected to run (matches its own duration_seconds default
+    in simulation/traffic.py), which is how capture_completion_timeout
+    below was originally hand-derived for each attack. Consistently
+    *smaller* than capture_completion_timeout for every registered
+    attack (by design -- see that field's own docstring), which is
+    also why monitoring/monitor.py's start_capture() watchdog_seconds
+    parameter deliberately does NOT read this field directly: doing so
+    would kill every capture before stop_capture() gets a fair chance.
+    test_attack_registry.py's test_capture_duration_seconds_stays_
+    under_completion_timeout enforces that relationship so it can't
+    silently drift out of sync again."""
     capture_completion_timeout: float
+    """The real, live wall-clock bound stop_capture() polls against
+    after generate_traffic() returns, before sending SIGTERM --
+    genuinely enforced, unlike capture_duration_seconds above.
+    Callers additionally pass this value (+60s margin) as
+    start_capture()'s watchdog_seconds, a real safety net for a
+    capture or generator that hangs outright."""
 
     preferred_action: DefenseAction
     """What RuleBasedDefensePolicy favors once score/confidence clear this
