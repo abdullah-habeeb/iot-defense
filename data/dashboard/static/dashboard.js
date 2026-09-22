@@ -813,6 +813,7 @@ function renderAll(state) {
     if (phase === 'THREAT_DETECTED') showAlert('⚠️ Threat detected — evaluating policies', 'threat');
     else if (phase === 'DECOY_ACTIVE') showAlert('🪤 Decoy deployed — attacker redirected', 'info');
     else if (phase === 'ISOLATED') showAlert('🔒 Target isolated from network', 'info');
+    else if (phase === 'THROTTLED') showAlert('🐌 Attacker connection rate throttled', 'info');
     else if (phase === 'BLOCKED_SOURCE') showAlert('🚫 Attacker source blocked', 'info');
     else if (phase === 'QUARANTINED') showAlert('🛑 Target quarantined to a default-deny allowlist', 'info');
     else if (phase === 'SESSIONS_RESET') showAlert('🔌 Live connections to the attacker terminated', 'info');

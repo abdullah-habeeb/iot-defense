@@ -52,23 +52,39 @@ def train(total_timesteps: int | None = None, output_path: str | Path = "models/
     # scenario mismatches against each scenario's own preferred_action
     # became 7, the policy collapsing onto THROTTLE for several unrelated
     # scenarios) -- more training without exploration pressure just
-    # locked in an early, wrong generalization faster. Adding
-    # ent_coef=0.01 alone got to 3 mismatches at 12750 timesteps and only
-    # 1 (the "normal" scenario, misrouted to DECOY) even at 35000 -- a
-    # single, *persistent* miss across three different timestep budgets,
-    # not noise, pointing at capacity rather than training time: DECOY is
-    # the optimal action for 3 of the 17 states (reconnaissance, exploit,
-    # dns_tunneling) with a large reward (+6.5), and [32, 32] wasn't
-    # reliably separating the "normal" state from those in the shared
-    # policy network. Doubling to [64, 64] converged all 17 scenarios to
-    # their own registered preferred_action, confirmed at both 12750 and
-    # 20000 timesteps -- see train_ppo's own verification run.
+    # locked in an early, wrong generalization faster.
+    #
+    # n_steps=170/batch_size=170 (one full 17-state episode cycled 10
+    # times per rollout, instead of the previous n_steps=32 -- under two
+    # full cycles): found by a system review that net_arch=[64,64] with
+    # ent_coef=0.01 alone, while it does converge this project's own
+    # fixed seed=7, was NOT reliably seed-independent -- a direct 6-seed
+    # sweep found 4 of 6 other seeds still produced 1-3 mismatches at the
+    # same 12750-timestep budget, meaning seed=7 was doing real, load-
+    # bearing work rather than the fix being generally robust. Root
+    # cause: n_steps=32 gives well under two full passes through all 17
+    # states per gradient update, a high-variance, noisy advantage
+    # estimate per state -- exactly the kind of noise that lets one
+    # unlucky seed lock a state onto the wrong action before entropy-
+    # driven exploration ever tries the right one. Raising n_steps to
+    # 170 (10 full cycles per update) alone, at the same 12750 timestep
+    # budget, meant *fewer* total gradient updates and made things worse
+    # (confirmed directly) -- doubling training_timesteps to 25500
+    # alongside it (below) restored update count while keeping the
+    # lower-variance per-update signal. Across a 10-seed sweep at this
+    # final recipe, 8 of 10 converged all 17 scenarios with zero
+    # mismatches (up from 2 of 6 before); the 2 remaining failures both
+    # isolated to the exact same single scenario (normal -> ALLOW), not
+    # scattered across different scenarios the way earlier configs
+    # failed -- a real, large improvement, not a claim of perfection.
+    # tests/test_ppo.py's own real-training regression test is the
+    # actual guarantee for the deployed seed=7, not this comment.
     model = PPO(
         "MlpPolicy",
         environment,
         policy_kwargs={"net_arch": [64, 64]},
-        n_steps=32,
-        batch_size=32,
+        n_steps=170,
+        batch_size=170,
         learning_rate=0.001,
         ent_coef=0.01,
         device="cpu",

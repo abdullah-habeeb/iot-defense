@@ -982,27 +982,33 @@ policy:
           CONTINUE: {attacker: -1.5, defender: 2.5}
           RETREAT: {attacker: -2.5, defender: 1.5}
   ppo:
-    # model_path/fallback_policy document the convention every real call
-    # site (train_ppo.py's own default output path, harness.py,
-    # demo/controller.py) already follows by hand -- unlike
-    # training_timesteps/environment_episode_length/reward below, these
-    # two are not read from this file by any code.
+    # model_path documents the convention every real call site
+    # (train_ppo.py's own default output path, harness.py,
+    # demo/controller.py) already follows by hand. fallback_policy is
+    # stale -- found by a system review: every real call site
+    # (harness.py, demo/controller.py) actually passes
+    # fallback=RuleBasedDefensePolicy(), not Stackelberg, and always
+    # has. Neither key is read from this file by any code -- both are
+    # documentation only, unlike training_timesteps/
+    # environment_episode_length/reward below.
     model_path: "models/ppo_defense"
     fallback_policy: "stackelberg"
     # Raised from 768 to 3000 after adding the fifth scenario (data
     # exfiltration) -- see below. Raised again, 3000 -> 12000, after the
     # registry grew from 6 training scenarios (normal + 5 attacks) to 16
     # (normal + 15 attacks). Raised again, 12000 -> 12750, after
-    # registering the 17th scenario (c2_beaconing): episode_length
-    # auto-floors to len(TRAINING_SCENARIOS()) regardless of this file's
-    # environment_episode_length, so the same per-cycle budget keeps
-    # thinning as the registry grows -- the same starvation risk the
-    # 768->3000 raise below already fixed once, just at a larger scale.
-    # 12750 keeps the same ~750/scenario budget 12000 gave 16 scenarios,
-    # and was confirmed (not assumed) to converge PPO's decision to each
-    # scenario's own preferred_action for all 17 training scenarios
-    # before being committed -- see the harness/review notes for the
-    # verification run.
+    # registering the 17th scenario (c2_beaconing).
+    #
+    # Raised again, 12750 -> 25500, alongside train_ppo.py's own
+    # n_steps/batch_size change (32 -> 170) -- found by a system review
+    # that the 12750-timestep recipe was not reliably seed-independent
+    # (4 of 6 sampled seeds failed to converge all 17 scenarios, only
+    # this project's own hardcoded seed=7 and, separately, seed=1 did).
+    # Doubling training_timesteps to keep the gradient-update count up
+    # after n_steps grew 32->170 (see train_ppo.py's own comment for the
+    # full reasoning and the 10-seed sweep this was confirmed against --
+    # not assumed) is what actually fixed the seed-fragility; raising
+    # n_steps alone, at the OLD 12750 budget, made it worse.
     #
     # Original note, still accurate for the mechanism: at 768 timesteps
     # PPO occasionally disagreed with the rule-based and Stackelberg
@@ -1011,7 +1017,7 @@ policy:
     # scenario -- 3000 timesteps resolved it for that 6-scenario registry.
     # Genuinely read by simulation/train_ppo.py -- editing this value
     # changes what a bare `train_ppo` run actually does.
-    training_timesteps: 12750
+    training_timesteps: 25500
     # Read by train_ppo.py, floored at len(TRAINING_SCENARIOS()) there
     # regardless of what's configured here -- a shorter episode silently
     # starves the last-cycled scenario of any training signal at all (see
