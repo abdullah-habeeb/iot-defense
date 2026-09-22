@@ -2,8 +2,10 @@ import pytest
 
 from iot_defense.detection.detector import (
     RuleBasedBruteForceDetector,
+    RuleBasedDnsAmplificationDetector,
     RuleBasedDosDetector,
     RuleBasedExfiltrationDetector,
+    RuleBasedFirmwareTamperingDetector,
     RuleBasedReconDetector,
     UnifiedRuleBasedDetector,
     _load_detection_policy,
@@ -391,3 +393,59 @@ class TestDetectFlowsScansEveryFlow:
     def test_raises_on_an_empty_flow_list(self):
         with pytest.raises(ValueError):
             UnifiedRuleBasedDetector().detect_flows([])
+
+
+class TestDnsAmplificationAndFirmwareTamperingShareOneBoundaryNotAGap:
+    """Regression test for a real, confirmed bug found by a rigorous
+    system review: RuleBasedDnsAmplificationDetector's floor
+    (packets_per_second >= 4.0) and RuleBasedFirmwareTamperingDetector's
+    ceiling (originally packets_per_second < 5.0) used mismatched
+    values, leaving a real [4.0, 5.0) band where both windows were
+    simultaneously true -- unlike every other boundary-sharing detector
+    pair in this file (e.g. dns_tunneling/rogue_beacon, both exactly
+    5.5), which use one shared value. Dormant in production only because
+    no real traffic generator's pacing ever landed in that band -- a
+    live logic defect, not a theoretical one. Fixed by tightening
+    firmware_tampering's ceiling to the same 4.0 boundary."""
+
+    BASE_FEATURES = {
+        "source_ip": "10.0.0.10",
+        "destination_ip": "10.0.0.100",
+        "protocol": "UDP",
+        "unique_destination_ports": 1,
+        "packet_count": 30,
+        "average_packet_size": 600.0,
+    }
+
+    def test_no_pps_value_fires_both_detectors(self):
+        dns_amp = RuleBasedDnsAmplificationDetector()
+        fw = RuleBasedFirmwareTamperingDetector()
+        pps = 0.0
+        overlaps = []
+        while pps <= 10.0:
+            features = dict(self.BASE_FEATURES, packets_per_second=round(pps, 2))
+            both_fire = (
+                dns_amp.detect(features).attack_type == "dns_amplification"
+                and fw.detect(features).attack_type == "firmware_tampering"
+            )
+            if both_fire:
+                overlaps.append(pps)
+            pps += 0.05
+        assert not overlaps, f"dns_amplification and firmware_tampering both fire at pps={overlaps}"
+
+    def test_exactly_4_0_pps_is_dns_amplification_not_firmware_tampering(self):
+        """The shared boundary itself: 4.0 must belong to exactly one
+        detector, not both and not neither."""
+        dns_amp = RuleBasedDnsAmplificationDetector()
+        fw = RuleBasedFirmwareTamperingDetector()
+        features = dict(self.BASE_FEATURES, packets_per_second=4.0)
+        assert dns_amp.detect(features).attack_type == "dns_amplification"
+        assert fw.detect(features).attack_type == "normal"
+
+    def test_real_firmware_tampering_traffic_rate_stays_under_the_new_ceiling(self):
+        """generate_firmware_tampering_mininet_traffic paces at ~3.33 pps
+        (0.3s interval) -- confirm the tightened 4.0 ceiling still leaves
+        real margin, not just a synthetic boundary value."""
+        fw = RuleBasedFirmwareTamperingDetector()
+        features = dict(self.BASE_FEATURES, packets_per_second=1 / 0.3)
+        assert fw.detect(features).attack_type == "firmware_tampering"

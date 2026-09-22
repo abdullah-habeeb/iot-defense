@@ -792,9 +792,19 @@ class RuleBasedFirmwareTamperingDetector(Detector):
     RuleBasedDnsTunnelingDetector: an already-compromised device pushing
     unauthorized config/firmware blobs outward. Shares
     RuleBasedDnsAmplificationDetector's own average_packet_size range but
-    at a meaningfully slower, less bursty rate (< 5.0/s here vs. that
-    detector's own >= 4.0/s floor) -- the two are disambiguated purely
-    on packets_per_second, not size.
+    at a meaningfully slower, less bursty rate. Shares the exact
+    same 4.0 boundary RuleBasedDnsAmplificationDetector's own floor
+    uses (< 4.0/s here, >= 4.0/s there) -- found via direct review
+    that an earlier version of this detector used a *mismatched*
+    ceiling (5.0) against that detector's 4.0 floor, leaving a real,
+    live [4.0, 5.0) gap where both windows were simultaneously true
+    and registry order silently shadowed this detector -- unlike
+    every other boundary-sharing pair in this file (e.g.
+    dns_tunneling/rogue_beacon, both exactly 5.5), which was the
+    giveaway. Real firmware_tampering traffic paces at ~3.33/s (see
+    generate_firmware_tampering_mininet_traffic's own 0.3s interval),
+    comfortably clear of 4.0 with real margin -- the tightened
+    ceiling costs nothing against real traffic, only closes the gap.
     """
 
     def __init__(
@@ -810,7 +820,7 @@ class RuleBasedFirmwareTamperingDetector(Detector):
         self.min_packet_count = int(config.get("firmware_tampering_min_packet_count", min_packet_count if min_packet_count is not None else 26))
         self.min_average_packet_size = float(config.get("firmware_tampering_min_average_packet_size", min_average_packet_size if min_average_packet_size is not None else 550.0))
         self.max_average_packet_size = float(config.get("firmware_tampering_max_average_packet_size", max_average_packet_size if max_average_packet_size is not None else 650.0))
-        self.max_packets_per_second = float(config.get("firmware_tampering_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 5.0))
+        self.max_packets_per_second = float(config.get("firmware_tampering_max_packets_per_second", max_packets_per_second if max_packets_per_second is not None else 4.0))
 
     def detect(self, features: dict[str, Any]) -> ThreatEvent:
         protocol = str(features.get("protocol", "")).upper()
