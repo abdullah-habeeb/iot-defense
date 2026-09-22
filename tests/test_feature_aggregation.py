@@ -101,6 +101,21 @@ def test_packet_rate_and_unique_port_helpers():
     assert aggregator.count_tcp_flags(events, "ack") == 1
 
 
+def test_packet_rate_helper_agrees_with_aggregate_on_zero_duration():
+    """Regression test for a real bug found by a system review:
+    calculate_packets_per_second()'s zero-duration fallback used to
+    return float(len(events)) (the raw packet count), silently
+    disagreeing with aggregate()'s own real path (0.0) for the exact
+    same input -- an ordinary single-packet or simultaneous-timestamp
+    flow would misreport as an extreme rate through this helper."""
+    aggregator = FeatureAggregator(window_seconds=3.0)
+    simultaneous = [
+        {"timestamp": 5.0, "protocol": "UDP", "src_port": 1, "dst_port": 1},
+        {"timestamp": 5.0, "protocol": "UDP", "src_port": 2, "dst_port": 1},
+    ]
+    assert aggregator.calculate_packets_per_second(simultaneous) == 0.0
+
+
 def test_tcp_syn_ack_counts_reflect_real_flags_not_port_presence():
     """Every real TCP packet -- refused, SYN-only, or a full handshake --
     carries both a source and destination port, so counting SYN/ACK by port
