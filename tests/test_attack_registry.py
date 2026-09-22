@@ -122,6 +122,26 @@ class TestUnifiedDetectorIsRegistryDriven:
         )
 
 
+class TestCaptureDurationFieldsStayConsistent:
+    """capture_duration_seconds is documentation, not an enforced runtime
+    bound (see its own field docstring in registry.py) -- but
+    monitoring/monitor.py's watchdog_seconds mechanism relies on
+    capture_completion_timeout always being the *larger* of the two, or
+    a naive future caller wiring capture_duration_seconds in directly as
+    a hard timeout would kill every capture before stop_capture() gets a
+    fair chance (confirmed during a system review: every single
+    registered attack currently has capture_duration_seconds 1-2 seconds
+    *smaller* than capture_completion_timeout). This is the regression
+    guard for that relationship."""
+
+    def test_capture_duration_seconds_stays_under_completion_timeout(self, scenario: AttackScenario):
+        assert scenario.capture_duration_seconds < scenario.capture_completion_timeout, (
+            f"{scenario.key!r}: capture_duration_seconds="
+            f"{scenario.capture_duration_seconds} must stay below "
+            f"capture_completion_timeout={scenario.capture_completion_timeout}"
+        )
+
+
 class TestPolicyIsRegistryDriven:
     def test_every_scenario_has_a_configured_action_threshold(self, attack_key: str):
         policy = RuleBasedDefensePolicy()
@@ -161,6 +181,16 @@ class TestStackelbergIsRegistryDriven:
     def test_game_solves_for_every_registered_threat(self, scenario: AttackScenario):
         solution = StackelbergGame().solve(scenario.observed_threat_key)
         assert isinstance(solution.selected_action, DefenseAction)
+        # Found by a system review: this used to only assert *a* valid
+        # DefenseAction came back, never that it was the *right* one --
+        # a tautology that would pass even if a payoff-table edit picked
+        # a completely different winner than the registry declares (the
+        # exact class of bug the C2_BEACONING payoff fix earlier this
+        # session was). This is the real assertion the test name promises.
+        assert solution.selected_action == scenario.preferred_action, (
+            f'{scenario.key!r}: Stackelberg solved to {solution.selected_action.name}, '
+            f'but the registry declares preferred_action={scenario.preferred_action.name}'
+        )
 
 
 class TestPPOEnvIsRegistryDriven:

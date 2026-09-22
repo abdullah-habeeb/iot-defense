@@ -216,9 +216,25 @@ class DemoController:
         rule_policy = RuleBasedDefensePolicy()
         stack_policy = StackelbergDefensePolicy()
 
+        # rule_decision is the actual fallback target when Stackelberg
+        # fails (see the selection logic below) -- deliberately not
+        # wrapped in its own try/except, since there is nothing further
+        # to fall back to if the fallback itself raises.
         rule_decision = rule_policy.decide(context)
-        stack_decision = stack_policy.decide(context)
-        stackelberg_reasoning = stack_decision.context.get("stackelberg_reasoning", {})
+        stack_decision = None
+        stackelberg_reasoning: dict[str, Any] = {}
+        stackelberg_fallback_used = False
+        try:
+            stack_decision = stack_policy.decide(context)
+            stackelberg_reasoning = stack_decision.context.get("stackelberg_reasoning", {})
+        except Exception as exc:  # noqa: BLE001
+            # A real fallback, not just a comment claiming one exists --
+            # found during a system review that this branch never
+            # existed: selected decision was unconditionally
+            # stack_decision, so a raising StackelbergDefensePolicy would
+            # abort the whole run instead of actually falling back.
+            print(f"[DemoController] Stackelberg decide error: {exc}")
+            stackelberg_fallback_used = True
 
         # PPO – load if model exists, else fall back to rule-based
         ppo_decision = None
@@ -236,8 +252,9 @@ class DemoController:
 
         comparison: dict[str, Any] = {
             "rule_based": rule_decision.to_dict(),
-            "stackelberg": stack_decision.to_dict(),
+            "stackelberg": stack_decision.to_dict() if stack_decision else None,
             "stackelberg_reasoning": stackelberg_reasoning,
+            "stackelberg_fallback_used": stackelberg_fallback_used,
             "ppo": ppo_decision.to_dict() if ppo_decision else None,
             "ppo_fallback_used": ppo_fallback_used,
         }
@@ -353,8 +370,10 @@ class DemoController:
         )
         detection_latency_ms = (time.perf_counter() - detect_start) * 1000
 
-        # Selected decision: prefer Stackelberg (strategic), fallback to rule-based
-        selected = stack_decision
+        # Selected decision: prefer Stackelberg (strategic), fall back to
+        # rule-based if it failed to decide at all -- a real conditional
+        # now, not just a comment (see _build_policy_comparison above).
+        selected = stack_decision if stack_decision is not None else rule_decision
 
         await self.update_state(
             {
@@ -375,7 +394,7 @@ class DemoController:
             },
             timeline_message=(
                 f"All policies evaluated. Rule-Based→{rule_decision.action.value}, "
-                f"Stackelberg→{stack_decision.action.value}"
+                + (f"Stackelberg→{stack_decision.action.value}" if stack_decision else "Stackelberg→FAILED (fell back to rule-based)")
                 + (f", PPO→{ppo_decision.action.value}" if ppo_decision else "")
                 + f". Selected: {selected.action.value}"
             ),
@@ -574,7 +593,14 @@ class DemoController:
             # exited and flushed (forcing a clean exit via SIGTERM if it
             # hasn't hit its packet limit yet) -- both ends of the earlier
             # race are now driven by tcpdump's own signals, not fixed sleeps.
-            capture_session = await asyncio.to_thread(monitor.start_capture, self.net, "sensor", 20)
+            # watchdog_seconds: a real, previously-missing wall-clock
+            # safety net (see start_capture's own docstring) -- generous
+            # above this capture's own 4.0s completion_timeout so it never
+            # fires in normal operation, only against a genuinely hung
+            # capture or traffic generator.
+            capture_session = await asyncio.to_thread(
+                monitor.start_capture, self.net, "sensor", 20, watchdog_seconds=64.0
+            )
             traffic_gen.generate_normal_mininet_traffic(self.net)
             cap_path = await asyncio.to_thread(monitor.stop_capture, self.net, capture_session, 4.0)
             raw_packets = self._observe_packets(monitor.read_capture(self.net, "sensor", cap_path))
@@ -654,7 +680,11 @@ class DemoController:
             # produces (e.g. a flood needs a higher limit and a tighter
             # window than a scan).
             atk_capture_session = await asyncio.to_thread(
-                monitor.start_capture, self.net, "sensor", scenario.capture_packet_limit
+                monitor.start_capture,
+                self.net,
+                "sensor",
+                scenario.capture_packet_limit,
+                watchdog_seconds=scenario.capture_completion_timeout + 60.0,
             )
             attack_result = scenario.generate_traffic(self.net)
             atk_cap_path = await asyncio.to_thread(

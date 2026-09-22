@@ -210,3 +210,55 @@ class TestInitialStateFactory:
         s = json.dumps(state, default=str)
         data = json.loads(s)
         assert data["phase"] == "IDLE"
+
+
+class TestStackelbergFallback:
+    """Regression test for a real bug found by a system review: the
+    demo controller's own comment claimed "prefer Stackelberg, fallback
+    to rule-based", but `selected = stack_decision` was unconditional --
+    there was no fallback logic at all, and StackelbergDefensePolicy.decide()
+    had no exception handling (unlike the PPO branch, which already did).
+    A raising Stackelberg policy aborted the whole run instead of ever
+    actually falling back."""
+
+    def test_stackelberg_exception_falls_back_to_rule_based_decision(self, ctrl):
+        threat_event = ThreatEvent.from_result(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", attack_type="dos_flood",
+            threat_score=0.9, confidence=0.9, detection_reason="test fixture",
+            features={"packets_per_second": 40.0, "unique_destination_ports": 1},
+            detector_name="test",
+        )
+        context = ctrl.decision_agent.build_context(threat_event, device_criticality="high")
+
+        with patch(
+            "iot_defense.defense.policy.StackelbergDefensePolicy.decide",
+            side_effect=RuntimeError("simulated Stackelberg failure"),
+        ):
+            comparison, rule_decision, stack_decision, ppo_decision = ctrl._build_policy_comparison(
+                threat_event, context
+            )
+
+        assert stack_decision is None
+        assert comparison["stackelberg"] is None
+        assert comparison["stackelberg_fallback_used"] is True
+        assert rule_decision is not None
+        assert comparison["rule_based"] is not None
+
+    def test_stackelberg_success_is_used_normally(self, ctrl):
+        """Confirms the fallback path doesn't accidentally fire (or
+        shadow the real decision) on the ordinary success path."""
+        threat_event = ThreatEvent.from_result(
+            source_ip="10.0.0.100", destination_ip="10.0.0.10", attack_type="dos_flood",
+            threat_score=0.9, confidence=0.9, detection_reason="test fixture",
+            features={"packets_per_second": 40.0, "unique_destination_ports": 1},
+            detector_name="test",
+        )
+        context = ctrl.decision_agent.build_context(threat_event, device_criticality="high")
+
+        comparison, rule_decision, stack_decision, ppo_decision = ctrl._build_policy_comparison(
+            threat_event, context
+        )
+
+        assert stack_decision is not None
+        assert comparison["stackelberg"] is not None
+        assert comparison["stackelberg_fallback_used"] is False
