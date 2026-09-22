@@ -2,11 +2,21 @@ import pytest
 
 from iot_defense.detection.detector import (
     RuleBasedBruteForceDetector,
+    RuleBasedBufferOverflowDetector,
+    RuleBasedC2BeaconDetector,
     RuleBasedDnsAmplificationDetector,
+    RuleBasedDnsTunnelingDetector,
     RuleBasedDosDetector,
     RuleBasedExfiltrationDetector,
+    RuleBasedExploitDetector,
     RuleBasedFirmwareTamperingDetector,
+    RuleBasedIcmpFloodDetector,
+    RuleBasedMqttFloodDetector,
     RuleBasedReconDetector,
+    RuleBasedReplayAttackDetector,
+    RuleBasedRogueBeaconDetector,
+    RuleBasedSlowLorisDetector,
+    RuleBasedSynFloodDetector,
     UnifiedRuleBasedDetector,
     _load_detection_policy,
 )
@@ -449,3 +459,118 @@ class TestDnsAmplificationAndFirmwareTamperingShareOneBoundaryNotAGap:
         fw = RuleBasedFirmwareTamperingDetector()
         features = dict(self.BASE_FEATURES, packets_per_second=1 / 0.3)
         assert fw.detect(features).attack_type == "firmware_tampering"
+
+
+# ── Dedicated coverage for the 12 detectors previously exercised only
+# generically (one fixed feature vector per attack in
+# test_attack_registry.py's own sweep, never a detector-specific test
+# here) -- a real coverage gap a system review flagged as part of why
+# the dns_amplification/firmware_tampering boundary overlap (see
+# TestDnsAmplificationAndFirmwareTamperingShareOneBoundaryNotAGap above)
+# went unnoticed for as long as it did. Each entry pairs a detector class
+# with a real feature vector safely inside its own numeric window (not a
+# boundary value -- those are covered by dedicated boundary tests where a
+# known-tight boundary exists) and the attack_type it should classify as.
+_TWELVE_DETECTOR_CASES = [
+    pytest.param(
+        RuleBasedExploitDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 5, "average_packet_size": 400.0},
+        "exploit_payload_injection",
+        id="exploit",
+    ),
+    pytest.param(
+        RuleBasedSynFloodDetector,
+        {"protocol": "TCP", "unique_destination_ports": 1, "tcp_syn_count": 20, "tcp_ack_count": 0, "packets_per_second": 17.0},
+        "tcp_syn_flood",
+        id="syn_flood",
+    ),
+    pytest.param(
+        RuleBasedIcmpFloodDetector,
+        {"protocol": "ICMP", "icmp_packet_count": 30, "packets_per_second": 10.0, "average_packet_size": 250.0},
+        "icmp_ping_flood",
+        id="icmp_flood",
+    ),
+    pytest.param(
+        RuleBasedSlowLorisDetector,
+        {"protocol": "TCP", "unique_destination_ports": 1, "unique_source_ports": 20, "tcp_ack_count": 20, "average_packet_size": 240.0},
+        "slow_loris_exhaustion",
+        id="slow_loris",
+    ),
+    pytest.param(
+        RuleBasedDnsAmplificationDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 30, "average_packet_size": 600.0, "packets_per_second": 6.0},
+        "dns_amplification",
+        id="dns_amplification",
+    ),
+    pytest.param(
+        RuleBasedDnsTunnelingDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 25, "average_packet_size": 240.0, "packets_per_second": 3.0},
+        "dns_tunneling_exfiltration",
+        id="dns_tunneling",
+    ),
+    pytest.param(
+        RuleBasedMqttFloodDetector,
+        {"protocol": "TCP", "unique_destination_ports": 1, "tcp_ack_count": 20, "packets_per_second": 0.5, "average_packet_size": 100.0},
+        "mqtt_message_flood",
+        id="mqtt_flood",
+    ),
+    pytest.param(
+        RuleBasedFirmwareTamperingDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 30, "average_packet_size": 600.0, "packets_per_second": 3.0},
+        "firmware_tampering",
+        id="firmware_tampering",
+    ),
+    pytest.param(
+        RuleBasedBufferOverflowDetector,
+        {"protocol": "TCP", "unique_destination_ports": 1, "packet_count": 30, "average_packet_size": 650.0, "packets_per_second": 10.0},
+        "buffer_overflow_probe",
+        id="buffer_overflow",
+    ),
+    pytest.param(
+        RuleBasedReplayAttackDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 17, "packets_per_second": 0.7, "average_packet_size": 150.0},
+        "credential_replay",
+        id="replay_attack",
+    ),
+    pytest.param(
+        RuleBasedRogueBeaconDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 45, "average_packet_size": 240.0, "packets_per_second": 7.0},
+        "rogue_config_beacon",
+        id="rogue_beacon",
+    ),
+    pytest.param(
+        RuleBasedC2BeaconDetector,
+        {"protocol": "UDP", "unique_destination_ports": 1, "packet_count": 20, "packets_per_second": 0.6, "average_packet_size": 400.0, "inter_arrival_cv": 0.05},
+        "c2_beaconing",
+        id="c2_beacon",
+    ),
+]
+
+_BENIGN_FEATURES = {
+    "protocol": "TCP",
+    "unique_destination_ports": 1,
+    "unique_source_ports": 1,
+    "packet_count": 3,
+    "packets_per_second": 0.3,
+    "average_packet_size": 90.0,
+    "tcp_syn_count": 0,
+    "tcp_ack_count": 1,
+    "icmp_packet_count": 0,
+    "inter_arrival_cv": 999.0,
+}
+
+
+class TestTwelvePreviouslyUncoveredDetectors:
+    """Dedicated, named coverage for the 12 detectors that previously had
+    no test in this file -- covered only generically via
+    test_attack_registry.py's own single-fixed-vector sweep."""
+
+    @pytest.mark.parametrize("detector_cls, features, expected_type", _TWELVE_DETECTOR_CASES)
+    def test_fires_on_its_own_real_signature(self, detector_cls, features, expected_type):
+        event = detector_cls().detect(dict(features, source_ip="10.0.0.100", destination_ip="10.0.0.10"))
+        assert event.attack_type == expected_type
+
+    @pytest.mark.parametrize("detector_cls, features, expected_type", _TWELVE_DETECTOR_CASES)
+    def test_ignores_ordinary_benign_traffic(self, detector_cls, features, expected_type):
+        event = detector_cls().detect(dict(_BENIGN_FEATURES, source_ip="10.0.0.20", destination_ip="10.0.0.10"))
+        assert event.attack_type == "normal"
