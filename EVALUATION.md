@@ -570,10 +570,22 @@ correct outcome to the same `+1`-scale reward and every incorrect outcome to the
 
 | Reward config | Seeds tested | Fully-converged rate | 95% CI |
 |---|---|---|---|
-| Shaped (deployed) | 5 | REWARD_SHAPED_RATE | REWARD_SHAPED_CI |
-| Flat (ablated) | 5 | REWARD_FLAT_RATE | REWARD_FLAT_CI |
+| Shaped (deployed) | 5 | 100.0% | (56.6%, 100.0%) |
+| Flat (ablated) | 5 | 100.0% | (56.6%, 100.0%) |
 
-REWARD_SHAPING_DISCUSSION
+**At this sample size and on this specific metric (full convergence to every registered
+`preferred_action`), no difference was detected between the two reward configurations --
+both reached 5/5.** This is reported honestly as a real result, not reframed to make the
+ablation look more decisive than it was: it does **not** show reward shaping is useless,
+only that it is not *necessary* for this environment's specific 17-scenario, single-step
+classification-style task to reach full convergence at n=5 each. Both CIs are wide (a
+direct consequence of n=5) and overlap completely, so this result cannot distinguish "no
+real difference" from "a real difference too small for this sample to detect." What this
+ablation does not measure -- sample efficiency (how many timesteps each configuration
+needs), training stability across a wider seed set, or behavior on a task with a longer
+credit-assignment horizon than this project's own single-decision-per-step environment --
+are the more likely places reward shaping would matter, and are named here as the
+concrete follow-up this ablation motivates rather than answers.
 
 ### Cost/overhead: what does running three policies instead of one actually cost?
 
