@@ -255,6 +255,153 @@ limit. It is, however, a real, now-measured gap between "the registered
 automatically follow), worth stating plainly rather than assuming BLOCK_SOURCE's
 per-event success generalizes to real persistence.
 
+## Disclosed defects found during a systematic review, and whether they affected reported results
+
+A full, adversarial review of every subsystem (not just the code touched by any one
+change) found and fixed 21 real issues, ranging from a firewall-rule leak to stale
+comments. This section states plainly what each one was, whether it could have reached
+any number reported in this document, and how that was actually checked -- not assumed.
+
+**Reached no reported evaluation data (checked directly, not assumed):**
+
+- **`quarantine()`/`bandwidth_cap()` multi-source leak.** Both required a *second*
+  distinct-source call against an already-actioned target with no `restore()` in
+  between. `harness.py`'s own design restores after every single trial before the
+  next one begins -- the precondition for the leak literally cannot occur inside this
+  evaluation's own trial loop.
+- **`block_source()`/`reset_sessions()` unsanitized shell interpolation.** Required a
+  malformed/attacker-controlled `source_ip` string; every value the harness ever
+  passes is a real Mininet host IP or a registry-derived attacker address, never
+  user- or attacker-supplied text.
+- **The `dns_amplification`/`firmware_tampering` detector window overlap** (a real
+  `[4.0, 5.0)` packets-per-second band where both detectors fired). Checked directly
+  against the actual harness data, not inferred: all 5 `firmware_tampering` trials in
+  the results classified correctly as `firmware_tampering`, 0 as `dns_amplification`.
+  Real `firmware_tampering` traffic paces at ~3.33 pps, comfortably outside the
+  overlapping band.
+- **The fake "fallback to rule-based" in `demo/controller.py`.** That code path is
+  the live-demo/dashboard state machine; `harness.py` calls
+  `RuleBasedDefensePolicy`/`StackelbergDefensePolicy` directly and never goes through
+  `controller.py` at all. Zero exposure to this evaluation's own numbers by
+  construction, not by luck.
+- **The PPO arm's authenticity.** Directly checked, not assumed, after a review
+  raised the question of whether the harness's own long-running process could have
+  silently hit the observation-shape mismatch that was separately found in a live
+  demo run, with `PPODefensePolicy`'s internal fallback silently substituting
+  rule-based decisions under the "ppo" label. It did not: all 80 `ppo` rows in the
+  results are present (0 null/failed rows), none carry the `ppo_fallback` marker
+  `PPODefensePolicy` sets when its model file is genuinely missing, and `PPO.load()`
+  succeeded against the model deployed when the harness process started (which
+  matched that process's own in-memory registry size for its entire run, since
+  Python does not hot-reload an already-imported module even if the file on disk
+  changes mid-run). The PPO numbers in this report are real model predictions.
+
+**Coverage/documentation gaps, not runtime bugs — no data to have corrupted:**
+the tautological Stackelberg-vs-registry test, the dead `capture_duration_seconds`
+field, 12 previously-untested detectors, `harness.py`'s own previously-zero unit
+test coverage, three now-consolidated sources of truth for host IPs, a dead helper
+method, a dead import, and several stale comments. None of these executed different
+logic at evaluation time than the logic whose output is reported here -- they were
+gaps in what was *tested* or *documented*, not defects in what *ran*.
+
+**A real, disclosed limitation on the deployed model, not a data-integrity issue:**
+the PPO training recipe's own seed-robustness was found to be weaker than first
+believed -- a 6-seed sweep showed 4 of 6 seeds failing to converge every scenario to
+its registered `preferred_action` at the recipe then in use. The recipe was fixed
+(architecture and rollout-size changes; see `simulation/train_ppo.py`'s own comment)
+and re-validated across a 10-seed sweep (8 of 10 fully converge). The model deployed
+for this evaluation's own run was retrained with that corrected recipe before this
+harness run started, and independently re-verified (17/17 scenarios) immediately
+before launch.
+
+This project treats a systematically-found-and-fixed defect as a methodology
+strength worth stating plainly, not a finding to omit: the alternative -- an external
+reviewer or replicator finding one of these independently -- would cost far more
+credibility than disclosing them here does.
+
+## Evaluating decision divergence directly (not just on real captured traffic)
+
+The comparison above shows rule-based, Stackelberg, and PPO choosing identical
+actions on every one of the real trials -- a real result, not an error, but on its
+own it cannot support any claim that these are three meaningfully different decision
+mechanisms, because real captured traffic in this lab classifies far from any
+threshold boundary every time: confidently classified, all three policies were each
+independently designed (via rule-based's own thresholds, Stackelberg's payoff
+tables, and PPO's training reward) to reach the same registry-declared
+`preferred_action` for exactly that case. Agreement there is closer to a consistency
+check than a comparison.
+
+`src/iot_defense/evaluation/policy_disagreement.py` tests the three real policy
+classes directly against synthetic `SecurityContext`s built two ways: (1)
+threat_score/confidence perturbed around each attack's own registered
+`action_score_min`/`action_confidence_min` boundary (`±0.03` to `±0.15`, 784
+contexts across the full registry), where a real detector's honest uncertainty would
+actually place a reading; and (2) entirely unregistered "novel" attack types no
+policy was ever tuned for (12 contexts), probing generalization rather than
+in-distribution ambiguity. No Mininet is needed -- these evaluate the real
+`RuleBasedDefensePolicy`, `StackelbergDefensePolicy`, and `PPODefensePolicy` classes
+directly, the same pattern this project's own PPO-convergence checks already use.
+
+**Results (2026-09-24, `models/ppo_defense.zip` -- the recipe re-validated above):**
+
+| | Rule vs. Stackelberg | Rule vs. PPO | Stackelberg vs. PPO | All three |
+|---|---|---|---|---|
+| Near decision boundaries (n=784) | 32.5% agree | 32.5% agree | **100% agree** | 32.5% agree |
+| Novel/unseen attack types (n=12) | -- | -- | -- | 0% agree |
+
+**Near decision boundaries, rule-based diverges from both Stackelberg and PPO on
+roughly two-thirds of ambiguous contexts** -- exactly where a real, honest detector
+reading would land under genuine uncertainty, not a corner case. Stackelberg and PPO
+track each other closely (100% agreement in this run) even off the exact training
+distribution: a real, positive finding that the learned policy generalizes toward
+the same strategic reasoning the game-theoretic solver encodes explicitly, rather
+than only memorizing the clean, high-confidence cases the harness's own real traffic
+happens to produce.
+
+**On entirely unregistered attack types, the three policies fail in different, worth-
+disclosing ways.** Rule-based and Stackelberg both degrade to `ALERT` every time --
+a real, deliberately-tested safe default for a `threat_type` neither recognizes (see
+`RuleBasedDefensePolicy`'s own no-match branch and the pre-check added to
+`StackelbergDefensePolicy.decide()` after this project's own system review). **PPO
+instead selects `ISOLATE` regardless of the actual threat_score or confidence
+supplied.** This is disclosed here as a genuine limitation, not smoothed over: unlike
+the other two policies, PPO has no mechanism for recognizing "I have never seen
+anything like this" and responding cautiously or by falling back -- its behavior
+outside the training distribution is a fixed action, an artifact of how a trained
+network extrapolates rather than a reasoned response to novelty. Whether a fixed
+`ISOLATE` is an acceptable fail-safe default or a real generalization failure is left
+as an open question this project does not claim to resolve -- it is reported because
+a paper claiming PPO "learns adaptive defense" needs to state this boundary
+explicitly, not discover it via a reviewer's own testing.
+
+## Detector calibration: robustness beyond the exact tuned point
+
+Every attack's own detection window was hand-placed to be clear of every other
+registered detector's window for *this* system's own generated traffic -- including,
+for `c2_beacon`, via an explicit 432-combination sweep. That is calibrating the
+evaluation to the system under test, and it is a real, unresolved threat to external
+validity this document does not claim to have fixed: only an independent, standard
+dataset (e.g. IoT-23, Bot-IoT, CIC-IoT2023, N-BaIoT, TON_IoT) that this project's own
+detectors were never tuned against could close it, and that has not been done.
+
+What `src/iot_defense/evaluation/detector_robustness.py` *does* answer is a narrower,
+adjacent question: is each detector's calibration a brittle single point, or does it
+have real margin? Every numeric feature in each attack's own real signature was
+perturbed by `-30%` to `+30%` (matching the scale of measurement variance this
+project has already documented directly, e.g. a 570-byte payload measuring
+`average_packet_size=612`), and re-classified through the full `UnifiedRuleBasedDetector`
+(so an earlier-registered detector stealing a perturbed signature would also show up
+as a failure, not just the target detector's own window).
+
+**Results are real and uneven, not uniformly reassuring:** robust classification
+rates under perturbation range from **28.6%** (`dns_amplification`, `firmware_tampering`,
+`buffer_overflow` -- the same crowded region of the numeric space already flagged by
+this project's own detector-overlap fix) to **100%** (`dos`, `brute_force`,
+`exfiltration`). Every attack's exact calibrated point still classifies correctly
+(the tautological floor this measurement is built on), but several attacks have
+genuinely tight real-world margins, not wide ones. This is reported as a finding, not
+smoothed into a single reassuring aggregate number.
+
 ## Limitations
 
 - **`c2_beacon`, the 16th registered attack, is not included in this run.** It was registered

@@ -1,6 +1,7 @@
 import json
 
 from iot_defense.evaluation.report import (
+    _wilson_ci,
     generate_report,
     load_results,
     load_suricata_summary,
@@ -8,6 +9,42 @@ from iot_defense.evaluation.report import (
     summarize_by_arm,
     summarize_by_condition,
 )
+
+
+def test_wilson_ci_matches_known_reference_value():
+    """8/10 successes -> a 95% Wilson interval of approximately
+    (0.490, 0.943) is a standard textbook reference value (matches
+    statsmodels.stats.proportion.proportion_confint(8, 10,
+    method='wilson')) -- added after a review found this evaluation
+    reported bare percentages with no uncertainty measure at all."""
+    lower, upper = _wilson_ci(8, 10)
+    assert abs(lower - 0.4904) < 0.001
+    assert abs(upper - 0.9434) < 0.001
+
+
+def test_wilson_ci_handles_zero_trials():
+    assert _wilson_ci(0, 0) is None
+
+
+def test_wilson_ci_stays_within_0_and_1_at_extreme_proportions():
+    lower, upper = _wilson_ci(0, 5)
+    assert 0.0 <= lower <= upper <= 1.0
+    lower, upper = _wilson_ci(5, 5)
+    assert 0.0 <= lower <= upper <= 1.0
+
+
+def test_summarize_by_arm_includes_confidence_intervals():
+    rows = [
+        {"arm": "rule_based", "ground_truth_attack_type": "dos_flood", "detection_correct": True,
+         "response_verified": True, "matches_preferred_action": True, "execution_ok": True,
+         "detection_latency_ms": 100.0},
+        {"arm": "rule_based", "ground_truth_attack_type": "dos_flood", "detection_correct": True,
+         "response_verified": False, "matches_preferred_action": False, "execution_ok": True,
+         "detection_latency_ms": 100.0},
+    ]
+    summary = summarize_by_arm(rows)
+    assert summary["rule_based"]["detection_accuracy_ci95"] is not None
+    assert summary["rule_based"]["response_verified_rate_ci95"] is not None
 
 
 def _row(**overrides):
