@@ -349,36 +349,72 @@ class TrafficGenerator:
         by reading their own thresholds rather than guessed. Landing
         inside RuleBasedBruteForceDetector's or RuleBasedDosDetector's
         window instead would make either of them claim this traffic
-        first, since neither checks protocol or TCP flags. Paced for
-        the real middle of that gap (~17.5/s), not just "inside" it: a
-        live run at a 0.055s pause measured 15.2-15.3/s across repeated
-        runs -- technically inside the gap, but close enough to its
-        15.0 floor that ordinary real Mininet timing jitter risked
-        dipping under it on some runs and being claimed by
-        RuleBasedBruteForceDetector instead. Even after retargeting the
-        pace, a short (5s) window still occasionally measured a dip --
-        few enough real samples that one slow connect() attempt could
-        meaningfully skew the average. 14s, not a faster pace, is the
-        actual fix: more real attempts means real per-attempt timing
-        noise averages out instead of dominating a small sample.
+        first, since neither checks protocol or TCP flags.
+
+        Two real, found-not-assumed bugs in this pacing, root-caused by
+        analyzing the actual captured pcaps from a 15-trial harness run
+        (only 3/15 landed in-window; 5/15 over-shot into DosDetector's
+        territory, 6/15 under-shot into BruteForceDetector's), then
+        confirmed with live, direct measurements against the real
+        detection pipeline rather than trusting either the single earlier
+        live measurement this comment used to cite or an initial,
+        incorrect theory about *why* the rate was off:
+
+        1. `time.sleep(fixed)` *after* a variable-cost connect() makes the
+           real per-iteration period `connect_cost + fixed`, not `fixed`
+           -- so the achieved rate silently depends on how expensive each
+           connect() happens to be, which is not constant even on one VM
+           (confirmed directly: attempt periods measured 2-5x longer than
+           the sleep alone under this session's own real, accumulated
+           Mininet load -- connect() overhead, not the sleep, was
+           dominating). A deadline-based scheduler fixes this at the root
+           instead of chasing another sleep constant that would just as
+           fragilely depend on the *next* moment's load: each iteration
+           computes its own absolute deadline up front
+           (start + i * interval) and sleeps only whatever time remains
+           until it, so connect()'s own real cost is absorbed into the
+           interval instead of added on top of it. Verified live: 6
+           consecutive trials on one persistent Mininet network measured
+           8.82-8.84 attempts/sec against a target interval of 1/8.75s --
+           a far tighter spread than any fixed-sleep version ever
+           produced.
+        2. A wrong initial theory (a refused connect() puts two packets,
+           SYN and the target's own RST reply, on the wire, so pacing
+           should target *half* the desired packets_per_second) was
+           tested live and directly falsified: FeatureAggregator groups
+           events into strictly directional (src_ip, dst_ip, protocol)
+           flows, so the flow the detector reads contains only the
+           attacker's own outbound SYNs, never the target's separate
+           reply flow -- packets_per_second is 1:1 with attempts/sec, not
+           2:1. Confirmed live before settling on the real constant: an
+           interval of 1/8.75s measured a real packets_per_second of
+           ~8.82 (matching attempts, not ~17.5), not the ~35/s the SYN+RST
+           theory would have predicted either. The real fix is simply
+           targeting the actual desired rate directly.
         """
         attacker = net.get("attacker")
         target_ip = "10.0.0.10"
         target_port = 6001
+        interval = 1.0 / 17.5  # attempts/sec == packets/sec for this one-directional flow
+        attempt_count = max(1, int(duration_seconds / interval))
         command = (
             "python3 - <<'PY'\n"
             "import socket, time\n"
-            "start = time.time()\n"
-            f"while time.time() - start < {duration_seconds}:\n"
+            "start = time.monotonic()\n"
+            f"interval = {interval}\n"
+            f"for i in range({attempt_count}):\n"
             "    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
-            "    sock.settimeout(0.2)\n"
+            "    sock.settimeout(0.05)\n"
             "    try:\n"
             f"        sock.connect(('{target_ip}', {target_port}))\n"
             "    except OSError:\n"
             "        pass\n"
             "    finally:\n"
             "        sock.close()\n"
-            "    time.sleep(0.048)\n"
+            "    deadline = start + (i + 1) * interval\n"
+            "    remaining = deadline - time.monotonic()\n"
+            "    if remaining > 0:\n"
+            "        time.sleep(remaining)\n"
             "print('syn_flood_done')\n"
             "PY"
         )
