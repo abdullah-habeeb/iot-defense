@@ -216,11 +216,24 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
             else:
                 components["false_positive_intervention"] = config.false_positive_intervention
                 reward += config.false_positive_intervention
+                # service_disruption used to apply only to ISOLATE, leaving
+                # every other wrong action on normal traffic (THROTTLE,
+                # DECOY, BLOCK_SOURCE, ...) penalized identically regardless
+                # of which one it was -- weaker gradient to avoid any of
+                # them specifically than to avoid ISOLATE. Found via a real
+                # 10-seed training sweep: both non-converging seeds' one
+                # mistake was a false positive on normal, and both chose a
+                # non-ISOLATE action (THROTTLE, DECOY) -- exactly the two
+                # actions this asymmetry gave the least reason to avoid.
+                # Applying it uniformly (still stacked with the ISOLATE-
+                # specific term below, since a full interface-down remains
+                # more disruptive than any other single action) gives every
+                # false-positive action equal pressure to be avoided.
+                components["service_disruption"] = config.service_disruption
+                reward += config.service_disruption
                 if action == DefenseAction.ISOLATE:
                     components["unnecessary_isolation"] = config.unnecessary_isolation
                     reward += config.unnecessary_isolation
-                    components["service_disruption"] = config.service_disruption
-                    reward += config.service_disruption
         else:
             attack = _scenario_by_attack_type().get(threat_type)
             if attack is None:
