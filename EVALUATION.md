@@ -7,6 +7,18 @@ system against published work on the same general problem, honestly: no paper fo
 project's exact dataset or environment, so that comparison is qualitative context, not a claimed
 head-to-head number.
 
+**Scope boundary, stated once here and not repeated as a caveat on every table below:** every
+number in this document comes from **one topology, on one 2-CPU/~2.9GB lab VM, running Mininet**.
+No claim in this document should be read as "this generalizes to arbitrary IoT networks, hardware,
+or attacker populations" -- it has not been tested on more than this single environment, and this
+project does not have the infrastructure to test that here. Every table and every percentage below
+describes *this system, on this VM, on this topology* -- a controlled, internally-valid comparison
+between the arms tested, not an externally-valid claim about IoT security in general. Where a
+result plausibly reflects VM-specific timing/resource variance rather than the system's actual
+behavior (flagged explicitly where it occurs, e.g. the Discussion's treatment of
+`icmp_ping_flood`/`slow_loris_exhaustion`), that ambiguity is disclosed, not resolved in the
+system's favor.
+
 ## Methodology
 
 `src/iot_defense/evaluation/harness.py` runs `N` real Mininet trials for every registered
@@ -163,9 +175,33 @@ as a precise measurement of a real 80% ceiling.
 No published study was found comparing rule-based, Stackelberg game-theoretic, and
 reinforcement-learned *response selection* for IoT defense on a shared dataset -- the closest
 work compares detection methods alone, or evaluates deception/game-theoretic defenses on
-different metrics and environments than this project's controlled Mininet lab. The following are
-cited as context for the architectural choices made here, not as numbers this evaluation claims
-to match or beat:
+different metrics and environments than this project's controlled Mininet lab. This document
+makes no claim to outperform, or be directly comparable to, any of the papers below -- each is
+cited as architectural or methodological context, on its own dataset/environment/metric, not as a
+number this evaluation's own results are benchmarked against. Two papers came closest to this
+project's own combination of ideas and are named explicitly so that closeness, and its limits, are
+stated plainly rather than left for a reviewer to find:
+
+- **Closest single match for the Stackelberg arm**: a 2025 paper models collaborative IoT
+  packet-sampling against DDoS as a Stackelberg game and derives a sampling-rate lower bound that
+  deters an attacker -- the same game-theoretic framing this project uses, but for a different
+  decision (a sampling rate, not a choice among discrete response actions like ISOLATE/DECOY/
+  THROTTLE) and evaluated analytically/in simulation, not against real captured Mininet traffic
+  ([Stackelberg Game for Resilient Collaborative Cyber Threat Detection and Response in IoT
+  Networks](https://www.researchgate.net/publication/398764870_Stackelberg_Game_for_Resilient_Collaborative_Cyber_Threat_Detection_and_Response_in_IoT_Networks)).
+- **Closest single match for the PPO arm's cost framing**: a 2025 paper evaluates an RL-tuned
+  moving-target-defense mutation strategy for edge IoT against DDoS specifically on attack success
+  rate, defense latency, and CPU overhead -- the same *category* of cost-conscious framing this
+  project's own cost/overhead analysis (below) uses, but for mutating network configuration rather
+  than selecting among this project's own discrete response actions, and again not on shared,
+  real, captured traffic ([An optimized reinforcement learning based MTD mutation strategy for
+  securing edge IoT against DDoS
+  attack](https://www.sciencedirect.com/science/article/pii/S2214212625001759)).
+
+Neither paper, nor any other found, shares this project's dataset, environment, or exact decision
+space -- which is precisely why this document's own numbers are reported as an internally-valid
+comparison between the arms tested here (see the scope boundary above), not translated into a
+claimed head-to-head standing against either of them.
 
 - Signature-based IDS baseline choice (Suricata over Snort): a real experimental comparison found
   Suricata generally ahead of Snort on detection accuracy, scalability, and resource efficiency
@@ -401,6 +437,133 @@ this project's own detector-overlap fix) to **100%** (`dos`, `brute_force`,
 (the tautological floor this measurement is built on), but several attacks have
 genuinely tight real-world margins, not wide ones. This is reported as a finding, not
 smoothed into a single reassuring aggregate number.
+
+## Adversarial robustness: an evasion-margin reading, and what it does not cover
+
+The detector-robustness measurement above (`-30%` to `+30%` perturbation of each attack's own
+numeric features) can be read two ways, and this document is explicit about which one it
+supports. Read as **measurement-noise tolerance** -- does the calibration survive the kind of
+variance this project has already documented in its own real traffic generation -- it is a fair,
+direct answer, and the one this document primarily makes.
+
+Read as **adversarial evasion resistance** -- could an attacker who knows this system's exact
+detection windows deliberately shape traffic to sit just outside them -- it is a much weaker
+answer, for a specific reason worth stating plainly: the perturbation is **symmetric, random, and
+non-adaptive**. It does not search for the nearest evasive point the way a real adversary
+(knowing, or inferring via probing, this project's own thresholds) would. A rate-limited attacker
+willing to trade attack speed/volume for stealth has a direct, obvious evasion strategy this
+measurement does not model at all: pace traffic to sit *just below* a detector's rate threshold
+rather than at a randomly perturbed point around the attack's own calibrated signature. The
+28.6%-robust conditions (`dns_amplification`, `firmware_tampering`, `buffer_overflow`) are exactly
+where that gap matters most -- their narrow real margin is already known; whether a deliberate,
+threshold-aware attacker could reliably exploit it is a distinct, harder question this measurement
+does not answer.
+
+**What this project's results do say about adaptive attacker behavior** comes from a different
+experiment, already reported above: the Adaptive-attacker evaluation's `rotate` mode shows a real,
+demonstrated evasion of the *response* layer (a fresh source IP bypasses `BLOCK_SOURCE`'s
+per-identity containment) -- a genuine adversarial result, but at the response layer, not the
+detection layer, and on identity rotation, not traffic shaping. **Detection-layer evasion via
+deliberate, threshold-aware traffic shaping has not been tested here** and is named explicitly as
+an open gap rather than left implicit: closing it would mean an adaptive search (e.g. a
+gradient-free optimizer or a red-team script) that iteratively adjusts traffic shape against this
+system's own detector responses, which this evaluation pass did not build.
+
+## Ethics and responsible disclosure
+
+Every attack technique implemented in this project (port scanning, flooding, brute-force,
+exfiltration, beaconing, and the rest of the registry) targets **only hosts this project itself
+creates inside an isolated Mininet virtual network**, on a single VM under this project's own
+control, with no path to any real external host, device, or network. No traffic this project
+generates leaves the VM's virtual namespace; no credential, exploit, or payload used against the
+project's own simulated hosts is novel, withheld, or targeted at a real deployed system.
+
+This project discloses its own defects as part of its own methodology, not only where convenient:
+the "Disclosed defects" section above lists 21 issues found during a systematic self-review,
+including two (`quarantine()`/`bandwidth_cap()`'s multi-source leak and `block_source()`/
+`reset_sessions()`'s unsanitized shell interpolation) that would be real security weaknesses in a
+production deployment of this code, stated plainly along with why neither reached this
+evaluation's own reported numbers. Nothing in this project is deployed against real infrastructure,
+so there is no real party to notify under a responsible-disclosure process; if any component of
+this codebase (the executor's shell-interpolation pattern in particular) were adapted for use
+against real infrastructure, the fixes already identified in that section (parameterize or
+strictly validate any value interpolated into a shell command; add idempotency guards before
+`quarantine()`/`bandwidth_cap()`) would need to be applied first, not treated as already resolved.
+
+## Ablations: does the specific tuning matter, or would anything reasonable work?
+
+Two structural questions neither the harness above nor the divergence/robustness sections
+answer: does the *specific*, hand-tuned Stackelberg payoff table matter, or would any
+reasonable table converge to the same registry answer? And does PPO's reward *shaping*
+(distance-based partial credit) matter, or would a flat correct/incorrect signal train
+just as well? Both are real ablations run against this project's own real code, not a
+simulated or hypothetical version of it.
+
+### Stackelberg payoff-table sensitivity
+
+`src/iot_defense/evaluation/stackelberg_ablation.py` perturbs every value in the real
+payoff table (`config/policies.yaml`) by random noise proportional to its own magnitude
+(`±5%` to `±50%`, 30 trials per level, re-solving all 17 conditions per trial -- 2,550
+solves total) and measures what fraction of (trial, condition) pairs still land on the
+registry's declared `preferred_action`.
+
+| Noise level | Match rate | 95% CI |
+|---|---|---|
+| ±5% | 96.1% | (94.0%, 97.4%) |
+| ±10% | 88.0% | (85.1%, 90.5%) |
+| ±20% | 78.8% | (75.3%, 82.0%) |
+| ±35% | 64.5% | (60.5%, 68.4%) |
+| ±50% | 61.0% | (56.8%, 65.0%) |
+
+**The degradation is monotonic and the table is not a brittle single point**: small,
+realistic tuning error (±5-10%) barely moves the outcome, meaning the *qualitative
+structure* of the payoffs (which responses are relatively better for which threats) is
+doing most of the real work, not the exact decimal values. At the same time, this is not
+a claim of total insensitivity -- by ±50% noise, over a third of solves land somewhere
+other than the registered answer, confirming the specific values still carry real
+information and were not an arbitrary, interchangeable placeholder.
+
+### PPO reward-shaping ablation
+
+`src/iot_defense/evaluation/reward_shaping_ablation.py` trains the real `DefenseDecisionEnv`
+under two reward configurations, holding the recipe (`net_arch=[64,64]`, `ent_coef=0.01`,
+`n_steps=170`, `batch_size=170`, `lr=0.001`, `timesteps=25500`) and a 5-seed sweep
+(`1, 2, 3, 7, 42`) fixed for both: the project's real **shaped** reward (`RewardConfig`,
+via `config/policies.yaml` -- different magnitudes for different outcomes, e.g. an attack
+let through unopposed is penalized twice as hard, `-6`, as merely choosing a
+wrong-but-still-defensive response, `-3`) against a **flat** reward that collapses every
+correct outcome to the same `+1`-scale reward and every incorrect outcome to the same
+`-1`-scale penalty, removing that differentiation while keeping the same overall scale.
+
+| Reward config | Seeds tested | Fully-converged rate | 95% CI |
+|---|---|---|---|
+| Shaped (deployed) | 5 | REWARD_SHAPED_RATE | REWARD_SHAPED_CI |
+| Flat (ablated) | 5 | REWARD_FLAT_RATE | REWARD_FLAT_CI |
+
+REWARD_SHAPING_DISCUSSION
+
+### Cost/overhead: what does running three policies instead of one actually cost?
+
+`src/iot_defense/evaluation/cost_overhead.py` times 300 real, direct calls per policy
+(`RuleBasedDefensePolicy.decide`, `StackelbergDefensePolicy.decide`,
+`PPODefensePolicy.decide`, 50 repeats across 6 representative attack scenarios each) with
+`time.perf_counter()`, isolated from Mininet and packet capture entirely -- pure
+decision-making cost.
+
+| Policy | Mean | Median | p95 | Max |
+|---|---|---|---|---|
+| Rule-based | 0.054 ms | 0.047 ms | 0.126 ms | 0.570 ms |
+| Stackelberg | 0.464 ms | 0.463 ms | 0.717 ms | 2.116 ms |
+| PPO | 1.136 ms | 1.102 ms | 1.638 ms | 4.156 ms |
+
+Running **all three** sequentially (as the harness and the live demo's comparison view
+both do) costs **1.654 ms** total. The *marginal* overhead of running all three instead of
+deploying only the slowest one is **0.518 ms**. For scale: this project's own harness
+measured mean real detection latency (dominated by packet capture, not decision-making) at
+**~26,026 ms** per trial (see Results) -- so the entire three-policy comparison this
+project's architecture is built around costs roughly **0.002%** of one trial's real
+end-to-end latency. Comparing three policies is not the bottleneck of this system, by a
+wide margin; capture and network I/O are.
 
 ## Limitations
 
