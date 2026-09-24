@@ -494,6 +494,28 @@ but a paper citing this system's PPO arm should cite this 80% (49-94% CI) figure
 the single deployed checkpoint's own clean verification, as the honest statement of
 training-recipe reliability.
 
+**Update (2026-09-24, after fixing a real reward asymmetry -- see "Real bugs found and
+fixed" below):** re-reading these two failures side by side showed a real, common cause,
+not two independent seed-specific flukes -- `calculate_reward()`'s own `normal`-traffic
+branch applied an extra disruption penalty only when the wrong action was specifically
+`ISOLATE`, giving the optimizer less gradient to avoid `THROTTLE`/`DECOY`-on-normal than
+`ISOLATE`-on-normal, for no principled reason. After fixing that asymmetry (applying the
+extra penalty to every non-`ALLOW` action on normal traffic, not only `ISOLATE`), the
+same 10-seed sweep was re-run in full:
+
+| Seeds tested | Fully converged | Rate | 95% CI |
+|---|---|---|---|
+| 10 | 9 | 90.0% | (59.6%, 98.2%) |
+
+A real, measurable improvement (8/10 -> 9/10), reported honestly rather than rounded up
+to "solved": **seed 17 still fails, with the exact same mistake** (`THROTTLE` instead of
+`ALLOW` on `normal`), while seed 55 -- the other original failure -- now converges fully.
+That one seed fails identically both before and after a real fix to the mechanism this
+document originally implicated suggests seed 17 carries some additional, seed-specific
+brittleness beyond the reward asymmetry alone; this document does not claim to have found
+what that is. The honest statement of training-recipe reliability is now 90% (CI
+59.6-98.2%), not 100% -- a real improvement, not a resolved guarantee.
+
 ## Evaluating decision divergence directly (not just on real captured traffic)
 
 The comparison above shows rule-based, Stackelberg, and PPO choosing identical
@@ -715,6 +737,159 @@ measured mean real detection latency (dominated by packet capture, not decision-
 project's architecture is built around costs roughly **0.002%** of one trial's real
 end-to-end latency. Comparing three policies is not the bottleneck of this system, by a
 wide margin; capture and network I/O are.
+
+## Real bugs found and fixed after this document's own N=15 run
+
+A later, independent review asked six blunt questions about the numbers this document
+reports: is `icmp_ping_flood`'s 0% verified-response rate a real system weakness or a
+measurement artifact; why does `tcp_syn_flood` misclassify 80% of the time; why does
+`dos_flood`'s own Suricata signature never fire; why does the lab ruleset only cover 5 of
+17 attacks; and does PPO's 8/10 seed-convergence rate reflect a fixable weakness or an
+irreducible one. Each was investigated with a live, direct repro rather than assumed, and
+five of the six led to a real, verified code fix. **This means every N=15 number reported
+earlier in this document was measured against code that has since changed** -- the fixes
+below are disclosed here rather than silently folded into the existing tables, and the
+specific numbers most affected (`icmp_ping_flood`, `tcp_syn_flood`, the Suricata lab-ruleset
+comparison) should be read as describing the *pre-fix* system. A full harness re-run to
+produce new N=15 aggregate numbers under the fixed code is a real, scoped next step, not
+done in this pass given the real time cost (the original run took ~2h09m).
+
+### 1. A real capture-race bug explains the adaptive-attacker module's 0-packet captures
+
+Root cause: `PacketMonitor.start_capture()`/`stop_capture()` reused a **fixed filename per
+host** (`sensor_capture.pcap`, `sensor_tcpdump.log`) for every capture call. `harness.py`
+recreates a fresh network per trial, so this was invisible there, but the adaptive-attacker
+module (above) deliberately keeps one persistent network across many rounds with no
+`restore()` between them -- and `stop_capture()`'s own process-kill can silently fail (its
+captured pid can come back contaminated by stray output sharing the same pty channel, a
+failure mode this codebase's `executor.py` already documents and partially works around). A
+not-fully-killed `tcpdump` from one round then kept writing into the exact file the next
+round tried to read.
+
+Confirmed directly: an isolated repro showed spoofed-source traffic captures cleanly on a
+virgin network (the network/kernel path was never the problem); the same traffic sent across
+a multi-round campaign on one persistent network reproduced 0-packet captures starting at
+the exact round message contamination first appeared.
+
+Fix: every capture now gets its own unique filename (a monotonic per-process counter), and
+`stop_capture()` gained a `pkill -f` fallback scoped to that unique path, correct even if the
+tracked pid is bad. Two callers that intentionally read a fixed "whatever this host last
+captured" path (`harness.py`'s pcap preservation, `executor.py`'s `FORENSIC_CAPTURE`) were
+preserved by mirroring each real capture there too. **Verified**: 4 consecutive rounds
+against 4 distinct spoofed addresses on one persistent network all captured cleanly
+(17/17 packets each), zero leaked processes.
+
+### 2. `tcp_syn_flood`'s traffic generator was hitting the wrong rate, for two compounding reasons
+
+Root cause, found by analyzing the real N=15 pcaps directly: only 3/15 trials landed in
+`RuleBasedSynFloodDetector`'s narrow `[15.0, 20.0)` packets/sec window; 5/15 over-shot into
+`dos_flood`'s territory (35-41 pps), 6/15 under-shot into `brute_force`'s (4-15 pps). Two real
+bugs, not one: (a) `time.sleep(fixed)` applied *after* a variable-cost `connect()` call meant
+the achieved rate silently depended on how expensive each individual connect happened to be --
+not constant even on one VM; (b) an initial fix attempt (retarget the sleep assuming a refused
+connect puts two packets, SYN and RST, on the wire) was live-tested and **falsified**:
+`FeatureAggregator` groups packets into strictly directional flows, so the detector's own flow
+never sees the target's separate reply -- packets/sec is 1:1 with attempts/sec, not 2:1.
+
+Fix: a deadline-based scheduler (each iteration computes its own absolute deadline up front and
+sleeps only the remainder, absorbing `connect()`'s real cost instead of adding to it) targeting
+the correct 17.5 attempts/sec. **Verified live, in two stages**: the scheduler alone (before
+correcting the rate) measured 8.82-8.84 attempts/sec across 6 consecutive trials -- a far
+tighter spread than any fixed-sleep version ever produced, confirming the mechanism; with the
+corrected target, all 6 trials measured 17.58-17.61 packets/sec and were **correctly detected
+as `tcp_syn_flood` every single time** (was 3/15 = 20% in the reported N=15 run).
+
+### 3. `THROTTLE` was silently defaulting to TCP for every real attack, not just `icmp_ping_flood`
+
+Root cause: `RealMininetDefenseEnv._execute_and_verify()` built its `DefenseDecision` with an
+**empty** `context`. `executor.execute()`'s `THROTTLE` branch reads
+`context["beliefs"]["observed_features"]["protocol"]` to pick a protocol-aware hashlimit rule,
+defaulting to `"TCP"` when that path is missing -- which it always was, for every attack.
+`executor.throttle()`'s own docstring already documents finding and fixing the underlying
+"a TCP-only rule can never match ICMP traffic" bug, but the fix was never wired through this
+specific caller, so real `THROTTLE` calls for `icmp_ping_flood` (the one `THROTTLE`-preferred
+attack that isn't TCP) kept installing a rule that could never match its traffic, while still
+reporting "success".
+
+Fix: populate `context` with the real detected protocol from the threat event's own observed
+features. **Verified end-to-end**: a live repro using the real `_observe_scenario ->
+_execute_and_verify -> _preferred_action_verified` path showed `response_verified=False`
+before the fix and `=True` after it, on the same real attack traffic, installing a genuinely
+ICMP-matching rule (confirmed directly against `iptables -L INPUT -n -v`). This is the exact,
+sole cause of `icmp_ping_flood`'s reported 0% verified-response rate at 15/15 trials -- a real,
+now-fixed system weakness, not VM-timing noise as originally hypothesized.
+
+### 4. `dos_flood`'s Suricata rule used a `threshold` type that never fires for UDP in this environment
+
+Root cause, found by testing the rule in isolation against real captured pcaps: Suricata
+7.0.3's `type threshold` never once emitted an alert for a UDP flow here, confirmed with a
+count far below what the traffic actually contained (10 required, 200+ available, 0 alerts,
+`detect.alerts_suppressed=1`) -- and confirmed the same failure held for both `track by_dst`
+and `track by_src`. `type limit` was tested the identical way and fired reliably across four
+separate real pcaps. TCP-based `type threshold` (the existing `reconnaissance_port_scan` rule)
+was separately confirmed still working, so this is a UDP-flow-specific Suricata behavior in
+this environment, not a general defect -- disclosed here as a real, found tool limitation, and
+every UDP-based `threshold` rule in the ruleset now uses `type limit`.
+
+### 5. `lab.rules` covered only 5 of 17 attacks -- and a second bug meant even a fix wouldn't have deployed
+
+Beyond the missing signatures themselves, a second, compounding bug was found while fixing
+this: `config/suricata/lab.rules` (the repo copy) already had draft signatures for 10 of the
+missing attacks from an earlier session, but the actual runtime copy Suricata reads from (a
+separate, un-tracked deployment path on the VM) was never updated to match -- so every
+evaluation to date, including this document's own N=15 run, silently tested against the
+original 5-signature version regardless of what the repo said. This document's own earlier
+text ("lab.rules was never updated for the 12 attacks added since") was itself an incomplete
+diagnosis as a result.
+
+Fix: wrote real signatures for the 11 attacks lab.rules didn't yet correctly cover, with every
+port, direction, and size/content threshold measured directly from this project's own real
+captured N=15 pcaps -- including confirming `credential_replay`'s exact real payload
+(`"TOKEN=stale-session-abc123"`) and `dns_tunneling_exfiltration`'s (`"QQQQ"`) via direct
+packet inspection, and each direction-reversed attack against the registry's own documented
+reversed-direction list -- then replaced the stale deployed copy and re-synced the repo copy
+to match. **Verified against the full 255-pcap N=15 dataset**: lab-ruleset accuracy
+**27.1% -> 87.45%**, true-positive rate **22.5% -> 86.67%**, false-positive rate unchanged at a
+clean **0.0%**. ET-Open's own numbers shifted too in this same re-run (accuracy 67.8% -> 83.53%,
+FPR 20.0% -> 26.67%) -- a real, disclosed change from the same underlying re-evaluation, not
+something this fix touched directly.
+
+15 of 17 conditions now score 15/15 (or 12/15 for `tcp_syn_flood`, matching item 2's fix
+above); the two exceptions are fully explained and are not signature defects:
+- **`credential_replay` (7/15)**: every miss has a completely empty, unreadable pcap
+  (confirmed directly -- `rdpcap` raises "No data could be read" on all 8), this project's own
+  already-documented capture flakiness. On the 7 trials with real data, the signature fires
+  7/7.
+- **`c2_beaconing` (0/15)**: every trial's pcap is truncated mid-write at the last packet
+  (confirmed directly across 6 trials, Suricata's own "truncated dump file" error each time) --
+  a real, newly-found, separate capture-pipeline bug. Disclosed here, not chased further in
+  this pass: it surfaced while fixing the six originally-reported bugs and is a seventh, out of
+  that original scope.
+
+### 6. A real reward asymmetry was giving PPO less reason to avoid two specific false positives
+
+Root cause, found by re-reading the PPO seed-robustness sweep's own results (above) rather
+than a new run: both non-converging seeds' only mistake was a false-positive-style action on
+`normal` traffic -- seed 17 chose `THROTTLE`, seed 55 chose `DECOY` -- never a missed attack.
+`calculate_reward()`'s `normal`-traffic branch applies an extra `service_disruption` penalty on
+top of the base false-positive penalty, but **only when the wrong action was specifically
+`ISOLATE`** -- every other wrong action on normal traffic (`THROTTLE`, `DECOY`,
+`BLOCK_SOURCE`, ...) was penalized identically regardless of which one, for no principled
+reason tied to those actions being less disruptive. This gave the optimizer strictly less
+gradient to avoid `THROTTLE`/`DECOY`-on-normal specifically than to avoid `ISOLATE`-on-normal
+-- and the two real failures were, precisely, `THROTTLE` and `DECOY`.
+
+Fix: apply `service_disruption` to every non-`ALLOW` action on normal traffic, not only
+`ISOLATE` (which keeps its own additional `unnecessary_isolation` term on top). Applied
+identically in both the synthetic and real-Mininet reward calculations for consistency. The
+existing live PPO regression test still converges at the project's development seed under the
+new reward shape, and the full test suite is green. **Verified with a fresh, full 10-seed
+sweep**: fully-converged rate improved from 8/10 to **9/10** (Wilson 95% CI widened to
+[59.6%, 98.2%] as the point estimate rose) -- a real, measurable improvement, reported
+honestly rather than as a full fix: seed 17 still fails, with the identical mistake
+(`THROTTLE` instead of `ALLOW` on `normal`) as before, suggesting some additional,
+seed-specific brittleness this fix did not reach. Full details in the "PPO training
+seed-robustness" section above.
 
 ## Limitations
 
