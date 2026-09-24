@@ -342,18 +342,51 @@ gaps in what was *tested* or *documented*, not defects in what *ran*.
 
 **A real, disclosed limitation on the deployed model, not a data-integrity issue:**
 the PPO training recipe's own seed-robustness was found to be weaker than first
-believed -- a 6-seed sweep showed 4 of 6 seeds failing to converge every scenario to
-its registered `preferred_action` at the recipe then in use. The recipe was fixed
-(architecture and rollout-size changes; see `simulation/train_ppo.py`'s own comment)
-and re-validated across a 10-seed sweep (8 of 10 fully converge). The model deployed
-for this evaluation's own run was retrained with that corrected recipe before this
-harness run started, and independently re-verified (17/17 scenarios) immediately
-before launch.
+believed -- an earlier 6-seed sweep showed 4 of 6 seeds failing to converge every
+scenario to its registered `preferred_action` at the recipe then in use. The recipe was
+fixed (architecture and rollout-size changes; see `simulation/train_ppo.py`'s own
+comment) and formally re-validated with error bars (see "PPO training seed-robustness"
+below); the model deployed for this evaluation's own run was retrained with that
+corrected recipe before this harness run started, and independently re-verified
+(17/17 scenarios) immediately before launch.
 
 This project treats a systematically-found-and-fixed defect as a methodology
 strength worth stating plainly, not a finding to omit: the alternative -- an external
 reviewer or replicator finding one of these independently -- would cost far more
 credibility than disclosing them here does.
+
+## PPO training seed-robustness
+
+The recipe fix above was validated on a single seed at the time -- not itself a
+resolved claim of robustness. `src/iot_defense/evaluation/ppo_seed_robustness.py`
+formalizes that check: it trains 10 independent models at the exact corrected recipe
+(`net_arch=[64,64]`, `ent_coef=0.01`, `n_steps=170`, `batch_size=170`, `lr=0.001`,
+`timesteps=25500`), varying only the seed (`1, 2, 3, 7, 13, 17, 42, 55, 88, 99`), and
+checks each one's convergence to every registered `preferred_action` the same way this
+project's own PPO regression test does -- reporting the aggregate rate with a Wilson CI
+rather than a single anecdote.
+
+**Results (2026-09-24):**
+
+| Seeds tested | Fully converged | Rate | 95% CI |
+|---|---|---|---|
+| 10 | 8 | 80.0% | (49.0%, 94.3%) |
+
+**Both failures were the same kind of mistake, not two different ones**: seed 17 chose
+`THROTTLE` instead of `ALLOW` on `normal` traffic, and seed 55 chose `DECOY` instead of
+`ALLOW` on `normal` traffic -- both are false-positive-style errors on the *no-attack*
+case, not a missed or misclassified attack. Every one of the 10 seeds converged
+correctly on every real attack scenario; the recipe's residual instability, at this
+sample size, is specifically in reliably learning restraint on `normal` traffic, not in
+learning to respond to attacks. The wide CI (49-94%) is itself an honest, disclosed
+result of testing at n=10 -- it does not support a claim tighter than "most seeds
+converge fully; this specific instability mode recurs in roughly a fifth of runs," and
+this document does not claim more than that. The model actually deployed for this
+evaluation's own harness run was independently re-verified (17/17) immediately before
+that run started, so the deployed checkpoint itself is not in the two failing seeds --
+but a paper citing this system's PPO arm should cite this 80% (49-94% CI) figure, not
+the single deployed checkpoint's own clean verification, as the honest statement of
+training-recipe reliability.
 
 ## Evaluating decision divergence directly (not just on real captured traffic)
 
