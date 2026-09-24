@@ -188,7 +188,21 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             confidence=threat_event.confidence,
             threat_score=threat_event.threat_score,
             policy_name="RealMininetDefenseEnv",
-            context={},
+            # Real, found-not-assumed bug: an empty context here made
+            # executor.execute()'s THROTTLE branch -- which reads
+            # context["beliefs"]["observed_features"]["protocol"] to pick
+            # a protocol-aware hashlimit rule -- always fall back to its
+            # "TCP" default, regardless of the real detected protocol.
+            # icmp_ping_flood is the one THROTTLE-preferred attack that
+            # isn't TCP, so every real THROTTLE call for it silently
+            # installed a TCP-only rule that can never match ICMP traffic,
+            # while still reporting "success" (no iptables error) -- the
+            # exact failure mode throttle()'s own docstring already
+            # describes as found-and-fixed, except the fix was never wired
+            # through this specific caller. Populating the real protocol
+            # here, from this threat_event's own already-observed
+            # features, is that missing wire, not a new mechanism.
+            context={"beliefs": {"observed_features": {"protocol": threat_event.features.get("protocol", "TCP")}}},
         )
         result = self.executor.execute(decision)
         outcome: dict[str, Any] = {"status": result.status}

@@ -7,12 +7,28 @@ and are covered here.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from iot_defense.defense.decision import DefenseAction
 from iot_defense.defense.ppo_real_env import RealMininetDefenseEnv
+from iot_defense.detection.threat_event import ThreatEvent
 
 
 def _env():
     return RealMininetDefenseEnv(episode_length=4)
+
+
+def _threat_event(protocol: str, attack_type: str = "icmp_ping_flood") -> ThreatEvent:
+    return ThreatEvent.from_result(
+        source_ip="10.0.0.100",
+        destination_ip="10.0.0.10",
+        attack_type=attack_type,
+        threat_score=0.9,
+        confidence=0.85,
+        detection_reason="test fixture",
+        features={"packet_count": 40, "protocol": protocol},
+        detector_name="RuleBasedIcmpFloodDetector",
+    )
 
 
 def test_instantiation_does_not_touch_mininet():
@@ -109,6 +125,41 @@ def test_data_exfiltration_rewards_verified_isolation_over_allow():
     )
     allow, _ = env.calculate_reward("data_exfiltration", DefenseAction.ALLOW, {"status": "success"})
     assert isolate > allow
+
+
+def test_execute_and_verify_wires_the_real_detected_protocol_into_throttle():
+    """Regression test for a real bug: _execute_and_verify used to build
+    its DefenseDecision with an empty context, so executor.execute()'s
+    THROTTLE branch (which reads context["beliefs"]["observed_features"]
+    ["protocol"]) always fell back to its "TCP" default -- silently
+    installing a TCP-only hashlimit rule that can never match ICMP
+    traffic, for every real ICMP attack (icmp_ping_flood, the one
+    THROTTLE-preferred attack that isn't TCP), while still reporting
+    "success". Found via a live Mininet repro showing icmp_ping_flood's
+    own verified-response rate stuck at 0% across 15 real trials."""
+    env = _env()
+    env.net = MagicMock()
+    env.executor = MagicMock()
+    env.executor.execute.return_value = MagicMock(status="success", details={})
+    threat_event = _threat_event(protocol="ICMP")
+
+    env._execute_and_verify(DefenseAction.THROTTLE, threat_event)
+
+    decision = env.executor.execute.call_args[0][0]
+    assert decision.context["beliefs"]["observed_features"]["protocol"] == "ICMP"
+
+
+def test_execute_and_verify_preserves_tcp_protocol_too():
+    env = _env()
+    env.net = MagicMock()
+    env.executor = MagicMock()
+    env.executor.execute.return_value = MagicMock(status="success", details={})
+    threat_event = _threat_event(protocol="TCP", attack_type="brute_force")
+
+    env._execute_and_verify(DefenseAction.THROTTLE, threat_event)
+
+    decision = env.executor.execute.call_args[0][0]
+    assert decision.context["beliefs"]["observed_features"]["protocol"] == "TCP"
 
 
 def test_unregistered_scenario_raises_instead_of_silently_scoring():
