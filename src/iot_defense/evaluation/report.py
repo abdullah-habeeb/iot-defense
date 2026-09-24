@@ -38,6 +38,29 @@ def _rate(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0.0
 
 
+def _wilson_ci(numerator: int, denominator: int, z: float = 1.96) -> tuple[float, float] | None:
+    """95% Wilson score confidence interval for a binomial proportion --
+    added after a review found this evaluation reported bare
+    percentages with no uncertainty measure at all, misleading at the
+    small per-condition sample sizes this harness actually uses (a
+    single trial swings a per-condition rate by an entire
+    1/trials_per_condition step). Wilson, not the naive normal
+    approximation (p +/- z*sqrt(p(1-p)/n)), because the naive interval
+    is a known poor approximation exactly in this small-n, extreme-p
+    regime (it can even fall outside [0, 1]) -- see Wilson (1927),
+    the standard fix and what most modern statistics texts recommend
+    for binomial proportions at small n.
+    """
+    if denominator == 0:
+        return None
+    p = numerator / denominator
+    n = denominator
+    denom = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    margin = (z / denom) * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5)
+    return (round(max(0.0, center - margin), 4), round(min(1.0, center + margin), 4))
+
+
 def summarize_by_arm(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """One row of metrics per arm, across every trial and condition.
 
@@ -57,13 +80,17 @@ def summarize_by_arm(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     for arm, sub in by_arm.items():
         n = len(sub)
         attack_rows = [r for r in sub if r["ground_truth_attack_type"] != "normal"]
+        detection_correct_n = sum(r["detection_correct"] for r in sub)
+        response_verified_n = sum(1 for r in sub if r["response_verified"])
+        matches_preferred_n = sum(1 for r in attack_rows if r["matches_preferred_action"])
         summary[arm] = {
             "trials": n,
-            "detection_accuracy": _rate(sum(r["detection_correct"] for r in sub), n),
-            "response_verified_rate": _rate(sum(1 for r in sub if r["response_verified"]), n),
-            "matches_preferred_action_rate_on_attacks": _rate(
-                sum(1 for r in attack_rows if r["matches_preferred_action"]), len(attack_rows)
-            ),
+            "detection_accuracy": _rate(detection_correct_n, n),
+            "detection_accuracy_ci95": _wilson_ci(detection_correct_n, n),
+            "response_verified_rate": _rate(response_verified_n, n),
+            "response_verified_rate_ci95": _wilson_ci(response_verified_n, n),
+            "matches_preferred_action_rate_on_attacks": _rate(matches_preferred_n, len(attack_rows)),
+            "matches_preferred_action_rate_on_attacks_ci95": _wilson_ci(matches_preferred_n, len(attack_rows)),
             "execution_ok_rate": _rate(sum(r["execution_ok"] for r in sub), n),
             "mean_detection_latency_ms": round(sum(r["detection_latency_ms"] for r in sub) / n, 1) if n else 0.0,
         }
@@ -82,10 +109,14 @@ def summarize_by_condition(rows: list[dict[str, Any]], arm: str) -> dict[str, di
     result: dict[str, dict[str, Any]] = {}
     for cond, cond_rows in by_cond.items():
         n = len(cond_rows)
+        detection_correct_n = sum(r["detection_correct"] for r in cond_rows)
+        response_verified_n = sum(1 for r in cond_rows if r["response_verified"])
         result[cond] = {
             "trials": n,
-            "detection_accuracy": _rate(sum(r["detection_correct"] for r in cond_rows), n),
-            "response_verified_rate": _rate(sum(1 for r in cond_rows if r["response_verified"]), n),
+            "detection_accuracy": _rate(detection_correct_n, n),
+            "detection_accuracy_ci95": _wilson_ci(detection_correct_n, n),
+            "response_verified_rate": _rate(response_verified_n, n),
+            "response_verified_rate_ci95": _wilson_ci(response_verified_n, n),
         }
     return result
 
@@ -117,11 +148,20 @@ def render_markdown(
     n_conditions = len({r["condition"] for r in rows})
     n_arms = len({r["arm"] for r in rows})
 
+    def _fmt_ci(ci: tuple[float, float] | None) -> str:
+        return f"[{ci[0] * 100:.1f}, {ci[1] * 100:.1f}]" if ci else "--"
+
     lines = [
         "# Evaluation results",
         "",
         f"Source: `{source_path}` -- {len(rows)} rows from {n_trials} trials x "
         f"{n_conditions} conditions x {n_arms} arms, all against real Mininet traffic.",
+        "",
+        "All rates are proportions of a finite trial count; the bracketed range next to",
+        "each one is a 95% Wilson score confidence interval, not a second measurement --",
+        "at this harness's own real trial counts a single trial can swing a reported",
+        "percentage by a full step, and the interval is how wide that uncertainty",
+        "genuinely is, not just the point estimate.",
         "",
         "## Comparison summary",
         "",
@@ -133,20 +173,24 @@ def render_markdown(
             continue
         s = arm_summary[arm]
         lines.append(
-            f"| {ARM_LABELS[arm]} | {s['detection_accuracy'] * 100:.1f}% | "
-            f"{s['response_verified_rate'] * 100:.1f}% | "
-            f"{s['matches_preferred_action_rate_on_attacks'] * 100:.1f}% | "
+            f"| {ARM_LABELS[arm]} | {s['detection_accuracy'] * 100:.1f}% {_fmt_ci(s.get('detection_accuracy_ci95'))} | "
+            f"{s['response_verified_rate'] * 100:.1f}% {_fmt_ci(s.get('response_verified_rate_ci95'))} | "
+            f"{s['matches_preferred_action_rate_on_attacks'] * 100:.1f}% {_fmt_ci(s.get('matches_preferred_action_rate_on_attacks_ci95'))} | "
             f"{s['mean_detection_latency_ms']:.0f} ms |"
         )
     lines += [
         "",
         "## Per-condition breakdown (Stackelberg -- the policy actually deployed)",
         "",
-        "| Condition | Detection accuracy | Verified response rate |",
-        "|---|---|---|",
+        "| Condition | Trials | Detection accuracy | Verified response rate |",
+        "|---|---|---|---|",
     ]
     for cond, s in condition_summary.items():
-        lines.append(f"| `{cond}` | {s['detection_accuracy'] * 100:.1f}% | {s['response_verified_rate'] * 100:.1f}% |")
+        lines.append(
+            f"| `{cond}` | {s['trials']} | "
+            f"{s['detection_accuracy'] * 100:.1f}% {_fmt_ci(s.get('detection_accuracy_ci95'))} | "
+            f"{s['response_verified_rate'] * 100:.1f}% {_fmt_ci(s.get('response_verified_rate_ci95'))} |"
+        )
 
     if suricata_summary:
         lines += [
