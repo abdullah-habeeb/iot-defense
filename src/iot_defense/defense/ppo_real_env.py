@@ -286,6 +286,16 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             else:
                 components["false_positive_intervention"] = config.false_positive_intervention
                 reward += config.false_positive_intervention
+                # Mirrors ppo_env.DefenseDecisionEnv's own real, found-not-
+                # assumed fix: service_disruption applies to every wrong
+                # action on normal traffic, not only ISOLATE -- an
+                # asymmetry that gave the optimizer less reason to avoid
+                # THROTTLE/DECOY-on-normal specifically than ISOLATE, and a
+                # real 10-seed sweep of the synthetic env found both
+                # non-converging seeds' one mistake was exactly a
+                # THROTTLE-or-DECOY false positive on normal.
+                components["service_disruption"] = config.service_disruption
+                reward += config.service_disruption
                 if action == DefenseAction.ISOLATE:
                     components["unnecessary_isolation"] = config.unnecessary_isolation
                     reward += config.unnecessary_isolation
