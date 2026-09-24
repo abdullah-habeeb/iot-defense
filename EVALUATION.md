@@ -316,25 +316,81 @@ measurement noise as a security finding. The module now retries once (mirroring
 **The fixed-mode control is unambiguous**: once `BLOCK_SOURCE` takes effect, the same
 attacker gets zero packets through for every subsequent round, for real, not assumed.
 
-**The rotate-mode result is the real finding**: a second, entirely fresh source
-(`.121`) reached the sensor and was independently detected and blocked, exactly like
-the first. Because `BLOCK_SOURCE` installs `iptables -A INPUT -s <source_ip> -d
-<target_ip> -j DROP` (confirmed by reading `executor.py`'s own implementation, not
-assumed), it is inherently scoped to the *claimed* IP in the packet header, not the
-physical attacker -- so an attacker able to spoof or genuinely rotate source addresses
-is not contained by this response at all, only whichever single address it has
-already been caught using. Two independent rounds already demonstrate this cleanly;
-the third source's result was inconclusive (flagged, not discarded), and a larger
-future run should push past this VM's own capture-reliability ceiling to get a
-cleaner distinct-sources-per-campaign count.
+**At this small scale, the rotate-mode result looked like a real finding**: a second,
+entirely fresh source (`.121`) reached the sensor and was independently detected and
+blocked, exactly like the first. Because `BLOCK_SOURCE` installs `iptables -A INPUT -s
+<source_ip> -d <target_ip> -j DROP` (confirmed by reading `executor.py`'s own
+implementation, not assumed), it is inherently scoped to the *claimed* IP in the packet
+header, not the physical attacker -- so an attacker able to spoof or genuinely rotate
+source addresses would not be contained by this response at all, only whichever single
+address it has already been caught using. Two rounds is not much evidence for that,
+though, and the scaled-up run below shows exactly why this initial read needed to be
+treated with real caution rather than reported as confirmed.
 
-**This is not a flaw unique to this project's implementation** -- any purely
+### Scaled-up results: a bug found, fixed, and a weaker (not stronger) finding
+
+The 5-round run above was explicitly flagged as too small to be a real headline finding
+on its own, so it was scaled to 30 rounds per mode (real, ~36-minute Mininet run). That
+run did not produce the "dozens of clean data points" it was run to get -- and, in
+diagnosing why, found a real bug in this evaluation module itself. Reading the raw
+per-round rows directly (not just the aggregate print) showed rotate mode selecting
+source `.121` for **all 28 of the last 28 rounds** rather than rotating through the
+pool's other addresses. `run_campaign()`'s selection was `remaining = [ip for ip in
+_SOURCE_POOL if ip not in blocked_sources]; source_ip = remaining[0]` -- always the
+*first* not-yet-blocked address. Because `.121` was never detected (so never blocked),
+it stayed first-in-line and kept getting re-selected instead of the campaign moving on.
+A 30-round "rotate" campaign was, in practice, a 2-source campaign with 28 rounds spent
+retrying the one address that had already failed once.
+
+This was fixed (`src/iot_defense/evaluation/adaptive.py`, commit `1902f99`): sources
+whose capture comes back unreliable are now excluded from future selection, and the
+address pool was expanded from 6 to 21 so a real dozens-of-rounds campaign can exercise
+dozens of distinct sources. A new regression test
+(`test_rotate_mode_skips_a_source_whose_capture_is_unreliable_instead_of_retrying_it_forever`)
+locks this in. The fixed code was then re-run for real (25 rounds/mode, ~35 minutes),
+and this time genuinely cycled through 20 distinct spoofed addresses (`.121`-`.140`,
+confirmed directly from the log -- never repeating one until the pool was exhausted).
+
+**The real result, once the selection bug stopped masking it, is a materially different
+and more important finding than the original 5-round run suggested**: every one of the
+20 distinct spoofed addresses produced **zero captured packets**, on both the initial
+attempt and the built-in retry (40 real zero-packet observations total), in *both* the
+30-round and the 25-round run. The only source that ever produced real, capturable
+traffic in either scaled-up run was `.100` -- the physical attacker host's own real,
+unspoofed address. `net.ipv4.conf.all.rp_filter` on the VM itself is `2` (loose mode,
+which should not by itself explain this, since the whole `10.0.0.0/24` range is locally
+routed), so the specific mechanism blocking spoofed-source capture was checked at the
+host level and not found there; whether it is a per-namespace Mininet setting, an OVS
+behavior, or something else was not further isolated in this pass, and this document
+does not claim to have root-caused it.
+
+**This means the original claim needs to be corrected, not reinforced, and this
+document says so plainly rather than quietly keeping the more dramatic earlier framing.**
+The one successful spoofed capture that grounded the original "a rotating attacker
+evades per-source blocking" finding (`.121`, 17 packets, in the very first 5-round run)
+could not be reproduced even once across 40 further real attempts spanning 20 distinct
+addresses in two independent, larger, bug-fixed runs. The honest conclusion this
+evaluation module currently supports is **not** "source rotation was demonstrated to
+evade `BLOCK_SOURCE`" -- it is "one unreplicated pilot observation suggested source
+rotation could evade `BLOCK_SOURCE`, and two much larger follow-up attempts, run
+specifically to strengthen that claim, could not reproduce it, instead surfacing that
+this module's spoofed-traffic generation is not reliably producing capturable packets
+in this environment." The structural argument (`BLOCK_SOURCE` is identity-based, scoped
+to the packet's claimed source IP, not the physical sender -- verified directly from
+`executor.py`) still stands as a reasoned, architectural point independent of this
+measurement. But this project no longer claims real, repeated Mininet evidence that a
+rotating attacker gets through -- it has one old, unreplicated data point and a newer,
+larger effort that could not confirm it. Root-causing why spoofed traffic is not being
+captured, and re-running once that is fixed, is a real, scoped next step, deliberately
+not chased further in this pass given the real time already spent on it.
+
+**This is not a flaw unique to this project's response-execution design** -- any purely
 identity-based (as opposed to behavior-based) containment has the same structural
-limit. It is, however, a real, now-measured gap between "the registered
+limit in principle. It is, however, a real, disclosed gap between "the registered
 `preferred_action` was executed and verified" (this evaluation's other results) and
-"the attacker is actually contained" (a stronger claim this module shows does not
-automatically follow), worth stating plainly rather than assuming BLOCK_SOURCE's
-per-event success generalizes to real persistence.
+"the attacker is actually contained against a rotating identity" (a stronger claim this
+module was built to test, and -- honestly reported -- has not yet demonstrated at any
+scale beyond one unreplicated pilot round).
 
 ## Disclosed defects found during a systematic review, and whether they affected reported results
 
