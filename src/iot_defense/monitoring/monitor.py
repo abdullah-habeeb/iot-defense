@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import itertools
 import os
+import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
 
 from scapy.all import Packet, rdpcap
+
+_PID_RE = re.compile(r"^\d+$")
 
 
 class PacketMonitor:
@@ -16,6 +21,14 @@ class PacketMonitor:
     def __init__(self, base_dir: str | Path = "/tmp/iot-defense") -> None:
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        # A monotonic counter, not a fixed per-host filename: found via a
+        # real repro (evaluation/adaptive.py's multi-round campaigns) that
+        # reusing the same capture_path/log_path for every call on a given
+        # host lets a not-yet-terminated tcpdump from an earlier round keep
+        # writing into the very file a later round is about to read,
+        # corrupting or zeroing that round's capture. A zombie process from
+        # one round no longer has anywhere to collide with a later one.
+        self._session_counter = itertools.count()
 
     def capture_host_packets(self, net: Any, host_name: str, packet_limit: int = 25, capture_seconds: int = 8) -> str:
         """Launch tcpdump on a host interface and return the capture filepath."""
@@ -60,10 +73,9 @@ class PacketMonitor:
         """
         host = net.get(host_name)
         interface = host.defaultIntf().name
-        capture_path = str(self.base_dir / f"{host_name}_capture.pcap")
-        log_path = f"/tmp/{host_name}_tcpdump.log"
-        if os.path.exists(capture_path):
-            os.remove(capture_path)
+        session_id = f"{os.getpid()}_{next(self._session_counter)}"
+        capture_path = str(self.base_dir / f"{host_name}_capture_{session_id}.pcap")
+        log_path = f"/tmp/{host_name}_tcpdump_{session_id}.log"
 
         # `disown` after backgrounding, not just output redirection: when
         # stop_capture() has to SIGTERM this process (its packet limit
@@ -111,15 +123,45 @@ class PacketMonitor:
         """
         host = net.get(session["host_name"])
         log_path = session["log_path"]
+        capture_path = session["capture_path"]
         completed = self._wait_for_log_marker(host, log_path, "packets captured", timeout=completion_timeout)
-        if not completed and session.get("pid"):
-            pid = session["pid"]
-            host.cmd(f"kill -TERM {pid} 2>/dev/null")
+        if not completed:
+            # host.cmd()'s return value for the original launch command has
+            # been observed, in a real repro, to come back contaminated
+            # with stray output from an unrelated prior command sharing
+            # this host's pty channel -- a corrupted/multi-line "pid" then
+            # makes `kill -TERM {pid}` a no-op against the real tcpdump,
+            # which keeps running (see the module docstring's own capture_
+            # path/log_path uniqueness fix, the other half of this same
+            # failure). pkill -f against this session's own unique
+            # capture_path is correct regardless of whether pid is trustworthy,
+            # since no other process (this run's or any concurrent one) will
+            # ever share that exact, once-only filename. The raw pid kill
+            # stays as a first attempt (cheaper, no process-table scan) with
+            # this as the real fallback, not the only mechanism.
+            pid = session.get("pid", "")
+            if _PID_RE.match(pid):
+                host.cmd(f"kill -TERM {pid} 2>/dev/null")
+            host.cmd(f"pkill -TERM -f {capture_path} 2>/dev/null")
             completed = self._wait_for_log_marker(host, log_path, "packets captured", timeout=3.0)
             if not completed:
-                host.cmd(f"kill -KILL {pid} 2>/dev/null")
+                if _PID_RE.match(pid):
+                    host.cmd(f"kill -KILL {pid} 2>/dev/null")
+                host.cmd(f"pkill -KILL -f {capture_path} 2>/dev/null")
                 time.sleep(0.3)
-        return session["capture_path"]
+        # Some callers (harness.py's _preserve_pcap, executor.py's
+        # FORENSIC_CAPTURE) intentionally read from the conventional,
+        # host-fixed path rather than this session's own unique one --
+        # both predate per-session uniqueness and document relying on it
+        # being "the latest capture" for this host. Keep that contract:
+        # mirror this session's real capture there too, best-effort (a
+        # capture that never actually produced a file, e.g. a fully
+        # SIGKILL'd empty run, leaves the fixed path exactly as absent as
+        # it always would have been -- not a new failure mode).
+        if os.path.exists(capture_path):
+            conventional_path = str(self.base_dir / f"{session['host_name']}_capture.pcap")
+            shutil.copy2(capture_path, conventional_path)
+        return capture_path
 
     def _wait_for_log_marker(self, host: Any, log_path: str, marker: str, timeout: float, poll_interval: float = 0.05) -> bool:
         """Poll a log file for a marker string without blocking longer than timeout."""
