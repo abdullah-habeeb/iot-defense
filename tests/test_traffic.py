@@ -180,3 +180,32 @@ def test_generate_brute_force_traffic_stops_listener_even_if_attack_command_rais
         pass
 
     assert any(c.startswith("kill ") for c in sensor.commands), "listener must be stopped even on failure"
+
+
+def test_syn_flood_targets_the_real_detection_window_not_the_wrong_2x_theory():
+    """Regression test for two real bugs found in this pacing (see the
+    generator's own docstring): a fixed post-connect() sleep let real,
+    variable connect() overhead silently drag the achieved rate around,
+    and an earlier theory (SYN+RST per attempt means the target rate
+    should be halved) was live-verified and falsified -- packets_per_second
+    is 1:1 with attempts/sec for this one-directional flow, not 2:1.
+    Live-verified separately (6/6 real Mininet trials measured
+    17.58-17.61 packets/sec, all correctly detected as tcp_syn_flood);
+    this test guards the constants a future edit could silently break
+    without needing Mininet for every change."""
+    net = FakeNetwork()
+    result = TrafficGenerator().generate_syn_flood_mininet_traffic(net, duration_seconds=14)
+    attacker = net.get("attacker")
+    command = attacker.commands[-1]
+
+    assert "interval = 0.05714285714285714" in command, (
+        "interval must target 17.5 attempts/sec (1/17.5), the real detection "
+        "window's center -- not a value derived from the falsified SYN+RST "
+        "2x-packet theory"
+    )
+    assert "range(245)" in command, "14s / (1/17.5) attempts must be scheduled up front, not open-ended"
+    assert "deadline = start + (i + 1) * interval" in command, (
+        "must use a deadline-based scheduler (absorbs connect() overhead into "
+        "the interval) rather than a fixed post-connect() sleep"
+    )
+    assert result["target"] == "10.0.0.10"
