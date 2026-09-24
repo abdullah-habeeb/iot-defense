@@ -54,7 +54,12 @@ from iot_defense.defense.ppo_real_env import ATTACKER_IP, TARGET_IP, RealMininet
 from iot_defense.simulation.traffic import TrafficGenerator
 
 _ATTACK_KEY = "replay_attack"
-_SOURCE_POOL: tuple[str, ...] = (ATTACKER_IP, "10.0.0.121", "10.0.0.122", "10.0.0.123", "10.0.0.124", "10.0.0.125")
+# 21 addresses (.100 plus 20 spoofed ones) -- expanded from the original 6 so a
+# real "dozens of rounds" rotate-mode campaign can exercise dozens of distinct
+# sources, not just retry the same handful. .10 (sensor), .200 (decoy) and the
+# real Mininet hosts already used elsewhere in this project are deliberately
+# avoided.
+_SOURCE_POOL: tuple[str, ...] = (ATTACKER_IP,) + tuple(f"10.0.0.{i}" for i in range(121, 141))
 
 Mode = Literal["fixed", "rotate"]
 
@@ -163,18 +168,34 @@ def run_campaign(
     """
     policy = StackelbergDefensePolicy()
     blocked_sources: set[str] = set()
+    # A source whose capture came back unreliable (see run_round's own
+    # capture_reliable flag) is excluded from future rotate-mode selection --
+    # found via a real 30-round run where the original "first not-yet-blocked"
+    # selection got stuck retrying a single capture-unreliable address for 28
+    # consecutive rounds instead of moving on to a fresh one. A source that was
+    # reliably captured but simply not detected (a genuine detector miss, not a
+    # capture problem) is deliberately NOT excluded here -- it still deserves a
+    # real retry, unlike a source this VM's own capture pipeline cannot observe.
+    exhausted_sources: set[str] = set()
     rows: list[dict[str, Any]] = []
     for round_num in range(rounds):
         if mode == "fixed":
             source_ip = _SOURCE_POOL[0]
         else:
-            remaining = [ip for ip in _SOURCE_POOL if ip not in blocked_sources]
-            source_ip = remaining[0] if remaining else _SOURCE_POOL[round_num % len(_SOURCE_POOL)]
+            remaining = [ip for ip in _SOURCE_POOL if ip not in blocked_sources and ip not in exhausted_sources]
+            if remaining:
+                source_ip = remaining[0]
+            else:
+                untried = [ip for ip in _SOURCE_POOL if ip not in blocked_sources]
+                source_ip = untried[round_num % len(untried)] if untried else _SOURCE_POOL[round_num % len(_SOURCE_POOL)]
         row = run_round(env, round_num, source_ip, policy, already_blocked=source_ip in blocked_sources)
         row["mode"] = mode
         if row["execution_ok"] and row["action"] == DefenseAction.BLOCK_SOURCE.value:
             blocked_sources.add(source_ip)
+        elif not row["capture_reliable"]:
+            exhausted_sources.add(source_ip)
         row["cumulative_blocked_sources"] = sorted(blocked_sources)
+        row["cumulative_exhausted_sources"] = sorted(exhausted_sources)
         rows.append(row)
         if on_row is not None:
             on_row(row)

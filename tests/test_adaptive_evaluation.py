@@ -165,3 +165,26 @@ class TestRunCampaign:
             run_campaign(env, rounds=4, mode="rotate")
 
         env.executor.restore.assert_not_called()
+
+    def test_rotate_mode_skips_a_source_whose_capture_is_unreliable_instead_of_retrying_it_forever(self):
+        """Found via a real 30-round Mininet run: the original selection
+        picked "first not-yet-blocked" and, when a source's capture came
+        back empty on both the initial attempt and the built-in retry,
+        kept re-selecting that same unreliable source every round instead
+        of moving on -- turning a 30-round rotate campaign into a 2-source
+        campaign with 28 wasted rounds. This is the regression test for
+        the fix: a source with an empty capture (never detected, so never
+        blocked) must not be selected again once it has been tried."""
+        empty_event = _threat_event("credential_replay", packet_count=0)
+        env = _fake_env(empty_event)
+        env.executor.execute.return_value = MagicMock(status="success", details={})
+        with patch("iot_defense.evaluation.adaptive.StackelbergDefensePolicy") as MockPolicy:
+            MockPolicy.return_value.decide.return_value = MagicMock(action=DefenseAction.ALLOW)
+            rows = run_campaign(env, rounds=5, mode="rotate")
+
+        sources = [row["source_ip"] for row in rows]
+        assert sources == list(_SOURCE_POOL[:5]), (
+            "every round should have moved to the next untried source instead of "
+            f"getting stuck retrying one; got {sources}"
+        )
+        assert all(row["capture_reliable"] is False for row in rows)
