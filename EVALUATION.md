@@ -516,6 +516,32 @@ brittleness beyond the reward asymmetry alone; this document does not claim to h
 what that is. The honest statement of training-recipe reliability is now 90% (CI
 59.6-98.2%), not 100% -- a real improvement, not a resolved guarantee.
 
+**A second update (2026-09-25): a follow-up attempt to fix seed 17 fully was tried,
+measured, and reverted -- reported here as a real dead end, not smoothed over.** Isolating
+seed 17 and retraining it alone at 2x and 4x the deployed timestep budget (51000, 102000)
+showed 4x reaching zero mismatches for that one seed, which looked like a real, targeted
+fix. Generalizing from that single seed turned out to be premature. A full 10-seed sweep
+at 102000 timesteps (config committed, then reverted -- see `config/policies.yaml`'s own
+comment) came back to **8/10**, not an improvement:
+
+| Recipe | Seeds tested | Fully converged | Rate | 95% CI | Failing seeds |
+|---|---|---|---|---|---|
+| A: original reward, 25500 steps | 10 | 8 | 80.0% | (49.0%, 94.3%) | 17, 55 |
+| B: fixed reward, 25500 steps | 10 | 9 | 90.0% | (59.6%, 98.2%) | 17 |
+| C: fixed reward, 102000 steps | 10 | 8 | 80.0% | (49.0%, 94.3%) | 3, 13 |
+
+Seed 17 did converge under recipe C, exactly as the isolated test predicted -- but seeds 3
+and 13, both fully converged under recipe B, newly failed under C on two scenarios
+(`rogue_beacon`, `buffer_overflow`) that had never been a problem for any seed before.
+**Quadrupling the training budget did not fix the aggregate seed-fragility; it moved which
+seeds and scenarios were most sensitive to initialization**, for four times the real
+training cost. Recipe B -- the reward fix alone, at the original 25500-timestep budget --
+is the best verified recipe found across this whole investigation, and is what
+`config/policies.yaml` and the deployed model (`models/ppo_defense.zip`, retrained under
+recipe B and independently re-verified at 17/17) now use. The honest, final statement of
+this project's PPO training-recipe reliability is recipe B's **90% (CI 59.6-98.2%)** -- not
+100%, and not improvable by training time alone based on everything tested here.
+
 ## Evaluating decision divergence directly (not just on real captured traffic)
 
 The comparison above shows rule-based, Stackelberg, and PPO choosing identical

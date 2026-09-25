@@ -1016,23 +1016,28 @@ policy:
     # ISOLATE) even though it converged correctly on every other
     # scenario -- 3000 timesteps resolved it for that 6-scenario registry.
     #
-    # Raised again, 25500 -> 102000 (4x), after a real 10-seed sweep at
-    # 25500 found 2 of 10 seeds not fully converging (both on the same
-    # false-positive-on-normal mistake, itself partly fixed separately by
-    # a reward-asymmetry fix -- see calculate_reward()'s own comment).
-    # Even after that reward fix, the worst remaining seed (17) still
-    # failed identically at 25500. Direct testing at 2x (51000) and 4x
-    # (102000) confirmed this is a training-budget issue, not a fixed
-    # limitation: 2x moved the mismatch to a different scenario
-    # (firmware_tampering) rather than eliminating it, but 4x reached
-    # zero mismatches for that same seed. A full 10-seed sweep at 102000
-    # timesteps is what this project's own EVALUATION.md reports as the
-    # real, current seed-robustness figure -- not assumed from the single
-    # seed=17 result alone.
+    # A 4x raise to 102000 was tried and reverted -- a real, disclosed
+    # dead end, not a silent rollback. After a reward-asymmetry fix (see
+    # calculate_reward()'s own comment) improved a 10-seed sweep from
+    # 8/10 to 9/10 at this same 25500 budget (only seed 17 still failing,
+    # on a false-positive-on-normal mistake), a single-seed test showed
+    # seed 17 reaching zero mismatches at 4x timesteps -- but generalizing
+    # from that one seed was premature: a full 10-seed sweep at 102000
+    # timesteps came back 8/10, not better. Seed 17 did converge, but
+    # seeds 3 and 13 -- both fine at 25500 -- newly failed on two
+    # unrelated scenarios (rogue_beacon, buffer_overflow) they had never
+    # failed on before. More training time did not fix the aggregate
+    # seed-fragility; it just moved which seeds and scenarios were most
+    # sensitive to initialization. 25500 with the fixed reward (9/10,
+    # Wilson 95% CI [59.6%, 98.2%]) is the best real recipe found so far
+    # -- kept here rather than the more expensive 102000 recipe that
+    # measurably was not better on the metric that matters. Full
+    # three-way comparison in EVALUATION.md's "PPO training
+    # seed-robustness" section.
     #
     # Genuinely read by simulation/train_ppo.py -- editing this value
     # changes what a bare `train_ppo` run actually does.
-    training_timesteps: 102000
+    training_timesteps: 25500
     # Read by train_ppo.py, floored at len(TRAINING_SCENARIOS()) there
     # regardless of what's configured here -- a shorter episode silently
     # starves the last-cycled scenario of any training signal at all (see
