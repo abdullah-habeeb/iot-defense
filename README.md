@@ -51,7 +51,7 @@ Sixteen attack types are currently registered, selectable at demo start via `--a
 
 `slow_loris` relies on `unique_source_ports` — many concurrent connections each claiming a fresh ephemeral port — a signal none of the first five attacks' detectors use. Three attacks (`dns_tunneling`, `firmware_tampering`, `rogue_beacon`) reverse traffic direction like `exfiltration` does, but with genuinely different shapes: `dns_tunneling` is many small frequent queries (the shape a naive payload-size-only exfiltration detector would miss), `firmware_tampering` is larger, less frequent pushes, and `rogue_beacon` is the same size range as `dns_tunneling` at a meaningfully higher frequency. `mqtt_flood`, `buffer_overflow`, and `replay_attack` were all originally paced into the same narrow packets-per-second gap `syn_flood` occupies (strictly between `brute_force`'s and `dos`'s own thresholds); repeated live runs found that gap genuinely too narrow for more than one attack under this project's own real Mininet timing variance, so `mqtt_flood`, `buffer_overflow`, and `replay_attack` were moved to a much wider, uncontested sub-1.0-packets-per-second rate instead — see each one's own traffic-generator docstring in `simulation/traffic.py` for the real live numbers behind that call.
 
-ML dataset generation (`ml/generate_dataset.py`) now covers all 16 registered attacks -- each of the 10 added after the original 5 reuses its own already-calibrated `AttackScenario.generate_traffic` directly rather than a second, bespoke generator, avoiding an un-synced copy of logic the live demo already tunes. `c2_beacon` is the one exception: its defining signal, `inter_arrival_cv`, is deliberately *not* in `ml/schema.py`'s `FEATURE_COLUMNS` (see "Controlled ML detection experiment" below for why), so the rule-based baseline can never correctly classify it through the CSV round-trip -- a real, documented, bounded gap, not an oversight. The **deployed** dataset/model (`data/ml/controlled_flows_6class.csv`, `models/random_forest_detector.joblib`) still only cover the original 6 classes; generating and retraining against the full 17-class registry is a real, scoped next step, not yet done.
+ML dataset generation (`ml/generate_dataset.py`) covers all 16 registered attacks -- each of the 10 added after the original 5 reuses its own already-calibrated `AttackScenario.generate_traffic` directly rather than a second, bespoke generator, avoiding an un-synced copy of logic the live demo already tunes. `c2_beacon` is the one exception: its defining signal, `inter_arrival_cv`, is deliberately *not* in `ml/schema.py`'s `FEATURE_COLUMNS` (see "Controlled ML detection experiment" below for why), so the rule-based baseline can never correctly classify it through the CSV round-trip -- a real, documented, bounded gap, not an oversight. The **deployed** dataset/model (`data/ml/controlled_flows_17class.csv`, `models/random_forest_detector.joblib`) cover the full 17-class registry.
 
 Adding a new attack means adding one `AttackScenario` entry to the registry, plus its own traffic generator and rule-based detector — not touching every dependent file by hand.
 
@@ -104,29 +104,30 @@ Two training passes exist:
 The generated models are ignored by Git. `PPODefensePolicy` fails clearly when a model is absent unless an explicit fallback policy is provided. The trained policy should not be interpreted as learning real-world attacker behaviour or general autonomous cyber defense — it is a bounded, controlled-environment demonstration.
 
 ## Controlled ML detection experiment
-A reproducible controlled dataset and Random Forest detector. The dataset-generation pipeline (`ml/generate_dataset.py`, `ml/schema.py`) is registry-driven and now covers all 16 registered attacks (17 classes with `normal`; `c2_beacon` generates real traffic and labels correctly, but see "Attack types" above for why its own detecting feature is excluded from `FEATURE_COLUMNS`). The **currently deployed** dataset/model below still reflect the original 6-class run -- generating and retraining against the full registry is a real, scoped next step. Generate labelled rows from fresh Mininet runs with:
+A reproducible controlled dataset and Random Forest detector. The dataset-generation pipeline (`ml/generate_dataset.py`, `ml/schema.py`) is registry-driven and covers all 16 registered attacks (17 classes with `normal`; `c2_beacon` generates real traffic and labels correctly, but see "Attack types" above for why its own detecting feature is excluded from `FEATURE_COLUMNS`). Generate labelled rows from fresh Mininet runs with:
 
 ```bash
-sudo .venv/bin/python3 -m iot_defense.ml.generate_dataset --runs 150 --seed 42 \
-    --output data/ml/controlled_flows_6class.csv
+sudo .venv/bin/python3 -m iot_defense.ml.generate_dataset --runs 255 --seed 42 \
+    --output data/ml/controlled_flows_17class.csv
 ```
+
+(`--runs 255` is deliberately `17 classes x 15` -- the same per-class trial count this project's own evaluation harness uses, for direct comparability rather than an arbitrary round number.)
 
 Train and evaluate on run-held-out groups with:
 
 ```bash
 sudo .venv/bin/python3 -m iot_defense.ml.train_random_forest \
-    --dataset data/ml/controlled_flows_6class.csv \
+    --dataset data/ml/controlled_flows_17class.csv \
     --model models/random_forest_detector.joblib --seed 7
 ```
 
 The model uses only the 12 behavioural `FlowFeatures` columns; IP addresses, run identifiers, timestamps, metadata, and labels remain audit fields. The rule-based comparison baseline reported alongside RF's own metrics uses the same `UnifiedRuleBasedDetector` the live demo calls, scored on the identical multi-class labels — not a separate binary question. This remains a small, controlled Mininet study; its held-out metrics must not be generalized to arbitrary IoT traffic. In the live demo, the trained RF model is consulted only as a confirmation step when the rule-based detector independently concludes reconnaissance — the one signature with the fuzziest rule-based boundary; every other registered attack has been proven reliable across many live Mininet runs without needing RF confirmation. Because RF is a confirmation step and not a second vote, it may only override the rule-based verdict when it agrees, or disagrees with real confidence (≥70%) — a low-confidence disagreement never downgrades an already-detected attack to "normal".
 
-The currently deployed `data/ml/controlled_flows_6class.csv` and `models/random_forest_detector.joblib` cover all six classes, perfectly balanced (156 rows, 26 per class: normal + reconnaissance/dos/brute_force/exfiltration/exploit). On a held-out test split (22 rows) RF reaches 100% accuracy against a rule-based baseline of 86.4% — a real, trustworthy gap now that every traffic generator behind the dataset delivers its intended payload (see "Known limitations" below for the two traffic-generator payload-delivery bugs this figure depends on having fixed).
+The currently deployed `data/ml/controlled_flows_17class.csv` and `models/random_forest_detector.joblib` cover the full registry (260 rows, 255 real Mininet runs, 15/class -- 20 for `normal`, since the normal bucket is sampled slightly more often by the generator's own cycling logic; 0 failed runs, 0 anomalies). On a held-out test split (40 rows across all 17 classes -- small per-class, and the per-class numbers below should be read with that in mind) RF reaches **97.5% accuracy** (precision 91.2%, recall 92.2%, f1 91.0%) against a rule-based baseline of **90.0%** (precision 78.8%, recall 80.4%, f1 78.7%) on the identical split -- a real, measured 7.5-point accuracy gap, this project's first genuine full-registry measurement of it (the original 6-class, 100%-vs-86.4% figure predates the 10-attack registry expansion and is superseded by this one, not additional to it). Two classes show real, small-sample weaknesses worth disclosing rather than smoothing over: `exploit_payload_injection` scored 0 precision/recall for RF on this specific test split, and `dns_tunneling_exfiltration` scored 0.5 precision (1.0 recall) -- at ~2-3 test rows per class on average, a single misclassified row swings a class's own metric by a large margin, and this is reported as a real, small-sample-driven result, not a claim that RF specifically fails to learn either attack's signature.
 
 ## Planned future components
 - ARP spoofing / MITM detection (needs tracking IP-to-MAC mappings over time, not flow statistics — architecturally distinct from every attack currently registered)
 - Richer honeypot and deception flows
-- Retraining the ML dataset/RF model against the full 17-class registry (see "Controlled ML detection experiment" above)
 
 ## Dashboard
 
@@ -173,7 +174,7 @@ Header (phase, connection status, attack-mode badge, run-control dropdown + butt
 The controller's `cleanup()` tears down the response executor (removing any iptables redirect/rate-limit rules and restoring isolated interfaces) and stops the Mininet network on completion or on error. If a run is interrupted, `sudo mn -c` clears any leftover Mininet state.
 
 ### Known limitations
-- The Random Forest detector reflects a preliminary evaluation on a small controlled Mininet dataset (156 rows across 6 classes; see "Controlled ML detection experiment" above) and should not be generalized to arbitrary IoT traffic.
+- The Random Forest detector reflects a preliminary evaluation on a small controlled Mininet dataset (260 rows across all 17 classes; see "Controlled ML detection experiment" above) and should not be generalized to arbitrary IoT traffic. The held-out test split (40 rows across 17 classes) is small enough per class that individual class-level metrics carry real sample-size noise -- the aggregate accuracy/precision/recall figures are more trustworthy than any single class's own numbers.
 - The PPO policy's base training is a lightweight synthetic decision simulator, not live Mininet traffic. A bounded real-Mininet fine-tuning pass exists and has been run (see "PPO reinforcement-learned policy" above), but it is a short, warm-started refinement on top of the synthetic policy, not training from scratch against real traffic.
 - Stackelberg utilities are configured/modelled values (see `config/policies.yaml`), not measured real-world costs.
 - Only two attack signatures (reconnaissance, credential-stuffing) are genuinely distinguished by connection *rate/pattern*; the flood and exfiltration signatures rely more heavily on volume and direction, and `exploit` relies on payload size rather than any of those. `c2_beacon` adds a third, genuinely different axis -- inter-packet timing regularity (`inter_arrival_cv`) -- rather than rate, volume, or size (see "Attack types" above).
