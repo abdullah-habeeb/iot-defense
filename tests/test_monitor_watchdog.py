@@ -50,3 +50,20 @@ def test_start_capture_omits_timeout_wrapper_when_no_watchdog_given(tmp_path):
     assert len(launch_commands) == 1
     assert "timeout" not in launch_commands[0]
     assert launch_commands[0].startswith("tcpdump")
+
+
+def test_start_capture_uses_packet_buffered_mode(tmp_path):
+    """Regression test for a real bug: without -U, tcpdump only flushes
+    its write buffer once it fills or the process exits cleanly. A
+    sparse, low-rate capture (confirmed via a real repro: c2_beaconing's
+    own traffic, ~20-40 packets over 28s) can sit on its last packet(s)
+    in memory until force-terminated, and a SIGKILL fallback then loses
+    them -- producing a truncated pcap. -U flushes after every packet,
+    so even a SIGKILL can only ever lose a packet that hadn't arrived
+    yet."""
+    monitor = PacketMonitor(base_dir=tmp_path)
+    net = FakeNetwork()
+    monitor.start_capture(net, "sensor", packet_limit=30)
+    launch_commands = [c for c in net.host.commands if "-i sensor-eth0" in c]
+    assert len(launch_commands) == 1
+    assert "tcpdump -U " in launch_commands[0]
