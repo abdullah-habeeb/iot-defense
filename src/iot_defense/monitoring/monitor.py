@@ -91,7 +91,23 @@ class PacketMonitor:
         # packets captured" -- tcpdump's own exit summary, misread as
         # iptables error output. disown removes the job from the shell's
         # job table so its completion is never reported at all.
-        tcpdump_cmd = f"tcpdump -i {interface} -nn -s 0 -c {packet_limit} -w {capture_path}"
+        #
+        # `-U` (packet-buffered mode) is not cosmetic: without it, tcpdump
+        # only flushes its internal write buffer to the pcap file once that
+        # buffer fills or the process exits cleanly. A sparse, low-rate
+        # capture (found via a real repro: c2_beaconing's own traffic is
+        # ~20-40 packets over 28s, well under a typical -c limit, so
+        # tcpdump never reaches it and must always be force-terminated by
+        # stop_capture()'s own timeout) can sit on its last captured
+        # packet(s) in memory indefinitely; if that force-termination ever
+        # has to fall through to SIGKILL (stop_capture()'s own last-resort
+        # fallback for a capture that doesn't react to SIGTERM in time),
+        # whatever was still buffered is lost -- producing exactly the
+        # "truncated dump file" corruption confirmed directly against every
+        # one of c2_beaconing's own real captured pcaps. -U flushes after
+        # every packet instead, so even a SIGKILL can only ever lose a
+        # packet that hadn't arrived yet, never one already captured.
+        tcpdump_cmd = f"tcpdump -U -i {interface} -nn -s 0 -c {packet_limit} -w {capture_path}"
         if watchdog_seconds is not None:
             tcpdump_cmd = f"timeout {watchdog_seconds}s {tcpdump_cmd}"
         command = f"{tcpdump_cmd} >{log_path} 2>&1 & disown; echo $!"
