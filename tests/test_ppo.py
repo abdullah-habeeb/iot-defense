@@ -1,161 +1,168 @@
-import numpy as np
+import ast
+import inspect
 
+import gymnasium as gym
+import numpy as np
+import pytest
+from gymnasium import spaces
+
+from iot_defense.defense import ppo_env as ppo_env_module
 from iot_defense.defense.context import build_security_context
 from iot_defense.defense.decision import DefenseAction
+from iot_defense.defense.objective import Objective
 from iot_defense.defense.policy import RuleBasedDefensePolicy
 from iot_defense.defense.ppo_env import (
     ACTION_TO_INDEX,
+    CRITICALITY_LEVELS,
+    INTENTIONS,
     OBSERVATION_SIZE,
     TRAINING_SCENARIOS,
     DefenseDecisionEnv,
-    RewardConfig,
     SecurityContextEncoder,
     context_for_scenario,
     load_ppo_training_config,
+    noisy_context,
 )
 from iot_defense.defense.ppo_policy import PPODefensePolicy
 from iot_defense.detection.threat_event import ThreatEvent
+from iot_defense.evaluation.outcome import OutcomeTable
+from iot_defense.simulation import train_ppo as train_ppo_module
 
 
-def test_load_ppo_training_config_actually_finds_the_yaml_file():
-    """Regression coverage for the same 'config never actually loads' bug
-    class already found and fixed in policy.py/detector.py -- this asserts
-    the file is genuinely found rather than silently returning {}."""
+def test_config_has_the_outcome_environment_settings():
     config = load_ppo_training_config()
-    assert config, "config/policies.yaml's policy.ppo section must actually load"
-    assert config["training_timesteps"] == 25500
-    assert config["environment_episode_length"] == 6
+    assert config["training_timesteps"] > 0
+    assert 0.0 <= config["label_error_rate"] < 1.0
+    assert config["reward_scale"] > 0
+    assert "reward" not in config, "the preferred_action reward block must be gone"
 
 
-def test_reward_config_from_mapping_reads_real_yaml_values():
-    config = RewardConfig.from_mapping(load_ppo_training_config()["reward"])
-    assert config.attack_contained == 5.0
-    assert config.response_cost == -0.5
+def test_observation_carries_no_other_policys_output():
+    assert OBSERVATION_SIZE() == 6 + len(TRAINING_SCENARIOS()) + len(INTENTIONS)
+    assert list(inspect.signature(SecurityContextEncoder.encode).parameters) == ["self", "context"]
+    assert list(inspect.signature(PPODefensePolicy.decide).parameters) == ["self", "context"]
 
 
-def test_reward_config_from_mapping_ignores_unknown_keys():
-    # Defensive: a stray/renamed YAML key must not crash config loading.
-    config = RewardConfig.from_mapping({"attack_contained": 9.0, "not_a_real_field": 1.0})
-    assert config.attack_contained == 9.0
+@pytest.mark.parametrize("module", [ppo_env_module, train_ppo_module])
+def test_ppo_training_code_never_reads_preferred_action(module):
+    tree = ast.parse(inspect.getsource(module))
+    used = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)} | {
+        n.id for n in ast.walk(tree) if isinstance(n, ast.Name)
+    }
+    assert "preferred_action" not in used
 
 
 def test_context_encoding_is_normalized_and_deterministic():
     context = context_for_scenario("reconnaissance_port_scan")
     encoder = SecurityContextEncoder()
-    first = encoder.encode(context)
-    second = encoder.encode(context)
+    first, second = encoder.encode(context), encoder.encode(context)
     assert first.shape == (OBSERVATION_SIZE(),)
     assert first.dtype == np.float32
     assert np.array_equal(first, second)
-    assert np.all(first >= 0.0)
-    assert np.all(first <= 1.0)
+    assert np.all(first >= 0.0) and np.all(first <= 1.0)
 
 
-def test_dos_flood_context_encodes_distinct_one_hot_flag():
-    recon = SecurityContextEncoder().encode(context_for_scenario("reconnaissance_port_scan"))
-    dos = SecurityContextEncoder().encode(context_for_scenario("dos_flood"))
-    assert dos.shape == (OBSERVATION_SIZE(),)
-    # The two attack-type scenarios must not collapse to the same encoding.
-    assert not np.array_equal(recon, dos)
+def test_every_scenarios_encoding_is_distinct():
+    encodings = {tuple(SecurityContextEncoder().encode(context_for_scenario(s))) for s in TRAINING_SCENARIOS()}
+    assert len(encodings) == len(TRAINING_SCENARIOS())
 
 
 def test_action_mapping_matches_defense_actions():
-    assert ACTION_TO_INDEX == {
-        DefenseAction.ALLOW: 0,
-        DefenseAction.ALERT: 1,
-        DefenseAction.ISOLATE: 2,
-        DefenseAction.DECOY: 3,
-        DefenseAction.THROTTLE: 4,
-        DefenseAction.BLOCK_SOURCE: 5,
-        DefenseAction.QUARANTINE: 6,
-        DefenseAction.RESET_SESSIONS: 7,
-        DefenseAction.FORENSIC_CAPTURE: 8,
-        DefenseAction.BANDWIDTH_CAP: 9,
-    }
+    assert ACTION_TO_INDEX == {action: index for index, action in enumerate(DefenseAction)}
+    assert len(ACTION_TO_INDEX) == 10
 
 
-def test_environment_reset_step_reward_and_termination():
-    environment = DefenseDecisionEnv(episode_length=2)
-    observation, info = environment.reset(seed=7)
-    assert observation.shape == (OBSERVATION_SIZE(),)
-    assert info["scenario"] == "normal"
+class TestNoisyContext:
+    def kwargs(self, **over):
+        base = dict(label_error_rate=0.0, score_sigma=0.07, feature_jitter=0.5)
+        base.update(over)
+        return base
 
-    next_observation, reward, terminated, truncated, step_info = environment.step(ACTION_TO_INDEX[DefenseAction.ALLOW])
-    assert next_observation.shape == (OBSERVATION_SIZE(),)
-    assert reward == 2.5
-    assert terminated is False
-    assert truncated is False
-    assert step_info["scenario"] == "normal"
+    def test_zero_error_rate_never_mislabels(self):
+        rng = np.random.default_rng(0)
+        for condition in TRAINING_SCENARIOS():
+            _, reported = noisy_context(condition, rng, **self.kwargs())
+            assert reported == condition
 
-    _, _, terminated, _, _ = environment.step(ACTION_TO_INDEX[DefenseAction.DECOY])
-    assert terminated is True
+    def test_error_rate_one_always_mislabels_to_a_different_condition(self):
+        rng = np.random.default_rng(0)
+        for condition in TRAINING_SCENARIOS():
+            _, reported = noisy_context(condition, rng, **self.kwargs(label_error_rate=1.0))
+            assert reported != condition and reported in TRAINING_SCENARIOS()
 
+    def test_empirical_error_rate_matches_the_configured_rate(self):
+        rng = np.random.default_rng(1)
+        errors = sum(noisy_context("dos_flood", rng, **self.kwargs(label_error_rate=0.3))[1] != "dos_flood" for _ in range(2000))
+        assert 0.26 < errors / 2000 < 0.34
 
-def test_reward_model_rewards_containment_and_penalizes_false_positive():
-    environment = DefenseDecisionEnv()
-    normal = context_for_scenario("normal")
-    recon = context_for_scenario("reconnaissance_port_scan")
-    allow_reward, _ = environment.calculate_reward(normal, DefenseAction.ALLOW)
-    isolate_reward, _ = environment.calculate_reward(recon, DefenseAction.ISOLATE)
-    false_positive_reward, _ = environment.calculate_reward(normal, DefenseAction.ISOLATE)
-    assert allow_reward > false_positive_reward
-    assert isolate_reward > false_positive_reward
+    def test_scores_stay_in_range_and_features_nonnegative(self):
+        rng = np.random.default_rng(2)
+        for _ in range(300):
+            context, _ = noisy_context("dos_flood", rng, **self.kwargs(score_sigma=0.5, feature_jitter=0.9))
+            assert 0.0 <= context.beliefs.threat_score <= 1.0
+            assert 0.0 <= context.beliefs.confidence <= 1.0
+            assert all(v >= 0.0 for v in context.beliefs.observed_features.values())
 
-
-def test_dos_flood_reward_favors_isolation_over_decoy_and_allow():
-    """Unlike reconnaissance, a flood should reward containment far more than
-    deception -- there is nothing useful to learn by redirecting a flood."""
-    environment = DefenseDecisionEnv()
-    dos = context_for_scenario("dos_flood")
-    isolate_reward, _ = environment.calculate_reward(dos, DefenseAction.ISOLATE)
-    decoy_reward, _ = environment.calculate_reward(dos, DefenseAction.DECOY)
-    allow_reward, _ = environment.calculate_reward(dos, DefenseAction.ALLOW)
-    assert isolate_reward > decoy_reward > allow_reward
+    def test_device_criticality_varies_so_the_policy_cannot_depend_on_it(self):
+        rng = np.random.default_rng(3)
+        seen = {noisy_context("dos_flood", rng, **self.kwargs())[0].beliefs.device_criticality for _ in range(200)}
+        assert seen == set(CRITICALITY_LEVELS)
 
 
-def test_brute_force_reward_favors_its_current_preferred_action():
-    """Brute-force's registered preferred_action is BLOCK_SOURCE (reassigned
-    from THROTTLE -- this lab's traffic always comes from one fixed,
-    identifiable attacker host, so blocking it outright beats merely
-    rate-limiting it). Registry-driven: calculate_reward() never hardcodes
-    which action brute_force prefers, so this proves the synthetic training
-    env's reward genuinely reflects the registry's current state, not a
-    stale assumption -- BLOCK_SOURCE must outscore every other real
-    response, and any non-preferred, non-ALLOW response must still beat
-    letting the attack through outright."""
-    environment = DefenseDecisionEnv()
-    brute_force = context_for_scenario("brute_force")
-    block_source_reward, _ = environment.calculate_reward(brute_force, DefenseAction.BLOCK_SOURCE)
-    throttle_reward, _ = environment.calculate_reward(brute_force, DefenseAction.THROTTLE)
-    isolate_reward, _ = environment.calculate_reward(brute_force, DefenseAction.ISOLATE)
-    allow_reward, _ = environment.calculate_reward(brute_force, DefenseAction.ALLOW)
-    assert block_source_reward > throttle_reward > allow_reward
-    assert block_source_reward > isolate_reward > allow_reward
+class TestEnvironment:
+    def test_reset_step_reward_and_termination(self, synthetic_table):
+        env = DefenseDecisionEnv(synthetic_table, episode_length=2)
+        observation, info = env.reset(seed=7)
+        assert observation.shape == (OBSERVATION_SIZE(),)
+        assert info["true_condition"] in TRAINING_SCENARIOS()
+        _, reward, terminated, truncated, step_info = env.step(ACTION_TO_INDEX[DefenseAction.ALLOW])
+        assert step_info["true_condition"] == info["true_condition"]
+        assert terminated is False and truncated is False
+        _, _, terminated, _, _ = env.step(0)
+        assert terminated is True
 
+    def test_reward_is_the_scaled_measured_utility_of_the_true_condition(self, synthetic_table):
+        env = DefenseDecisionEnv(synthetic_table, label_error_rate=1.0, reward_scale=10.0)
+        _, info = env.reset(seed=11)
+        true = info["true_condition"]
+        assert info["reported_condition"] != true
+        measured = set(synthetic_table.samples(true, DefenseAction.ISOLATE))
+        _, reward, _, _, step_info = env.step(ACTION_TO_INDEX[DefenseAction.ISOLATE])
+        assert step_info["utility"] in measured
+        assert reward == pytest.approx(step_info["utility"] / 10.0)
 
-def test_environment_cycles_through_all_registered_scenarios():
-    training_scenarios = TRAINING_SCENARIOS()
-    environment = DefenseDecisionEnv(episode_length=len(training_scenarios))
-    _, info = environment.reset(seed=7)
-    assert info["scenario"] == "normal"
-    seen = {info["scenario"]}
-    for _ in range(len(training_scenarios)):
-        _, _, _, _, step_info = environment.step(ACTION_TO_INDEX[DefenseAction.ALERT])
-        seen.add(step_info["scenario"])
-    assert seen == set(training_scenarios)
+    def test_measured_best_action_earns_the_highest_reward(self, synthetic_table):
+        from conftest import synthetic_best_actions
+
+        for condition, best in synthetic_best_actions().items():
+            best_mean = synthetic_table.mean(condition, best)
+            assert all(best_mean >= synthetic_table.mean(condition, a) for a in DefenseAction)
+
+    def test_conditions_are_drawn_across_the_whole_registry(self, synthetic_table):
+        env = DefenseDecisionEnv(synthetic_table, episode_length=10_000)
+        _, info = env.reset(seed=5)
+        seen = {info["true_condition"]}
+        for _ in range(600):
+            _, _, _, _, step_info = env.step(0)
+            seen.add(step_info["next_true_condition"])
+        assert seen == set(TRAINING_SCENARIOS())
+
+    def test_incomplete_table_is_rejected(self):
+        with pytest.raises(ValueError, match="no valid measurement"):
+            DefenseDecisionEnv(OutcomeTable([], Objective.load()))
+
+    def test_invalid_action_is_rejected(self, synthetic_table):
+        env = DefenseDecisionEnv(synthetic_table)
+        env.reset(seed=1)
+        with pytest.raises(ValueError):
+            env.step(99)
 
 
 def test_ppo_policy_fallback_is_explicit_when_model_is_absent(tmp_path):
-    fallback = RuleBasedDefensePolicy()
-    policy = PPODefensePolicy(tmp_path / "missing-model", fallback=fallback)
+    policy = PPODefensePolicy(tmp_path / "missing-model", fallback=RuleBasedDefensePolicy())
     event = ThreatEvent.from_result(
-        source_ip="10.0.0.100",
-        destination_ip="10.0.0.10",
-        attack_type="normal",
-        threat_score=0.05,
-        confidence=0.9,
-        detection_reason="test",
-        features={},
+        source_ip="10.0.0.100", destination_ip="10.0.0.10", attack_type="normal",
+        threat_score=0.05, confidence=0.9, detection_reason="test", features={},
     )
     decision = policy.decide(build_security_context(event))
     assert decision.action == DefenseAction.ALLOW
@@ -163,12 +170,8 @@ def test_ppo_policy_fallback_is_explicit_when_model_is_absent(tmp_path):
 
 
 def test_ppo_policy_rejects_missing_model_without_fallback(tmp_path):
-    try:
+    with pytest.raises(FileNotFoundError, match="Train it first"):
         PPODefensePolicy(tmp_path / "missing-model")
-    except FileNotFoundError as error:
-        assert "Train it first" in str(error)
-    else:
-        raise AssertionError("Missing PPO model should fail without an explicit fallback")
 
 
 def test_ppo_action_output_is_valid():
@@ -180,52 +183,38 @@ def test_ppo_action_output_is_valid():
     policy = PPODefensePolicy("unused", fallback=RuleBasedDefensePolicy())
     policy.model = FakeModel()
     policy.fallback = None
-    decision = policy.decide(context_for_scenario("reconnaissance_port_scan"))
-    assert decision.action == DefenseAction.DECOY
+    assert policy.decide(context_for_scenario("reconnaissance_port_scan")).action == DefenseAction.DECOY
 
 
-def test_synthetic_training_converges_every_scenario_to_its_preferred_action(tmp_path):
-    """Regression guard for a real bug class this project has now hit
-    twice: train_ppo.py's model quietly stops converging every scenario
-    to its own registered preferred_action as the registry grows,
-    without anything failing loudly. Found the second time via a direct
-    3-seed sweep (not assumed): net_arch=[32, 32] with more timesteps
-    made convergence *worse* (a real, reproduced finding, see
-    train_ppo.py's own comment), and even the net_arch=[64, 64] fix
-    later found to work was NOT reliably seed-independent at the
-    project's own default timestep budget -- 2 of 3 sampled seeds
-    (13, 42) still produced 1-2 mismatches, only the project's actual
-    hardcoded seed=7 (and, separately, seed=1) converged cleanly. That
-    means train_ppo.py's own fixed seed=7 is currently load-bearing for
-    correctness, not just a determinism convenience -- worth a real test
-    that fails loudly if that stops being true, rather than relying on
-    the ad-hoc verification script this bug was actually caught with.
+def test_a_model_trained_on_a_different_observation_layout_is_rejected(tmp_path):
+    from stable_baselines3 import PPO
 
-    Trains for real (not mocked) using the project's own actual
-    train_ppo.py entry point and config -- slower than this file's other
-    tests, but a fast, deterministic, non-Mininet training run (a few
-    tens of seconds), and this is exactly the kind of bug a mocked test
-    cannot catch."""
-    from iot_defense.attacks.registry import ATTACK_SCENARIOS
-    from iot_defense.defense.decision import DefenseAction
-    from iot_defense.defense.ppo_env import context_for_scenario
-    from iot_defense.defense.ppo_policy import PPODefensePolicy
-    from iot_defense.simulation.train_ppo import train
+    class Stale(gym.Env):
+        observation_space = spaces.Box(0.0, 1.0, shape=(5,), dtype=np.float32)
+        action_space = spaces.Discrete(10)
 
-    output_path = tmp_path / "ppo_convergence_check"
-    train(output_path=output_path)
-    policy = PPODefensePolicy(model_path=str(output_path))
+        def reset(self, *, seed=None, options=None):
+            return np.zeros(5, dtype=np.float32), {}
 
-    mismatches = []
-    normal_decision = policy.decide(context_for_scenario("normal"))
-    if normal_decision.action != DefenseAction.ALLOW:
-        mismatches.append(("normal", normal_decision.action.name, "ALLOW"))
-    for key, scenario in ATTACK_SCENARIOS.items():
-        decision = policy.decide(context_for_scenario(scenario.attack_type))
-        if decision.action != scenario.preferred_action:
-            mismatches.append((key, decision.action.name, scenario.preferred_action.name))
+        def step(self, action):
+            return np.zeros(5, dtype=np.float32), 0.0, True, False, {}
 
-    assert not mismatches, (
-        f"train_ppo.py's own real training run (seed=7, the project's fixed seed) "
-        f"no longer converges every scenario to its registered preferred_action: {mismatches}"
-    )
+    PPO("MlpPolicy", Stale(), device="cpu").save(str(tmp_path / "stale"))
+    with pytest.raises(ValueError, match="different observation layout"):
+        PPODefensePolicy(tmp_path / "stale")
+
+
+def test_training_on_measured_outcomes_learns_the_measured_best_action(trained_ppo_path, synthetic_table):
+    """Trains for real (not mocked) on the synthetic table, whose best action
+    per condition is known by construction, and checks the learned policy
+    picks it for (nearly) every condition from canonical observations."""
+    from conftest import synthetic_best_actions
+
+    policy = PPODefensePolicy(model_path=trained_ppo_path)
+    best = synthetic_best_actions()
+    wrong = [
+        (c, policy.decide(context_for_scenario(c)).action.name, b.name)
+        for c, b in best.items()
+        if policy.decide(context_for_scenario(c)).action != b
+    ]
+    assert len(wrong) <= 2, f"PPO failed to learn the measured-best action on: {wrong}"

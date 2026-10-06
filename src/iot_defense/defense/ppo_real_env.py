@@ -1,91 +1,82 @@
-"""Real-Mininet-backed Gymnasium environment for PPO fine-tuning.
+"""Live Mininet lab driver: observe real attack traffic, execute a response
+for real, and MEASURE what it actually did.
 
-Unlike ppo_env.DefenseDecisionEnv (a fast, deterministic synthetic
-simulator used for the base training pass), every step() here actually
-drives the real Mininet lab: it generates real traffic for the chosen
-scenario, captures and detects it with the exact same pipeline the live
-demo uses, executes the agent's chosen action for real, and computes a
-reward from a *verified* real outcome (a real ping check for ISOLATE, a
-real redirected connection for DECOY) rather than an assumed one.
+Used by the evaluation harness, the outcome-table builder and the adaptive
+evaluation. Despite the historical class name it is not a Gym environment:
+PPO trains from the measured outcome table (defense/ppo_env.py), not from
+this class.
 
-This is intended for a short, bounded fine-tuning run on top of an
-already-trained model -- not training from scratch. Each step costs several
-real seconds (traffic generation, capture, detection, response, and a
-restore-to-baseline before the next step), so total_timesteps should stay
-small (tens, not thousands). Requires root (Mininet) to run.
+measure_response() is the measurement protocol. It applies the response,
+appends an iptables counter rule AFTER it on the host that receives the
+attack flow, replays the same condition's traffic generator against the
+now-defended network, and records (1) how many attack packets survived to
+that counter, (2) what fraction of legitimate pings from the camera to the
+sensor were lost, and (3) whether the response yielded verified
+intelligence. Containment is later computed relative to the un-responded
+(ALLOW) probe of the same trial -- never from a registered preferred_action.
+
+Why an iptables counter and not a packet capture: tcpdump sees packets
+before the firewall acts, so a capture reads zero containment for
+BLOCK_SOURCE/THROTTLE/QUARANTINE (all iptables rules). A counter appended
+after the response only counts packets no earlier rule dropped; a response
+that diverts or stops the flow upstream (ISOLATE, DECOY's NAT redirect,
+BANDWIDTH_CAP's egress qdisc) leaves it at zero for the same reason. The
+receiving host is the sensor for inbound attacks and the attacker host for
+the outbound (exfiltration-style) ones -- see AttackScenario.traffic_direction.
+
+The response is always applied to the canonical pair (protected device =
+sensor, adversary = attacker host; for benign traffic, camera -> sensor), never
+to whatever IPs the detector's event happens to carry: when detection misses
+an attack the event keeps raw flow orientation and a response would land on
+the attacker's own host. What a response physically does against an attack
+must not depend on whether the detector caught it.
+
+Requires root (Mininet).
 """
 
 from __future__ import annotations
 
+import json
+import re
 import time
 from typing import Any, Callable
 
-import gymnasium as gym
-import numpy as np
-from gymnasium import spaces
-
-from iot_defense.defense.context import build_security_context
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.executor import MininetResponseExecutor
-from iot_defense.defense.ppo_env import (
-    ACTION_TO_INDEX,
-    INDEX_TO_ACTION,
-    OBSERVATION_SIZE,
-    TRAINING_SCENARIOS,
-    RewardConfig,
-    SecurityContextEncoder,
-)
 from iot_defense.detection.detector import UnifiedRuleBasedDetector
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
+from iot_defense.evaluation.outcome import Measurement
 from iot_defense.monitoring.monitor import PacketMonitor
 from iot_defense.network.topology import create_mininet_network
 from iot_defense.simulation.traffic import TrafficGenerator
 
 TARGET_IP = "10.0.0.10"
 ATTACKER_IP = "10.0.0.100"
+CAMERA_IP = "10.0.0.20"
+
+LEGIT_PING_COUNT = 5
+INVALID_SERVICE_LOSS = -1.0
+PROBE_COMMENT = "iot_probe_count"
+
+_PACKET_LOSS_RE = re.compile(r"(\d+(?:\.\d+)?)% packet loss")
 
 
-class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
-    """PPO training environment whose step() outcomes are real, verified
-    Mininet observations instead of an assumed reward table.
+class RealMininetDefenseEnv:
+    """Live-Mininet lab driver. The network is created once (first
+    _ensure_network()) and reused; every response is restored before the
+    next one so consecutive measurements never interfere."""
 
-    The Mininet network is created once (on the first reset()) and reused
-    for the whole training run -- recreating it every episode would be far
-    too slow. Every step restores the network to a clean baseline before
-    returning, so consecutive steps and episodes never interfere with each
-    other.
-    """
-
-    metadata = {"render_modes": []}
-
-    def __init__(self, episode_length: int | None = None, reward_config: RewardConfig | None = None) -> None:
-        super().__init__()
-        self.action_space = spaces.Discrete(len(DefenseAction))
-        self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
-        # Self-sizes to the scenario count, not a fixed number: a fixed
-        # episode_length smaller than len(TRAINING_SCENARIOS()) means
-        # whichever scenario cycles in last is only ever shown as the
-        # terminal observation, never actually acted on -- so it gets no
-        # training signal at all, no matter how long training runs. This
-        # was a real, confirmed bug in ppo_env.DefenseDecisionEnv (fixed
-        # in Phase 3); applying the same fix here pre-emptively, before
-        # this env's first real use, rather than waiting to rediscover it.
-        self.episode_length = episode_length if episode_length is not None else len(TRAINING_SCENARIOS())
-        self.reward_config = reward_config or RewardConfig()
-        self.encoder = SecurityContextEncoder()
-
+    def __init__(self) -> None:
         self.net: Any = None
         self.executor: MininetResponseExecutor | None = None
         self.traffic_gen = TrafficGenerator()
         self.monitor = PacketMonitor()
         self.aggregator = FeatureAggregator()
         self.detector = UnifiedRuleBasedDetector()
-
-        self._step = 0
-        self._scenario_index = 0
-        self._pending_scenario: str | None = None
-        self._pending_threat_event: ThreatEvent | None = None
+        # Protocol of the dominant attacker flow in the latest observation,
+        # taken from the captured traffic itself (not the detector's verdict).
+        self.last_attack_protocol: str | None = None
 
     # ─── Mininet lifecycle ──────────────────────────────────────────────────
 
@@ -112,41 +103,34 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
 
     # ─── Real observation for one scenario ─────────────────────────────────
 
+    @staticmethod
+    def _attack_for(condition: str) -> Any:
+        from iot_defense.attacks.registry import ATTACK_SCENARIOS
+
+        attack = next((s for s in ATTACK_SCENARIOS.values() if s.attack_type == condition), None)
+        if attack is None:
+            raise ValueError(f"No registered attack scenario for condition: {condition!r}")
+        return attack
+
     def _observe_scenario(
         self, scenario: str, traffic_override: Callable[[Any], Any] | None = None
     ) -> ThreatEvent:
         """Generate real traffic for one scenario, capture it, and classify
         it with the same attack-type-agnostic detector the live demo uses.
 
-        Registry-driven for every non-normal scenario: this used to
-        hardcode exactly two attacks (dos_flood, else-reconnaissance),
-        left over from before brute-force/exfiltration existed. Left
-        unfixed, it would have silently generated reconnaissance traffic
-        while *labeling* it brute_force/data_exfiltration in training data
-        the moment this env was first actually used -- caught and fixed
-        here, before that first real use, not after.
-
         traffic_override, when given, replaces the registry's own
         `generate_traffic` call for this one observation (capture sizing
         still comes from the matched attack's own registry entry) -- used
-        by evaluation/adaptive.py to send the *same* attack's traffic from
-        a different (real or spoofed) source per round without
-        duplicating this method's capture/aggregate/detect logic, the
-        exact un-synced-copy bug class this project has hit before.
+        by evaluation/adaptive.py to send the same attack's traffic from a
+        different source per round without duplicating this method's
+        capture/aggregate/detect logic.
         """
         if scenario == "normal":
             session = self.monitor.start_capture(self.net, "sensor", 20, watchdog_seconds=63.0)
             (traffic_override or self.traffic_gen.generate_normal_mininet_traffic)(self.net)
             cap_path = self.monitor.stop_capture(self.net, session, 3.0)
         else:
-            from iot_defense.attacks.registry import ATTACK_SCENARIOS
-
-            attack = next(
-                (scenario_ for scenario_ in ATTACK_SCENARIOS.values() if scenario_.attack_type == scenario),
-                None,
-            )
-            if attack is None:
-                raise ValueError(f"No registered attack scenario for training scenario: {scenario!r}")
+            attack = self._attack_for(scenario)
             session = self.monitor.start_capture(
                 self.net, "sensor", attack.capture_packet_limit,
                 watchdog_seconds=attack.capture_completion_timeout + 60.0,
@@ -158,17 +142,16 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             packets = self.monitor.read_capture(self.net, "sensor", cap_path)
         except Exception:  # noqa: BLE001
             # A capture can genuinely come back empty/corrupt under real
-            # timing (the same intermittent "No data could be read!"
-            # failure mode generate_dataset.py already tolerates by
-            # skipping the run and continuing) -- read_capture() itself
-            # already retries once, so a second failure here means this
-            # is a real dry step, not a transient race. A single bad
-            # capture must degrade to "no signal", not crash the whole
-            # training loop: with dozens of steps per run, even a ~10%
-            # per-capture failure rate would make an unguarded crash here
-            # almost certain to end any real run before it finished.
+            # timing; read_capture() already retries once, so a second
+            # failure is a real dry observation, not a transient race. A
+            # single bad capture must degrade to "no signal", not crash a
+            # multi-hour run.
             packets = []
         flows = self.aggregator.aggregate(packets)
+        attacker_flows = [f for f in flows if ATTACKER_IP in (f.source_ip, f.destination_ip)]
+        self.last_attack_protocol = (
+            max(attacker_flows, key=lambda f: f.packet_count).protocol if attacker_flows else None
+        )
         if flows:
             return self.detector.detect_flows(flows)
         return self.detector.detect(
@@ -176,32 +159,31 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
              "unique_destination_ports": 0, "packet_count": 0, "packets_per_second": 0.0}
         )
 
-    # ─── Real action execution + verified outcome ──────────────────────────
+    # ─── Real action execution + verification ──────────────────────────────
 
-    def _execute_and_verify(self, action: DefenseAction, threat_event: ThreatEvent) -> dict[str, Any]:
-        """Actually perform the chosen action and verify its real effect."""
+    def _execute_and_verify(
+        self,
+        action: DefenseAction,
+        threat_event: ThreatEvent,
+        probe: Callable[[], dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Perform the chosen action for real and verify its mechanism. When
+        `probe` is given it runs while the response is still active (before
+        restore) and its result is returned under outcome["probe"]; a probe
+        failure is recorded under outcome["probe_error"], never raised, so
+        restore() always runs."""
         decision = DefenseDecision.create(
             action=action,
             target_ip=threat_event.destination_ip if threat_event.destination_ip != "unknown" else TARGET_IP,
             source_ip=threat_event.source_ip if threat_event.source_ip != "unknown" else ATTACKER_IP,
-            reason="PPO real-Mininet fine-tuning step",
+            reason="live-Mininet response measurement",
             confidence=threat_event.confidence,
             threat_score=threat_event.threat_score,
             policy_name="RealMininetDefenseEnv",
-            # Real, found-not-assumed bug: an empty context here made
-            # executor.execute()'s THROTTLE branch -- which reads
-            # context["beliefs"]["observed_features"]["protocol"] to pick
-            # a protocol-aware hashlimit rule -- always fall back to its
-            # "TCP" default, regardless of the real detected protocol.
-            # icmp_ping_flood is the one THROTTLE-preferred attack that
-            # isn't TCP, so every real THROTTLE call for it silently
-            # installed a TCP-only rule that can never match ICMP traffic,
-            # while still reporting "success" (no iptables error) -- the
-            # exact failure mode throttle()'s own docstring already
-            # describes as found-and-fixed, except the fix was never wired
-            # through this specific caller. Populating the real protocol
-            # here, from this threat_event's own already-observed
-            # features, is that missing wire, not a new mechanism.
+            # The executor's THROTTLE branch reads the real detected
+            # protocol from this context to pick a protocol-aware rule;
+            # an empty context silently falls back to TCP and installs a
+            # rule that can never match ICMP traffic.
             context={"beliefs": {"observed_features": {"protocol": threat_event.features.get("protocol", "TCP")}}},
         )
         result = self.executor.execute(decision)
@@ -215,7 +197,7 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
             try:
                 attacker = self.net.get("attacker")
                 decoy_ports = result.details.get("decoy_ports") or [22]
-                probe = attacker.cmd(
+                probe_output = attacker.cmd(
                     "python3 - <<'PY'\n"
                     "import socket\n"
                     "try:\n"
@@ -227,7 +209,7 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
                     "    print(f'INTERACTION_FAILED:{exc}')\n"
                     "PY"
                 ).strip()
-                outcome["interaction_verified"] = "INTERACTION_OK" in probe
+                outcome["interaction_verified"] = "INTERACTION_OK" in probe_output
             except Exception:  # noqa: BLE001
                 outcome["interaction_verified"] = False
         elif action == DefenseAction.THROTTLE and result.status == "success":
@@ -237,139 +219,156 @@ class RealMininetDefenseEnv(gym.Env[np.ndarray, int]):
                 outcome["rule_installed"] = rule_check.strip() not in ("", "0")
             except Exception:  # noqa: BLE001
                 outcome["rule_installed"] = False
+        elif action == DefenseAction.FORENSIC_CAPTURE:
+            # forensic_capture() raises (status "failed") unless real
+            # captured bytes exist, so success IS the verification.
+            outcome["evidence_captured"] = result.status == "success"
 
-        # Always restore before the next step so every step starts clean.
+        if probe is not None:
+            try:
+                outcome["probe"] = probe()
+            except Exception as exc:  # noqa: BLE001
+                outcome["probe_error"] = f"{type(exc).__name__}: {exc}"
+
         try:
             self.executor.restore(decision.target_ip)
         except Exception:  # noqa: BLE001
             pass
         return outcome
 
-    # ─── Reward ─────────────────────────────────────────────────────────────
+    # ─── Measurement protocol ───────────────────────────────────────────────
+
+    def _legit_service_loss(self) -> float:
+        camera = self.net.get("camera")
+        output = camera.cmd(f"ping -c {LEGIT_PING_COUNT} -i 0.2 -W 1 {TARGET_IP}")
+        match = _PACKET_LOSS_RE.search(output)
+        if match is not None:
+            return float(match.group(1)) / 100.0
+        if "network is unreachable" in output.lower():
+            # The pinging host itself has no usable interface (e.g. the
+            # response isolated it): no packet can leave, i.e. total loss.
+            return 1.0
+        raise RuntimeError(f"could not parse legitimate-service ping output: {output!r}")
+
+    def _flow_endpoints(self, condition: str) -> tuple[Any, tuple[str, ...]] | None:
+        """(receiving host, sender IPs) of the condition's attack flow, or None
+        for benign traffic. Inbound attacks are received by the sensor;
+        outbound (exfiltration-style) ones by the attacker-controlled host. A
+        distributed attack lists every address its sender uses."""
+        if condition == "normal":
+            return None
+        attack = self._attack_for(condition)
+        if attack.traffic_direction == "outbound":
+            return self.net.get("attacker"), (TARGET_IP,)
+        return self.net.get("sensor"), tuple(attack.sender_ips) or (ATTACKER_IP,)
 
     @staticmethod
-    def _preferred_action_verified(preferred_action: DefenseAction, outcome: dict[str, Any], execution_ok: bool) -> bool:
-        """Whether the *specific, real* outcome this preferred action needs
-        to actually claim success was itself verified -- not just that
-        the executor call didn't raise. Mirrors the per-action outcome
-        keys _execute_and_verify() sets: a real ping check for ISOLATE, a
-        real redirected connection for DECOY, a real installed-rule check
-        for THROTTLE."""
-        if not execution_ok:
-            return False
-        if preferred_action == DefenseAction.ISOLATE:
-            return bool(outcome.get("connectivity_lost"))
-        if preferred_action == DefenseAction.DECOY:
-            return bool(outcome.get("interaction_verified"))
-        if preferred_action == DefenseAction.THROTTLE:
-            return bool(outcome.get("rule_installed"))
-        return execution_ok
+    def _counter_rule(op: str, senders: tuple[str, ...]) -> str:
+        return f"iptables -{op} INPUT -s {','.join(senders)} -m comment --comment {PROBE_COMMENT} -j ACCEPT"
 
-    def calculate_reward(self, scenario: str, action: DefenseAction, outcome: dict[str, Any]) -> tuple[float, dict[str, float]]:
-        """Registry-driven, mirroring ppo_env.DefenseDecisionEnv's synthetic
-        calculate_reward(): every attack's reward comes from its own
-        registered preferred_action, so a newly registered attack needs no
-        code change here -- only _execute_and_verify() needs a branch if
-        its preferred action introduces a genuinely new kind of outcome to
-        verify (matching the pattern already used for ISOLATE/DECOY/
-        THROTTLE above).
-        """
-        config = self.reward_config
-        components: dict[str, float] = {"response_cost": config.response_cost}
-        reward = config.response_cost
-        execution_ok = outcome.get("status") == "success"
+    def _clear_counter(self, receiver: Any, senders: tuple[str, ...]) -> None:
+        for _ in range(5):
+            if receiver.cmd(self._counter_rule("D", senders)).strip():  # iptables prints only on error: none left
+                return
 
-        if scenario == "normal":
-            if action == DefenseAction.ALLOW:
-                components["service_preserved"] = config.service_preserved
-                reward += config.service_preserved
-            else:
-                components["false_positive_intervention"] = config.false_positive_intervention
-                reward += config.false_positive_intervention
-                # Mirrors ppo_env.DefenseDecisionEnv's own real, found-not-
-                # assumed fix: service_disruption applies to every wrong
-                # action on normal traffic, not only ISOLATE -- an
-                # asymmetry that gave the optimizer less reason to avoid
-                # THROTTLE/DECOY-on-normal specifically than ISOLATE, and a
-                # real 10-seed sweep of the synthetic env found both
-                # non-converging seeds' one mistake was exactly a
-                # THROTTLE-or-DECOY false positive on normal.
-                components["service_disruption"] = config.service_disruption
-                reward += config.service_disruption
-                if action == DefenseAction.ISOLATE:
-                    components["unnecessary_isolation"] = config.unnecessary_isolation
-                    reward += config.unnecessary_isolation
-            return float(reward), components
+    @staticmethod
+    def _read_counter(receiver: Any) -> int:
+        """Total packets over every probe counter rule: iptables expands a
+        comma-separated `-s` list into one rule (and one counter) per source."""
+        counts = [
+            int(line.split()[0])
+            for line in receiver.cmd("iptables -nvxL INPUT").splitlines()
+            if PROBE_COMMENT in line
+        ]
+        if not counts:
+            raise RuntimeError("probe counter rule not found in iptables INPUT")
+        return sum(counts)
 
-        from iot_defense.attacks.registry import ATTACK_SCENARIOS
-
-        attack = next((s for s in ATTACK_SCENARIOS.values() if s.attack_type == scenario), None)
-        if attack is None:
-            raise ValueError(f"Unsupported threat type for reward calculation: {scenario!r}")
-
-        if action == attack.preferred_action:
-            if self._preferred_action_verified(attack.preferred_action, outcome, execution_ok):
-                if attack.preferred_action == DefenseAction.DECOY:
-                    components["attacker_diverted"] = config.attacker_diverted
-                    components["intelligence_gained"] = config.intelligence_gained
-                    reward += config.attacker_diverted + config.intelligence_gained
-                else:
-                    components["attack_contained"] = config.attack_contained
-                    reward += config.attack_contained
-            else:
-                components["response_failed"] = config.false_positive_intervention
-                reward += config.false_positive_intervention
-        elif action == DefenseAction.ALLOW:
-            components["successful_compromise"] = config.successful_compromise
-            reward += config.successful_compromise
+    def _canonical_event(self, condition: str, observed: ThreatEvent) -> ThreatEvent:
+        """The event a response is applied for: protected device as target,
+        adversary (or, for benign traffic, the camera peer) as source, and
+        the protocol seen in the captured traffic."""
+        features = dict(observed.features)
+        if condition == "normal":
+            source_ip = CAMERA_IP
         else:
-            components["service_disruption"] = config.service_disruption
-            reward += config.service_disruption
+            source_ip = ATTACKER_IP
+            features["protocol"] = self.last_attack_protocol or features.get("protocol", "TCP")
+        return ThreatEvent.from_result(
+            source_ip=source_ip, destination_ip=TARGET_IP, attack_type=condition,
+            threat_score=observed.threat_score, confidence=observed.confidence,
+            detection_reason="canonical response target for measurement",
+            features=features, detector_name="canonical",
+        )
 
-        return float(reward), components
+    def _decoy_hits_since(self, started_at: float) -> int:
+        """Connections from the attacker that the decoy logged at or after
+        `started_at` -- i.e. the attack's own replayed traffic, not the
+        executor's earlier verification connection."""
+        path = self.executor.decoy.log_path
+        if not path.exists():
+            return 0
+        hits = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if record.get("source_ip") == ATTACKER_IP and record.get("timestamp", 0.0) >= started_at:
+                hits += 1
+        return hits
 
-    # ─── Gym API ────────────────────────────────────────────────────────────
+    def measure_response(
+        self, action: DefenseAction, threat_event: ThreatEvent, condition: str
+    ) -> tuple[Measurement, dict[str, Any]]:
+        """Apply `action` (to the canonical pair, see module docstring), then
+        measure how much of the attack flow survives to the receiving host's
+        firewall counter and how much legitimate service survives.
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
-        super().reset(seed=seed)
-        self._ensure_network()
-        self._step = 0
-        training_scenarios = TRAINING_SCENARIOS()
-        scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
-        threat_event = self._observe_scenario(scenario)
-        context = build_security_context(threat_event, device_criticality="high")
-        self._pending_scenario = scenario
-        self._pending_threat_event = threat_event
-        return self.encoder.encode(context), {"scenario": scenario}
+        The returned Measurement's baseline_packets is only meaningful for
+        ALLOW (its own residual). For every other action it is 0, which
+        Measurement.valid rejects for attacks until the caller supplies the
+        trial's un-responded baseline via outcome.with_baseline() -- so a
+        forgotten baseline can never score as containment.
 
-    def step(self, action: int):
-        """Evaluate `action` against the state actually returned by the
-        previous reset()/step() call -- not a freshly regenerated one, so
-        the action is judged against what the agent actually observed.
-        This also means each step costs exactly one real observation
-        (not two): the state it evaluates was already captured last call,
-        and only the *next* state is freshly observed here.
-        """
-        if action not in INDEX_TO_ACTION:
-            raise ValueError(f"Invalid defense action index: {action}")
-        scenario = self._pending_scenario
-        threat_event = self._pending_threat_event
-        selected_action = INDEX_TO_ACTION[action]
+        A probe that could not be read (counter rule not installed or found,
+        unparsable ping output, generator failure) yields service_loss = -1.0,
+        which Measurement.valid rejects."""
+        event = self._canonical_event(condition, threat_event)
 
-        outcome = self._execute_and_verify(selected_action, threat_event)
-        reward, components = self.calculate_reward(scenario, selected_action, outcome)
+        def probe() -> dict[str, Any]:
+            endpoints = self._flow_endpoints(condition)
+            residual = 0
+            decoy_hits = 0
+            if endpoints is None:
+                self.traffic_gen.generate_normal_mininet_traffic(self.net)
+            else:
+                receiver, senders = endpoints
+                self._clear_counter(receiver, senders)  # a leaked rule from a crashed probe would be read first
+                installed = receiver.cmd(self._counter_rule("A", senders)).strip()
+                if "iptables" in installed.lower():
+                    raise RuntimeError(f"could not install probe counter: {installed}")
+                started_at = time.time()
+                try:
+                    self._attack_for(condition).generate_traffic(self.net)
+                    residual = self._read_counter(receiver)
+                    if action == DefenseAction.DECOY:
+                        time.sleep(0.3)  # the decoy logs after it accepts
+                        decoy_hits = self._decoy_hits_since(started_at)
+                finally:
+                    self._clear_counter(receiver, senders)
+            return {"residual_packets": residual, "service_loss": self._legit_service_loss(), "decoy_hits": decoy_hits}
 
-        self._step += 1
-        self._scenario_index += 1
-        terminated = self._step >= self.episode_length
-
-        training_scenarios = TRAINING_SCENARIOS()
-        next_scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
-        next_threat_event = self._observe_scenario(next_scenario)
-        next_context = build_security_context(next_threat_event, device_criticality="high")
-        self._pending_scenario = next_scenario
-        self._pending_threat_event = next_threat_event
-        observation = self.encoder.encode(next_context)
-
-        info = {"scenario": scenario, "action": selected_action.value, "outcome": outcome, "reward_components": components}
-        return observation, reward, terminated, False, info
+        outcome = self._execute_and_verify(action, event, probe=probe)
+        probed = outcome.pop("probe", None)
+        residual = probed["residual_packets"] if probed else 0
+        measurement = Measurement(
+            condition=condition,
+            action=action,
+            status=outcome["status"],
+            baseline_packets=residual if action == DefenseAction.ALLOW else 0,
+            residual_packets=residual,
+            service_loss=probed["service_loss"] if probed else INVALID_SERVICE_LOSS,
+            intel_verified=bool((probed and probed["decoy_hits"] > 0) or outcome.get("evidence_captured")),
+        )
+        return measurement, outcome
