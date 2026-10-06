@@ -244,7 +244,7 @@ class DemoController:
                 model_path="models/ppo_defense",
                 fallback=RuleBasedDefensePolicy(),
             )
-            ppo_decision = ppo.decide(context, stackelberg_info=stackelberg_reasoning)
+            ppo_decision = ppo.decide(context)
             ppo_fallback_used = ppo.model is None
         except Exception as exc:  # noqa: BLE001
             print(f"[DemoController] PPO load error: {exc}")
@@ -892,7 +892,7 @@ def _select_attack_mode() -> str:
     print("Select attack scenario:")
     for index, key in enumerate(attack_keys, start=1):
         scenario = ATTACK_SCENARIOS[key]
-        print(f"  [{index}] {scenario.label} -> expected response: {scenario.preferred_action.value}")
+        print(f"  [{index}] {scenario.label} -> rule-based default response: {scenario.preferred_action.value}")
     choice = input(f"Enter choice [1-{len(attack_keys)}] (default 1): ").strip()
     try:
         selected_index = int(choice) - 1

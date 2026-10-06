@@ -31,10 +31,10 @@ def _time_calls(fn, context, n: int) -> list[float]:
     return timings
 
 
-def run() -> dict[str, Any]:
+def run(model_path: str = "models/ppo_defense") -> dict[str, Any]:
     rule_policy = RuleBasedDefensePolicy()
     stack_policy = StackelbergDefensePolicy()
-    ppo_policy = PPODefensePolicy(model_path="models/ppo_defense", fallback=rule_policy)
+    ppo_policy = PPODefensePolicy(model_path=model_path)
 
     all_timings: dict[str, list[float]] = {"rule_based": [], "stackelberg": [], "ppo": []}
     scenarios = list(ATTACK_SCENARIOS.values())[:6]  # a representative subset is enough to characterize latency

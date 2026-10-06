@@ -228,4 +228,5 @@ class TestStackelbergDefensePolicyUnknownThreatType:
 
         decision = StackelbergDefensePolicy().decide(context)
 
-        assert decision.action == dos_scenario.preferred_action
+        assert decision.context["stackelberg_reasoning"]["observed_threat"] == dos_scenario.observed_threat_key
+        assert decision.action != DefenseAction.ALERT, "a recognized threat must be solved, not short-circuited to the unknown-threat ALERT"
