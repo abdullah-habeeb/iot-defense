@@ -101,6 +101,23 @@ Stackelberg containment prior vs measured: mean absolute error 0.116 over 90 (ac
    (`DECOY` vs payload attacks 0.80 -> -0.01, `BANDWIDTH_CAP` vs reflection 0.80 -> 0.00, `THROTTLE` vs connection
    exhaustion 0.70 -> -0.01); none of them changed a chosen action except the ICMP case above.
 
+### PPO seed robustness
+
+Ten independent PPO models (seeds 1, 2, 3, 7, 13, 17, 42, 55, 88, 99; the deployed recipe, 120,000 steps each) were trained
+from the same measured outcome table and scored by regret against it: for each condition, how much measured mean
+utility the model's chosen action leaves on the table relative to the best measured action.
+
+- **Mean regret per model: 0.011 to 0.022** (0.017 for seven of the ten, including the deployed seed 7), against a
+  near-optimal threshold of 0.25. All ten are near-optimal; none is a lucky seed.
+- **The same two conditions account for nearly all of it.** `dos_flood_distributed`: all 10 seeds choose `QUARANTINE`
+  (7.30) where `THROTTLE` measures 7.54 (regret 0.24). `tcp_syn_flood_distributed`: 9 of 10 choose `QUARANTINE` (7.30)
+  where `THROTTLE` measures 7.42 (regret 0.12). One seed (55) also picks `THROTTLE` for plain `dos_flood`, where
+  `BLOCK_SOURCE` is best (regret 0.10).
+- **A miss shared by every seed is systematic, so it is not initialization noise.** The likely cause is the training
+  noise model: PPO sees a mislabelled detector reading 15% of the time, and `QUARANTINE` stays good under any mislabel
+  while `THROTTLE` is poor for most attacks, so a small hedge toward `QUARANTINE` costs little in expectation. This is a
+  hypothesis consistent with the data, not something tested here (a run with label noise off would test it).
+
 ### What it does not support
 
 - **No claim that PPO beats Stackelberg.** The gap is 0.027 utility with a CI touching zero, driven by 1 condition in 21.
@@ -114,7 +131,7 @@ Stackelberg containment prior vs measured: mean absolute error 0.116 over 90 (ac
   decoy or evidence capture never pays for the containment it gives up here.
 - **`dos_flood`'s measurement is noisy by construction** (an unthrottled flood; baseline varied by about +/-37%),
   which affects all arms equally.
-- **PPO ran with one training seed (7).** A multi-seed regret check is pending, and has to run with the VM idle.
+- **PPO's training-seed sensitivity is small but its one systematic miss is a hedge, not noise** (next section).
 
 ---
 
