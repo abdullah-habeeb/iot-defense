@@ -15,6 +15,37 @@ from scapy.all import Packet, rdpcap
 _PID_RE = re.compile(r"^\d+$")
 
 
+def describe_for_display(packet: Any, protocol_name: str, src_ip: str, dst_ip: str) -> dict[str, Any]:
+    """How the dashboard should label a captured packet.
+
+    Only IPv4 and ARP carry addresses the detection pipeline understands; the
+    rest of what Linux puts on a virtual interface (IPv6 neighbour discovery,
+    multicast listener reports, link-layer chatter) is kernel housekeeping
+    that appears whenever an interface comes up. It is flagged `background`
+    so the feed can show real traffic first, and given a readable label
+    instead of "unknown".
+    """
+    ip6 = packet.getlayer("IPv6")
+    if ip6 is not None and packet.getlayer("IP") is None:
+        layer_names = [layer.__class__.__name__ for layer in packet.iterpayloads()]
+        protocol = "ICMPv6" if any(name.startswith("ICMPv6") for name in layer_names) else "IPv6"
+        return {
+            "display_src": str(ip6.src),
+            "display_dst": str(ip6.dst),
+            "display_protocol": protocol,
+            "background": True,
+        }
+    if src_ip != "unknown" and dst_ip != "unknown":
+        return {"display_src": src_ip, "display_dst": dst_ip, "display_protocol": protocol_name, "background": False}
+    ether = packet.getlayer("Ether")
+    return {
+        "display_src": str(ether.src) if ether is not None else "unknown",
+        "display_dst": str(ether.dst) if ether is not None else "unknown",
+        "display_protocol": protocol_name,
+        "background": True,
+    }
+
+
 class PacketMonitor:
     """Capture packets from a Mininet host and convert them into structured events."""
 
@@ -226,6 +257,7 @@ class PacketMonitor:
 
             src_ip = ip_layer.src if ip_layer is not None else (arp_layer.psrc if arp_layer is not None else "unknown")
             dst_ip = ip_layer.dst if ip_layer is not None else (arp_layer.pdst if arp_layer is not None else "unknown")
+            display = describe_for_display(packet, protocol_name, src_ip, dst_ip)
 
             direction = "unknown"
             if host_ip is not None:
@@ -249,6 +281,11 @@ class PacketMonitor:
                 # bits for FeatureAggregator (port presence alone can't tell
                 # SYN/ACK apart -- every TCP packet has both ports set).
                 "tcp_flags": int(tcp_layer.flags) if tcp_layer is not None else None,
+                # Display-only: src_ip/dst_ip/protocol above stay exactly what
+                # FeatureAggregator keys flows on (it drops non-IPv4 packets
+                # because their src_ip is "unknown"); these describe the same
+                # packet for the dashboard feed without changing that.
+                **display,
             }
             events.append(event)
         return events

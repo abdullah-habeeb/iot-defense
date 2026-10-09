@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
@@ -51,16 +51,33 @@ app = FastAPI(
 # Singleton controller — shared across all SSE streams and the /state endpoint
 controller = DemoController()
 
+class _RevalidatingStaticFiles(StaticFiles):
+    """Static files that the browser must revalidate on every load, so an
+    edited dashboard.js/style.css is never served stale from its cache."""
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Mount static files (index.html, dashboard.js, style.css)
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+app.mount("/static", _RevalidatingStaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.get("/")
-async def read_root() -> FileResponse:
+async def read_root() -> HTMLResponse:
     """Serve the dashboard SPA."""
-    return FileResponse(str(_STATIC_DIR / "index.html"))
+    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for asset in ("style.css", "dashboard.js"):
+        try:
+            stamp = int((_STATIC_DIR / asset).stat().st_mtime)
+        except OSError:
+            continue
+        html = html.replace(f"/static/{asset}", f"/static/{asset}?v={stamp}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/state")
