@@ -88,6 +88,7 @@ def _initial_state() -> dict[str, Any]:
         "threat_status": "NORMAL",
         "timeline": [],
         "traffic": [],
+        "traffic_background": 0,
         "threat_event": None,
         "security_context": None,
         "policy_comparison": None,
@@ -289,6 +290,21 @@ class DemoController:
             "ppo_fallback_used": ppo_fallback_used,
         }
         return comparison, rule_decision, stack_decision, ppo_decision
+
+    @staticmethod
+    def _feed_sample(packets: list[dict[str, Any]], limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        """The packets the dashboard feed shows for one capture, and how many
+        background packets (IPv6 neighbour discovery and similar kernel
+        housekeeping) were left out of it.
+
+        Real traffic is preferred and the most recent `limit` of it is shown.
+        Only a capture with nothing but background packets falls back to
+        showing those, so the feed is never empty for a non-empty capture.
+        """
+        foreground = [packet for packet in packets if not packet.get("background")]
+        if not foreground:
+            return packets[-limit:], 0
+        return foreground[-limit:], len(packets) - len(foreground)
 
     # ─── Packet observation ───────────────────────────────────────────────────
 
@@ -665,13 +681,14 @@ class DemoController:
             cap_path = await asyncio.to_thread(monitor.stop_capture, self.net, capture_session, 4.0)
             raw_packets = self._observe_packets(monitor.read_capture(self.net, "sensor", cap_path))
 
-            traffic_events = raw_packets[:20]
+            traffic_events, baseline_background = self._feed_sample(raw_packets)
             flows = aggregator.aggregate(raw_packets)
 
             await self.update_state(
                 {
                     "phase": "OBSERVING",
                     "traffic": traffic_events,
+                    "traffic_background": baseline_background,
                     "metrics": {
                         **self.state["metrics"],
                         "packets_observed": len(raw_packets),
@@ -760,11 +777,15 @@ class DemoController:
             # should find.
             threat_event: ThreatEvent = self._classify_attack_traffic(atk_flows)
 
-            all_traffic = (traffic_events + atk_packets)[:20]
+            # The feed follows the capture the run is on: the attack's own
+            # packets now, not the baseline's (it used to show
+            # (baseline + attack)[:20], and the baseline already filled all 20).
+            attack_feed, attack_background = self._feed_sample(atk_packets)
             await self.update_state(
                 {
                     "threat_status": "THREAT_DETECTED",
-                    "traffic": all_traffic,
+                    "traffic": attack_feed,
+                    "traffic_background": attack_background,
                     "metrics": {
                         **self.state["metrics"],
                         "packets_observed": self.state["metrics"]["packets_observed"] + len(atk_packets),
