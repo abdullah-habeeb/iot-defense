@@ -24,7 +24,7 @@ from iot_defense.simulation.traffic import start_multi_connection_listener
 # shape, sub-variations, and labeling condition), so this file still needs
 # one branch added per new attack -- what's generic here is only the bucket
 # *count*, which grows automatically as ATTACK_SCENARIOS grows.
-_ATTACK_KEYS = tuple(ATTACK_SCENARIOS.keys())
+_ATTACK_KEYS = tuple(key for key, scenario in ATTACK_SCENARIOS.items() if scenario.per_flow_detectable)
 
 # Every attack registered after the original 5 reuses its own registered
 # AttackScenario.generate_traffic directly (see the dispatch in

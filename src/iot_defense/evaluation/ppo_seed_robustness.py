@@ -1,16 +1,12 @@
-"""PPO synthetic-training seed-robustness sweep: how often does the
-project's own training recipe converge every scenario to its registered
-preferred_action across different random seeds, not just this project's
-own hardcoded seed=7?
+"""PPO seed-robustness sweep on measured outcomes.
 
-Trains N independent models (fast, deterministic, no Mininet -- each run
-is a few tens of seconds) at the exact recipe train_ppo.py actually uses,
-varying only the seed, and checks each one's convergence the same way
-tests/test_ppo.py's own regression test does. Reports the aggregate
-success rate with a Wilson confidence interval, not a single anecdote --
-this is what a methods section can actually cite instead of "we found a
-good seed."
+Trains N independent PPO models from the measured outcome table, varying
+only the seed, and scores each by REGRET against the table: for every
+condition, how much measured mean utility the model's chosen action leaves
+on the table relative to the best measured action. Nothing here consults a
+registered preferred_action.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -18,91 +14,78 @@ import json
 from pathlib import Path
 from typing import Any
 
-from iot_defense.attacks.registry import ATTACK_SCENARIOS
-from iot_defense.defense.decision import DefenseAction
-from iot_defense.defense.ppo_env import context_for_scenario
+import numpy as np
+
+from iot_defense.defense.ppo_env import TRAINING_SCENARIOS, context_for_scenario
 from iot_defense.defense.ppo_policy import PPODefensePolicy
-from iot_defense.evaluation.report import _wilson_ci
+from iot_defense.evaluation.outcome import OutcomeTable
 from iot_defense.simulation.train_ppo import train
 
 DEFAULT_SEEDS: tuple[int, ...] = (1, 2, 3, 7, 13, 17, 42, 55, 88, 99)
+# A model is "near-optimal" if its mean per-condition regret is within this
+# many utility units (the objective spans roughly [-1, 10]).
+NEAR_OPTIMAL_REGRET = 0.25
 
 
-def _mismatches_for_model(model_path: str) -> list[tuple[str, str, str]]:
+def regret_for_model(model_path: str, table: OutcomeTable) -> dict[str, Any]:
     policy = PPODefensePolicy(model_path=model_path)
-    mismatches = []
-    normal_decision = policy.decide(context_for_scenario("normal"))
-    if normal_decision.action != DefenseAction.ALLOW:
-        mismatches.append(("normal", normal_decision.action.name, "ALLOW"))
-    for key, scenario in ATTACK_SCENARIOS.items():
-        decision = policy.decide(context_for_scenario(scenario.attack_type))
-        if decision.action != scenario.preferred_action:
-            mismatches.append((key, decision.action.name, scenario.preferred_action.name))
-    return mismatches
+    per_condition: dict[str, dict[str, Any]] = {}
+    for condition in TRAINING_SCENARIOS():
+        chosen = policy.decide(context_for_scenario(condition)).action
+        best = table.best_action(condition)
+        per_condition[condition] = {
+            "chosen": chosen.value,
+            "best_measured": best.value,
+            "regret": table.mean(condition, best) - table.mean(condition, chosen),
+        }
+    return {
+        "mean_regret": float(np.mean([c["regret"] for c in per_condition.values()])),
+        "max_regret": float(max(c["regret"] for c in per_condition.values())),
+        "per_condition": per_condition,
+    }
 
 
-def run(seeds: tuple[int, ...] = DEFAULT_SEEDS, scratch_dir: str = "/tmp/ppo_seed_sweep") -> list[dict[str, Any]]:
+def run(
+    table_path: str | Path,
+    seeds: tuple[int, ...] = DEFAULT_SEEDS,
+    scratch_dir: str = "/tmp/ppo_seed_sweep",
+    timesteps: int | None = None,
+) -> list[dict[str, Any]]:
     Path(scratch_dir).mkdir(parents=True, exist_ok=True)
+    table = OutcomeTable.from_jsonl(table_path)
     rows = []
     for seed in seeds:
         output_path = f"{scratch_dir}/seed_{seed}"
-        # train_ppo.py's own PPO(..., seed=7) is hardcoded; reproduce its
-        # exact recipe here with only the seed varied, by monkeypatching
-        # is riskier than it looks, so instead call the real training
-        # internals the same way tests/test_ppo.py's own regression test
-        # does, via a thin, explicit seed override.
-        from stable_baselines3 import PPO as _PPO
-        from iot_defense.defense.ppo_env import TRAINING_SCENARIOS, DefenseDecisionEnv, RewardConfig, load_ppo_training_config
-
-        ppo_config = load_ppo_training_config()
-        episode_length = max(int(ppo_config.get("environment_episode_length", len(TRAINING_SCENARIOS()))), len(TRAINING_SCENARIOS()))
-        reward_config = RewardConfig.from_mapping(ppo_config.get("reward", {}))
-        environment = DefenseDecisionEnv(episode_length=episode_length, reward_config=reward_config)
-        model = _PPO(
-            "MlpPolicy", environment, policy_kwargs={"net_arch": [64, 64]},
-            n_steps=170, batch_size=170, learning_rate=0.001, ent_coef=0.01,
-            device="cpu", verbose=0, seed=seed,
-        )
-        model.learn(total_timesteps=int(ppo_config.get("training_timesteps", 25500)))
-        model.save(output_path)
-
-        mismatches = _mismatches_for_model(output_path)
-        rows.append({
-            "seed": seed,
-            "fully_converged": len(mismatches) == 0,
-            "mismatch_count": len(mismatches),
-            "mismatches": mismatches,
-        })
-        print(f"[seed_robustness] seed={seed} mismatches={len(mismatches)} {mismatches}", flush=True)
+        train(total_timesteps=timesteps, output_path=output_path, table_path=table_path, seed=seed)
+        result = regret_for_model(output_path, table)
+        rows.append({"seed": seed, **result})
+        print(f"[seed_robustness] seed={seed} mean_regret={result['mean_regret']:.3f}", flush=True)
     return rows
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    n = len(rows)
-    converged = sum(1 for r in rows if r["fully_converged"])
-    ci = _wilson_ci(converged, n)
+    regrets = np.array([r["mean_regret"] for r in rows])
     return {
-        "seeds_tested": n,
-        "fully_converged_count": converged,
-        "fully_converged_rate": round(converged / n, 4) if n else None,
-        "fully_converged_rate_ci95": ci,
-        "mean_mismatch_count": round(sum(r["mismatch_count"] for r in rows) / n, 3) if n else None,
+        "seeds_tested": len(rows),
+        "mean_regret_mean": float(regrets.mean()),
+        "mean_regret_median": float(np.median(regrets)),
+        "mean_regret_worst_seed": float(regrets.max()),
+        "near_optimal_seeds": int((regrets <= NEAR_OPTIMAL_REGRET).sum()),
+        "near_optimal_threshold": NEAR_OPTIMAL_REGRET,
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--table", default="data/outcomes/outcome_table.jsonl")
     parser.add_argument("--output", default="data/evaluation/ppo_seed_robustness.jsonl")
     parser.add_argument("--summary-output", default="data/evaluation/ppo_seed_robustness.summary.json")
     args = parser.parse_args()
 
-    rows = run()
+    rows = run(args.table)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row) + "\n")
-
+    output.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     summary = summarize(rows)
     Path(args.summary_output).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))

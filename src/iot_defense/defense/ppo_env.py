@@ -1,10 +1,18 @@
-"""Small Gymnasium decision simulator used exclusively for PPO training."""
+"""Gymnasium environment that trains PPO from MEASURED response outcomes.
+
+Each step draws a true condition, shows the policy a noisy and sometimes
+mislabelled detector observation of it, and rewards the chosen action with a
+realized utility measured in live Mininet for the TRUE condition (the
+evaluation/outcome_table.py table). The reward never reads a registered
+attack's preferred_action, and the observation carries no other policy's
+output.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+import random
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
 import numpy as np
@@ -14,17 +22,15 @@ from gymnasium import spaces
 from iot_defense.defense.context import Beliefs, Desires, SecurityContext
 from iot_defense.defense.decision import DefenseAction
 
+if TYPE_CHECKING:
+    from iot_defense.evaluation.outcome import OutcomeTable
 
 ACTION_TO_INDEX = {action: index for index, action in enumerate(DefenseAction)}
 INDEX_TO_ACTION = {index: action for action, index in ACTION_TO_INDEX.items()}
 
 # Intentions are a distinct axis from attack identity -- several attacks may
-# reasonably share one (e.g. two containment-preferring attacks both using
-# "contain_malicious_activity") -- so this stays an explicit, static list
-# rather than one auto-derived 1:1 from ATTACK_SCENARIOS. Every intention
-# used by any registered scenario's `intention` field, plus the two fixed
-# ones below ("normal"'s own, and a reserved value used elsewhere in the
-# real controller but not by any training scenario), must appear here.
+# share one -- so this stays an explicit, static list rather than one
+# auto-derived 1:1 from ATTACK_SCENARIOS.
 INTENTIONS = (
     "protect_legitimate_iot_service",
     "contain_malicious_activity",
@@ -32,18 +38,15 @@ INTENTIONS = (
     "minimize_unnecessary_disruption",
 )
 
+CRITICALITY_LEVELS = ("unknown", "low", "medium", "high")
 
-# TRAINING_SCENARIOS, _scenario_by_attack_type(), and OBSERVATION_SIZE are
-# functions, not module-level constants: this module is eagerly imported by
-# iot_defense.defense's own package __init__, which the registry itself
-# pulls in while building ATTACK_SCENARIOS -- a top-level constant here
-# would deadlock that cycle. The underlying import is cheap after the
-# first real load (cached in sys.modules), so each call only rebuilds a
-# small tuple/dict, not a re-import.
+
+# Functions, not module-level constants: this module is eagerly imported by
+# iot_defense.defense's package __init__, which the registry itself pulls in
+# while building ATTACK_SCENARIOS -- a top-level import would deadlock that
+# cycle.
 def TRAINING_SCENARIOS() -> tuple[str, ...]:
-    """The 'normal' scenario plus one entry per registered attack, in
-    registry order -- a new AttackScenario automatically gets its own
-    training scenario and one-hot slot with no other change in this file."""
+    """The 'normal' condition plus one entry per registered attack, in registry order."""
     from iot_defense.attacks.registry import ATTACK_SCENARIOS
 
     return ("normal",) + tuple(scenario.attack_type for scenario in ATTACK_SCENARIOS.values())
@@ -56,37 +59,11 @@ def _scenario_by_attack_type() -> dict[str, Any]:
 
 
 def OBSERVATION_SIZE() -> int:
-    return 6 + len(TRAINING_SCENARIOS()) + len(INTENTIONS) + len(DefenseAction)
-
-
-@dataclass(frozen=True, slots=True)
-class RewardConfig:
-    """Configurable reward coefficients; values are modelling assumptions."""
-
-    attack_contained: float = 5.0
-    attacker_diverted: float = 4.0
-    intelligence_gained: float = 3.0
-    service_preserved: float = 3.0
-    successful_compromise: float = -6.0
-    false_positive_intervention: float = -4.0
-    unnecessary_isolation: float = -3.0
-    service_disruption: float = -3.0
-    response_cost: float = -0.5
-
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> "RewardConfig":
-        """Build from a plain dict (e.g. config/policies.yaml's policy.ppo.reward),
-        ignoring any keys that aren't real fields rather than raising on them."""
-        known = {f.name for f in fields(cls)}
-        return cls(**{key: float(value) for key, value in data.items() if key in known})
+    return 6 + len(TRAINING_SCENARIOS()) + len(INTENTIONS)
 
 
 def load_ppo_training_config() -> dict[str, Any]:
-    """Load policy.ppo from config/policies.yaml, mirroring the pattern
-    defense/policy.py and defense/stackelberg.py already use."""
     config_path = Path(__file__).resolve().parents[3] / "config" / "policies.yaml"
-    if not config_path.exists():
-        return {}
     with config_path.open("r", encoding="utf-8") as fh:
         loaded = yaml.safe_load(fh) or {}
     return loaded.get("policy", {}).get("ppo", {})
@@ -97,34 +74,32 @@ class SecurityContextEncoder:
 
     criticality = {"unknown": 0.0, "low": 0.33, "medium": 0.66, "high": 1.0}
 
-    def encode(self, context: SecurityContext, stackelberg_info: dict[str, Any] | None = None) -> np.ndarray:
+    def encode(self, context: SecurityContext) -> np.ndarray:
         beliefs = context.beliefs
         features = beliefs.observed_features
         threat_type = beliefs.threat_type.lower()
-        intention = context.intention
         packet_rate = min(max(float(features.get("packets_per_second", 0.0)), 0.0) / 100.0, 1.0)
         unique_ports = min(max(float(features.get("unique_destination_ports", 0.0)), 0.0) / 20.0, 1.0)
         history = min(len(beliefs.previous_relevant_events) / 5.0, 1.0)
         threat_one_hot = [float(threat_type == scenario) for scenario in TRAINING_SCENARIOS()]
-        intention_one_hot = [float(intention == candidate) for candidate in INTENTIONS]
-        base_vector = [
+        intention_one_hot = [float(context.intention == candidate) for candidate in INTENTIONS]
+        return np.array(
+            [
                 np.clip(beliefs.threat_score, 0.0, 1.0),
                 np.clip(beliefs.confidence, 0.0, 1.0),
                 packet_rate,
                 unique_ports,
                 self.criticality.get(beliefs.device_criticality.lower(), 0.0),
                 history,
-            ] + threat_one_hot + intention_one_hot
-        stack_vector = [0.0] * len(DefenseAction)
-        if stackelberg_info:
-            selected = stackelberg_info.get("selected_action")
-            if selected in {action.value for action in DefenseAction}:
-                stack_vector[ACTION_TO_INDEX[DefenseAction(selected)]] = 1.0
-        return np.array(base_vector + stack_vector, dtype=np.float32)
+            ]
+            + threat_one_hot
+            + intention_one_hot,
+            dtype=np.float32,
+        )
 
 
 def context_for_scenario(scenario: str) -> SecurityContext:
-    """Create one deterministic training scenario from supported detector states."""
+    """The canonical, noise-free detector observation for one condition."""
     if scenario == "normal":
         beliefs = Beliefs(
             threat_type="normal",
@@ -134,8 +109,7 @@ def context_for_scenario(scenario: str) -> SecurityContext:
             destination_device="10.0.0.10",
             observed_features={"packets_per_second": 1.0, "unique_destination_ports": 0},
         )
-        intention = "protect_legitimate_iot_service"
-        return SecurityContext(beliefs=beliefs, desires=Desires(), intention=intention)
+        return SecurityContext(beliefs=beliefs, desires=Desires(), intention="protect_legitimate_iot_service")
 
     attack = _scenario_by_attack_type().get(scenario)
     if attack is None:
@@ -151,115 +125,114 @@ def context_for_scenario(scenario: str) -> SecurityContext:
     return SecurityContext(beliefs=beliefs, desires=Desires(), intention=attack.intention)
 
 
+def noisy_context(
+    true_condition: str,
+    rng: np.random.Generator,
+    *,
+    label_error_rate: float,
+    score_sigma: float,
+    feature_jitter: float,
+) -> tuple[SecurityContext, str]:
+    """A detector observation of `true_condition` as a real detector could
+    produce it: sometimes mislabelled, with jittered score/confidence/
+    features and an arbitrary device-criticality tag. Returns the context
+    and the label the detector reported."""
+    conditions = TRAINING_SCENARIOS()
+    reported = true_condition
+    if rng.random() < label_error_rate:
+        reported = str(rng.choice([c for c in conditions if c != true_condition]))
+    base = context_for_scenario(reported)
+    beliefs = base.beliefs
+    features = {
+        key: max(0.0, float(value) * (1.0 + rng.uniform(-feature_jitter, feature_jitter)))
+        for key, value in beliefs.observed_features.items()
+    }
+    noisy = Beliefs(
+        threat_type=beliefs.threat_type,
+        threat_score=float(np.clip(beliefs.threat_score + rng.normal(0.0, score_sigma), 0.0, 1.0)),
+        confidence=float(np.clip(beliefs.confidence + rng.normal(0.0, score_sigma), 0.0, 1.0)),
+        source_device=beliefs.source_device,
+        destination_device=beliefs.destination_device,
+        observed_features=features,
+        device_criticality=str(rng.choice(CRITICALITY_LEVELS)),
+    )
+    return SecurityContext(beliefs=noisy, desires=base.desires, intention=base.intention), reported
+
+
 class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
-    """Deterministic repeated decision simulator; it never starts Mininet."""
+    """Contextual-bandit environment over the measured outcome table."""
 
     metadata = {"render_modes": []}
 
-    def __init__(self, episode_length: int | None = None, reward_config: RewardConfig | None = None) -> None:
+    def __init__(
+        self,
+        table: "OutcomeTable",
+        *,
+        episode_length: int = 68,
+        label_error_rate: float = 0.15,
+        score_sigma: float = 0.07,
+        feature_jitter: float = 0.5,
+        reward_scale: float = 10.0,
+    ) -> None:
         super().__init__()
+        table.require_complete(TRAINING_SCENARIOS())
+        self.table = table
         self.action_space = spaces.Discrete(len(DefenseAction))
         self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
-        # Defaults to exactly the number of registered scenarios, not a
-        # fixed number: with episode_length < len(TRAINING_SCENARIOS()),
-        # step() cycles _scenario_index past the episode boundary before
-        # the agent ever gets to *act* on the later scenarios in that
-        # cycle -- they're only ever shown as the terminal observation
-        # right before the episode ends, so calculate_reward() is never
-        # called for them and the policy never receives a training signal
-        # for those states. This was silently true from the day episode
-        # length happened to equal scenario count (a hardcoded 4 for 4
-        # scenarios); adding THROTTLE surfaced it as a real, confirmed
-        # non-convergence for the *scenario* cycled in last place
-        # (data_exfiltration) even after 20000 training timesteps -- more
-        # training could never have fixed it, since that scenario was
-        # structurally never trained on at all.
-        self.episode_length = episode_length if episode_length is not None else len(TRAINING_SCENARIOS())
-        self.reward_config = reward_config or RewardConfig()
+        self.episode_length = episode_length
+        self.label_error_rate = label_error_rate
+        self.score_sigma = score_sigma
+        self.feature_jitter = feature_jitter
+        self.reward_scale = reward_scale
         self.encoder = SecurityContextEncoder()
+        self._reward_rng = random.Random(0)
         self._step = 0
-        self._scenario_index = 0
+        self._true_condition = "normal"
+
+    @classmethod
+    def from_config(cls, table: "OutcomeTable", episode_length: int | None = None) -> "DefenseDecisionEnv":
+        config = load_ppo_training_config()
+        return cls(
+            table,
+            episode_length=episode_length or int(config["environment_episode_length"]),
+            label_error_rate=float(config["label_error_rate"]),
+            score_sigma=float(config["score_noise_sigma"]),
+            feature_jitter=float(config["feature_jitter"]),
+            reward_scale=float(config["reward_scale"]),
+        )
+
+    def _draw(self) -> tuple[np.ndarray, str]:
+        self._true_condition = str(self.np_random.choice(TRAINING_SCENARIOS()))
+        context, reported = noisy_context(
+            self._true_condition,
+            self.np_random,
+            label_error_rate=self.label_error_rate,
+            score_sigma=self.score_sigma,
+            feature_jitter=self.feature_jitter,
+        )
+        return self.encoder.encode(context), reported
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
+        if seed is not None:
+            self._reward_rng = random.Random(seed)
         self._step = 0
-        self._scenario_index = 0
-        context = context_for_scenario("normal")
-        return self.encoder.encode(context), {"scenario": "normal"}
+        observation, reported = self._draw()
+        return observation, {"true_condition": self._true_condition, "reported_condition": reported}
 
     def step(self, action: int):
         if action not in INDEX_TO_ACTION:
             raise ValueError(f"Invalid defense action index: {action}")
-        training_scenarios = TRAINING_SCENARIOS()
-        scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
-        context = context_for_scenario(scenario)
-        selected_action = INDEX_TO_ACTION[action]
-        reward, components = self.calculate_reward(context, selected_action)
+        selected = INDEX_TO_ACTION[action]
+        true_condition = self._true_condition
+        utility = self.table.sample(true_condition, selected, self._reward_rng)
         self._step += 1
-        self._scenario_index += 1
-        terminated = self._step >= self.episode_length
-        next_scenario = training_scenarios[self._scenario_index % len(training_scenarios)]
-        observation = self.encoder.encode(context_for_scenario(next_scenario))
-        return observation, reward, terminated, False, {"scenario": scenario, "reward_components": components}
-
-    def calculate_reward(self, context: SecurityContext, action: DefenseAction) -> tuple[float, dict[str, float]]:
-        """Calculate the configured, deterministic reward for one simulated outcome."""
-        config = self.reward_config
-        threat_type = context.beliefs.threat_type
-        components: dict[str, float] = {"response_cost": config.response_cost}
-        reward = config.response_cost
-
-        if threat_type == "normal":
-            if action == DefenseAction.ALLOW:
-                components["service_preserved"] = config.service_preserved
-                reward += config.service_preserved
-            else:
-                components["false_positive_intervention"] = config.false_positive_intervention
-                reward += config.false_positive_intervention
-                # service_disruption used to apply only to ISOLATE, leaving
-                # every other wrong action on normal traffic (THROTTLE,
-                # DECOY, BLOCK_SOURCE, ...) penalized identically regardless
-                # of which one it was -- weaker gradient to avoid any of
-                # them specifically than to avoid ISOLATE. Found via a real
-                # 10-seed training sweep: both non-converging seeds' one
-                # mistake was a false positive on normal, and both chose a
-                # non-ISOLATE action (THROTTLE, DECOY) -- exactly the two
-                # actions this asymmetry gave the least reason to avoid.
-                # Applying it uniformly (still stacked with the ISOLATE-
-                # specific term below, since a full interface-down remains
-                # more disruptive than any other single action) gives every
-                # false-positive action equal pressure to be avoided.
-                components["service_disruption"] = config.service_disruption
-                reward += config.service_disruption
-                if action == DefenseAction.ISOLATE:
-                    components["unnecessary_isolation"] = config.unnecessary_isolation
-                    reward += config.unnecessary_isolation
-        else:
-            attack = _scenario_by_attack_type().get(threat_type)
-            if attack is None:
-                raise ValueError(f"Unsupported threat type for reward calculation: {threat_type!r}")
-
-            if action == attack.preferred_action:
-                if attack.preferred_action == DefenseAction.DECOY:
-                    # Deception only pays off framed as diversion +
-                    # intelligence gathering, not generic "containment".
-                    components["attacker_diverted"] = config.attacker_diverted
-                    components["intelligence_gained"] = config.intelligence_gained
-                    reward += config.attacker_diverted + config.intelligence_gained
-                else:
-                    # ISOLATE (and, once registered, any other
-                    # containment-style preferred action) -- successful
-                    # containment of an attack this volumetric or direct
-                    # offers no useful deception target.
-                    components["attack_contained"] = config.attack_contained
-                    reward += config.attack_contained
-            elif action == DefenseAction.ALLOW:
-                components["successful_compromise"] = config.successful_compromise
-                reward += config.successful_compromise
-            else:
-                # Any other non-preferred, non-ALLOW response: still better
-                # than letting the attack through, but not the response
-                # this scenario is optimized for.
-                components["service_disruption"] = config.service_disruption
-                reward += config.service_disruption
-        return float(reward), components
+        observation, reported = self._draw()
+        info = {
+            "true_condition": true_condition,
+            "action": selected.value,
+            "utility": utility,
+            "next_true_condition": self._true_condition,
+            "next_reported_condition": reported,
+        }
+        return observation, utility / self.reward_scale, self._step >= self.episode_length, False, info

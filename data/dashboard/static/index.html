@@ -8,13 +8,32 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/></symbol>
+    <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+    <symbol id="i-radio" viewBox="0 0 24 24"><path d="M4.9 19.1a10 10 0 010-14.2M7.8 16.2a6 6 0 010-8.4M16.2 7.8a6 6 0 010 8.4M19.1 4.9a10 10 0 010 14.2"/><circle cx="12" cy="12" r="1.5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18M5 21h14M6 7h12"/><path d="M6 7l-3 7a3 3 0 006 0zM18 7l-3 7a3 3 0 006 0z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4l6 2 6-2v14l-6 2-6-2-6 2V6z"/><path d="M9 4v14M15 6v14"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-bars" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0zM7 6H4v2a3 3 0 003 3M17 6h3v2a3 3 0 01-3 3"/></symbol>
+  </defs>
+</svg>
+<a class="skip-link" href="#main-content">Skip to dashboard</a>
 
 <!-- ═══════════════════════════════════════════════════════════
      HEADER
 ════════════════════════════════════════════════════════════ -->
 <header class="dashboard-header">
   <div class="header-logo">
-    <span class="sys-title">🛡 RESIDENTIAL IoT DEFENSE SYSTEM</span>
+    <span class="sys-title"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-shield"/></svg> RESIDENTIAL IoT DEFENSE SYSTEM</span>
     <span class="sys-sub">Security Operations Console · Cyber Defense Demonstrator</span>
   </div>
 
@@ -26,7 +45,7 @@
       <span class="conn-label" id="conn-label">DISCONNECTED</span>
     </div>
 
-    <div class="phase-badge" id="phase-badge">IDLE</div>
+    <div class="phase-badge" id="phase-badge" role="status" aria-live="polite" aria-label="Pipeline phase">IDLE</div>
 
     <div class="phase-badge" id="attack-mode-badge" style="display:none">ATTACK MODE</div>
 
@@ -45,31 +64,31 @@
 <div style="background:var(--bg-surface);border-bottom:1px solid var(--border-subtle);">
   <div class="pipeline-flow" id="pipeline-flow">
     <div class="pipe-step" id="pipe-network"  data-phases="STARTING_NETWORK,BASELINE,OBSERVING,THREAT_DETECTED,DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
-      <div class="pipe-icon">🌐</div><div class="pipe-label">Network</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-globe"/></svg></div><div class="pipe-label">Network</div>
     </div>
     <div class="pipe-arrow"></div>
     <div class="pipe-step" id="pipe-observe"  data-phases="OBSERVING,THREAT_DETECTED,DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
-      <div class="pipe-icon">📡</div><div class="pipe-label">Capture</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-radio"/></svg></div><div class="pipe-label">Capture</div>
     </div>
     <div class="pipe-arrow"></div>
     <div class="pipe-step" id="pipe-detect"   data-phases="THREAT_DETECTED,DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
-      <div class="pipe-icon">🔍</div><div class="pipe-label">Detection</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-search"/></svg></div><div class="pipe-label">Detection</div>
     </div>
     <div class="pipe-arrow"></div>
     <div class="pipe-step" id="pipe-context"  data-phases="DECIDING,RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
-      <div class="pipe-icon">🧠</div><div class="pipe-label">Context</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-layers"/></svg></div><div class="pipe-label">Context</div>
     </div>
     <div class="pipe-arrow"></div>
     <div class="pipe-step" id="pipe-decision" data-phases="RESPONDING,DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
-      <div class="pipe-icon">⚖️</div><div class="pipe-label">Decision</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-scale"/></svg></div><div class="pipe-label">Decision</div>
     </div>
     <div class="pipe-arrow"></div>
     <div class="pipe-step" id="pipe-response" data-phases="DECOY_ACTIVE,ISOLATED,RESTORING,RESTORED,COMPLETE">
-      <div class="pipe-icon">🛡️</div><div class="pipe-label">Response</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-shield-check"/></svg></div><div class="pipe-label">Response</div>
     </div>
     <div class="pipe-arrow"></div>
     <div class="pipe-step" id="pipe-recovery" data-phases="RESTORED,COMPLETE">
-      <div class="pipe-icon">✅</div><div class="pipe-label">Recovery</div>
+      <div class="pipe-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-check"/></svg></div><div class="pipe-label">Recovery</div>
     </div>
   </div>
 </div>
@@ -77,17 +96,17 @@
 <!-- ═══════════════════════════════════════════════════════════
      MAIN DASHBOARD GRID
 ════════════════════════════════════════════════════════════ -->
-<main class="dashboard-main">
+<main class="dashboard-main" id="main-content">
 
   <!-- ── A. NETWORK TOPOLOGY ─────────────────────────────── -->
   <section class="card span-3" id="section-topology">
     <div class="card-header">
-      <span class="card-icon">🗺</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-map"/></svg></span>
       <span class="card-title card-title-accent">Network Topology</span>
       <span style="margin-left:auto;font-size:0.7rem;color:var(--text-muted)">iot-home-lab · OVSKernelSwitch</span>
     </div>
     <div class="topology-wrap">
-      <svg class="topology-svg" id="topology-svg" viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg">
+      <svg class="topology-svg" id="topology-svg" viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Network topology: sensor, camera, smart plug, attacker and decoy connected through switch s1">
         <!-- ── Links (drawn first, behind nodes) ── -->
         <line class="topo-link" id="link-sensor"     x1="180" y1="130" x2="450" y2="130"/>
         <line class="topo-link" id="link-camera"     x1="450" y1="130" x2="270" y2="60"/>
@@ -151,13 +170,15 @@
   <!-- ── B. LIVE TRAFFIC ─────────────────────────────────── -->
   <section class="card span-2" id="section-traffic">
     <div class="card-header">
-      <span class="card-icon">📶</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-activity"/></svg></span>
       <span class="card-title">Live Packet Feed</span>
+      <span class="card-note" id="traffic-window-note">latest 20</span>
       <span class="card-badge" id="traffic-count-badge" style="background:rgba(6,182,212,0.1);color:var(--accent-cyan);border:1px solid rgba(6,182,212,0.3)">0 pkts</span>
     </div>
     <div class="card-body" style="padding:0;">
       <div class="traffic-table-wrap">
         <table class="traffic-table" id="traffic-table">
+          <caption class="sr-only">Most recent captured packets</caption>
           <thead>
             <tr>
               <th>Time</th>
@@ -180,7 +201,7 @@
   <!-- ── C. METRICS ─────────────────────────────────────── -->
   <section class="card" id="section-metrics">
     <div class="card-header">
-      <span class="card-icon">📊</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-bars"/></svg></span>
       <span class="card-title">Metrics</span>
     </div>
     <div class="card-body">
@@ -237,7 +258,7 @@
   <!-- ── D. THREAT DETECTION ────────────────────────────── -->
   <section class="card span-2" id="section-threat">
     <div class="card-header">
-      <span class="card-icon">⚡</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-zap"/></svg></span>
       <span class="card-title">Threat Detection</span>
       <span class="card-badge" id="threat-badge" style="background:rgba(34,197,94,0.1);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)">NORMAL</span>
     </div>
@@ -290,7 +311,7 @@
   <!-- ── E. SECURITY CONTEXT (BDI) ──────────────────────── -->
   <section class="card" id="section-context">
     <div class="card-header">
-      <span class="card-icon">🧠</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-layers"/></svg></span>
       <span class="card-title">Security Context</span>
       <span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em">BDI-style</span>
     </div>
@@ -299,10 +320,48 @@
     </div>
   </section>
 
+  <!-- ── F0. ARBITER VERDICT ─────────────────────────────── -->
+  <section class="card span-3 arbiter-card" id="section-arbiter" style="display:none" aria-labelledby="arbiter-title">
+    <div class="card-header">
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-trophy"/></svg></span>
+      <span class="card-title card-title-accent" id="arbiter-title">Arbiter Verdict</span>
+      <span class="card-note" id="arbiter-formula">score = measured utility − risk aversion × spread</span>
+      <span class="card-badge" id="arbiter-mode-badge">—</span>
+    </div>
+    <div class="card-body">
+      <div class="arbiter-layout">
+        <div class="arbiter-hero" id="arbiter-hero" aria-live="polite">
+          <!-- populated by JS -->
+        </div>
+        <div class="arbiter-evidence">
+          <div class="table-scroll">
+            <table class="evidence-table" id="evidence-table">
+              <caption class="sr-only">Measured evidence for each policy's proposed action, ranked by risk-adjusted score</caption>
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Proposed by</th>
+                  <th scope="col">Action</th>
+                  <th scope="col" class="col-bar">Measured utility</th>
+                  <th scope="col" class="num">Spread</th>
+                  <th scope="col" class="num">Runs</th>
+                  <th scope="col" class="num">Risk-adj.</th>
+                  <th scope="col">Verdict</th>
+                </tr>
+              </thead>
+              <tbody id="evidence-tbody"></tbody>
+            </table>
+          </div>
+          <p class="arbiter-footnote" id="arbiter-footnote"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ── F. POLICY COMPARISON ───────────────────────────── -->
   <section class="card span-3" id="section-policy">
     <div class="card-header">
-      <span class="card-icon">⚖️</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-scale"/></svg></span>
       <span class="card-title">Policy Comparison</span>
       <span style="margin-left:auto;font-size:0.65rem;color:var(--text-muted)">Rule-Based · Stackelberg · PPO</span>
     </div>
@@ -344,7 +403,7 @@
   <!-- ── G. RESPONSE / CONTAINMENT ──────────────────────── -->
   <section class="card span-2" id="section-response">
     <div class="card-header">
-      <span class="card-icon">🛡️</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-shield-check"/></svg></span>
       <span class="card-title">Response &amp; Containment</span>
       <span class="card-badge" id="resp-badge" style="background:rgba(34,197,94,0.1);color:var(--accent-green);border:1px solid rgba(34,197,94,0.3)">IDLE</span>
     </div>
@@ -356,7 +415,7 @@
   <!-- ── H. EVENT TIMELINE ───────────────────────────────── -->
   <section class="card" id="section-timeline">
     <div class="card-header">
-      <span class="card-icon">📋</span>
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-list"/></svg></span>
       <span class="card-title">Event Timeline</span>
       <span class="card-badge" id="timeline-count" style="background:rgba(59,130,246,0.1);color:var(--accent-blue);border:1px solid rgba(59,130,246,0.3)">0 events</span>
     </div>
@@ -368,7 +427,7 @@
 </main>
 
 <!-- ── Notification banner ──────────────────────────────────── -->
-<div class="alert-banner" id="alert-banner"></div>
+<div class="alert-banner" id="alert-banner" role="status" aria-live="polite"></div>
 
 <script src="/static/dashboard.js"></script>
 </body>

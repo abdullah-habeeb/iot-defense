@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
-
-import yaml
 
 from iot_defense.defense.decision import DefenseAction
 
@@ -77,21 +74,20 @@ class StackelbergSolution:
         }
 
 
-def _load_game_config() -> dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[3] / "config" / "policies.yaml"
-    if not config_path.exists():
-        return {}
-    with config_path.open("r", encoding="utf-8") as stream:
-        loaded = yaml.safe_load(stream) or {}
-    return loaded.get("policy", {}).get("stackelberg", {})
-
-
 class StackelbergGame:
-    """Solve a finite leader-follower game using explicit payoff values."""
+    """Solve a finite leader-follower game using explicit payoff values.
+
+    With no explicit payoffs, they are derived from the a-priori mechanism
+    model and shared objective (defense/game_model.py) -- never from a
+    registered attack's preferred_action or any measured outcome.
+    """
 
     def __init__(self, payoffs: dict[str, dict[str, dict[str, dict[str, float]]]] | None = None) -> None:
-        raw_payoffs = payoffs or _load_game_config().get("payoffs", {})
-        self.payoffs = self._parse_payoffs(raw_payoffs)
+        if payoffs is None:
+            from iot_defense.defense.game_model import build_game_payoffs
+
+            payoffs = build_game_payoffs()
+        self.payoffs = self._parse_payoffs(payoffs)
 
     @staticmethod
     def _parse_payoffs(
