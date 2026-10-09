@@ -118,6 +118,35 @@ utility the model's chosen action leaves on the table relative to the best measu
   while `THROTTLE` is poor for most attacks, so a small hedge toward `QUARANTINE` costs little in expectation. This is a
   hypothesis consistent with the data, not something tested here (a run with label noise off would test it).
 
+### The arbiter: executing the best-evidenced proposal
+
+The demo no longer has to commit to one policy. `ArbiterPolicy` executes whichever of the three proposals has the best
+measured evidence (mean realized utility from the outcome table minus one standard deviation; ties go to Stackelberg,
+then PPO, then rule-based). Scored offline on the same 168 held-out trials (`evaluation/arbiter_eval.py`; the arbiter
+only executes a proposal the harness already measured, and its evidence never contains these trials):
+
+| | Mean utility (95% CI) |
+|---|---|
+| Rule-based | 4.272 [4.00, 4.56] |
+| Stackelberg | 7.226 [7.04, 7.38] |
+| PPO | 7.254 [7.08, 7.40] |
+| **Arbiter** | **7.271 [7.09, 7.42]** |
+| Best of the three, in hindsight (ceiling for any chooser) | 7.271 [7.09, 7.42] |
+
+- The arbiter equals the in-hindsight ceiling: it never picked a worse proposal than another one on the table.
+- Paired gains are small but consistent: +3.00 over rule-based (p = 9e-24), +0.044 over Stackelberg (Wilcoxon p = 0.008,
+  8 of 168 trials differ), +0.017 over PPO (p = 0.0004, 16 of 168 trials differ). These are not adjusted for the
+  three comparisons, and the effect is concentrated in the distributed conditions.
+- It executed Stackelberg's proposal in 160 trials and PPO's in 8 (all on `icmp_ping_flood_distributed`, where the
+  a-priori model's `THROTTLE` is worse than PPO's `QUARANTINE`); it never executed rule-based's.
+
+**What this does and does not show.** The gain over the best single policy is under 0.05 utility in this lab, because
+Stackelberg and PPO already agree on 19 of 21 conditions. The arbiter's real value is robustness: a wrong proposal from
+one policy is overridden by another's better-evidenced one, instead of being executed. It depends on the measured
+table, so on an attack or environment that was never measured it has no evidence and falls back to Stackelberg. These
+trials are fresh, but the conditions are the ones the table covers, so this is not evidence of generalization to
+unseen attacks.
+
 ### What it does not support
 
 - **No claim that PPO beats Stackelberg.** The gap is 0.027 utility with a CI touching zero, driven by 1 condition in 21.
