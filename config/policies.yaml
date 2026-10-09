@@ -161,6 +161,15 @@ policy:
     intelligence_prior:
       DECOY: 0.8
       FORENSIC_CAPTURE: 0.9
+  # The arbiter executes whichever of the three policies' PROPOSED ACTIONS has the
+  # best measured evidence (defense/arbiter.py): mean realized utility from the live
+  # outcome table minus risk_aversion x its spread, so an erratic action loses to a
+  # dependable one. Actions with fewer than min_samples valid measurements for the
+  # detected attack carry no evidence.
+  arbiter:
+    outcome_table_path: "data/outcomes/outcome_table.jsonl"
+    risk_aversion: 1.0
+    min_samples: 2
   ppo:
     model_path: "models/ppo_defense"
     # The PPO arm learns from MEASURED outcomes only: the live-Mininet

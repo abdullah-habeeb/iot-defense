@@ -120,6 +120,16 @@ sudo .venv/bin/python3 -m iot_defense.evaluation.harness --trials-per-condition 
 .venv/bin/python3 -m iot_defense.evaluation.report                             # detection summary
 ```
 
+## Which response the demo executes: the arbiter
+The three policies each propose an action; the live demo does not favour one of them. `defense/arbiter.py` scores each proposed **action** by what was measured when that action was applied against this kind of attack in live Mininet (the outcome table): mean realized utility minus `risk_aversion` x its run-to-run spread, so an erratic action loses to a dependable one. It executes the best-scoring proposal. It can only choose among the proposals it is given, never reads `preferred_action`, and with no measured evidence for any proposal (an attack label never measured, or no outcome table) it falls back to Stackelberg and says so in its reasoning (`policy.arbiter` in `config/policies.yaml`).
+
+```bash
+sudo .venv/bin/python3 -m iot_defense.demo.controller --attack dos_distributed                  # arbiter (default)
+sudo .venv/bin/python3 -m iot_defense.demo.controller --attack dos_distributed --policy ppo     # force one policy: arbiter|stackelberg|rule_based|ppo
+```
+
+`python -m iot_defense.evaluation.arbiter_eval` scores the arbiter on the held-out harness trials without a new live run (it only ever executes one of the three proposals, and the harness measured every distinct proposal); see EVALUATION.md.
+
 ## Controlled ML detection experiment
 A reproducible controlled dataset and Random Forest detector. The dataset-generation pipeline (`ml/generate_dataset.py`, `ml/schema.py`) is registry-driven and covers all 16 registered attacks (17 classes with `normal`; `c2_beacon` generates real traffic and labels correctly, but see "Attack types" above for why its own detecting feature is excluded from `FEATURE_COLUMNS`). Generate labelled rows from fresh Mininet runs with:
 

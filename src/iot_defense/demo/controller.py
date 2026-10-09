@@ -118,7 +118,14 @@ def _initial_state() -> dict[str, Any]:
 class DemoController:
     """Orchestrate the full IoT defense pipeline and publish state/events via SSE."""
 
-    def __init__(self) -> None:
+    def __init__(self, policy_mode: str = "arbiter") -> None:
+        from iot_defense.defense.arbiter import POLICY_MODES
+
+        if policy_mode not in POLICY_MODES:
+            raise ValueError(f"unknown policy mode {policy_mode!r}; expected one of {POLICY_MODES}")
+        self.policy_mode = policy_mode
+        self._arbiter: Any = None
+        self._arbiter_loaded = False
         self.state: dict[str, Any] = _initial_state()
         self.event_queue: asyncio.Queue = asyncio.Queue()
         self.data_dir = "/home/abdullah/iot-defense/data/dashboard"
@@ -203,6 +210,30 @@ class DemoController:
         self.net = None
 
     # ─── Policy evaluation ────────────────────────────────────────────────────
+
+    def _arbitrate(self, context: Any, rule_decision: Any, stack_decision: Any, ppo_decision: Any) -> Any:
+        """The arbiter's decision over whichever policies proposed something, or
+        None when the mode does not use it or the measured table is missing."""
+        if self.policy_mode != "arbiter":
+            return None
+        if not self._arbiter_loaded:
+            from iot_defense.defense.arbiter import ArbiterPolicy
+
+            try:
+                self._arbiter = ArbiterPolicy.from_config()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[DemoController] arbiter unavailable: {exc}")
+            if self._arbiter is None:
+                print("[DemoController] no measured outcome table found -- executing Stackelberg instead", flush=True)
+            self._arbiter_loaded = True
+        if self._arbiter is None:
+            return None
+        proposals = {
+            name: decision
+            for name, decision in (("rule_based", rule_decision), ("stackelberg", stack_decision), ("ppo", ppo_decision))
+            if decision is not None
+        }
+        return self._arbiter.arbitrate(context.beliefs.threat_type, proposals)
 
     def _build_policy_comparison(
         self,
@@ -369,10 +400,19 @@ class DemoController:
         )
         detection_latency_ms = (time.perf_counter() - detect_start) * 1000
 
-        # Selected decision: prefer Stackelberg (strategic), fall back to
-        # rule-based if it failed to decide at all -- a real conditional
-        # now, not just a comment (see _build_policy_comparison above).
-        selected = stack_decision if stack_decision is not None else rule_decision
+        # The executed decision depends on policy_mode: by default the arbiter
+        # runs the proposal (from any of the three policies) with the best
+        # measured evidence; a single policy can be forced instead. Every mode
+        # degrades to Stackelberg, then rule-based, if its own policy produced
+        # nothing (see select_decision).
+        from iot_defense.defense.arbiter import select_decision
+
+        arbiter_decision = self._arbitrate(context, rule_decision, stack_decision, ppo_decision)
+        if arbiter_decision is not None:
+            comparison["arbiter"] = arbiter_decision.to_dict()
+        selected = select_decision(
+            self.policy_mode, rule=rule_decision, stackelberg=stack_decision, ppo=ppo_decision, arbiter=arbiter_decision
+        )
 
         await self.update_state(
             {
@@ -395,7 +435,7 @@ class DemoController:
                 f"All policies evaluated. Rule-Based→{rule_decision.action.value}, "
                 + (f"Stackelberg→{stack_decision.action.value}" if stack_decision else "Stackelberg→FAILED (fell back to rule-based)")
                 + (f", PPO→{ppo_decision.action.value}" if ppo_decision else "")
-                + f". Selected: {selected.action.value}"
+                + f". Selected ({selected.policy_name}): {selected.action.value}"
             ),
         )
 
@@ -868,9 +908,12 @@ class DemoController:
             self.cleanup()
 
 
-def _select_attack_mode() -> str:
-    """Resolve the attack mode from --attack, or prompt interactively if omitted."""
+def _parse_args() -> tuple[str, str]:
+    """Resolve (attack mode, policy mode) from the command line; the attack is
+    prompted for interactively if --attack is omitted."""
     import argparse
+
+    from iot_defense.defense.arbiter import POLICY_MODES
 
     attack_keys = list(ATTACK_SCENARIOS)
 
@@ -885,9 +928,18 @@ def _select_attack_mode() -> str:
             + ". Prompted interactively if omitted."
         ),
     )
+    parser.add_argument(
+        "--policy",
+        choices=POLICY_MODES,
+        default="arbiter",
+        help=(
+            "Which decision to execute: 'arbiter' (default) runs the proposal with the best measured "
+            "evidence across all three policies; the others force that single policy."
+        ),
+    )
     args = parser.parse_args()
     if args.attack is not None:
-        return args.attack
+        return args.attack, args.policy
 
     print("Select attack scenario:")
     for index, key in enumerate(attack_keys, start=1):
@@ -897,16 +949,16 @@ def _select_attack_mode() -> str:
     try:
         selected_index = int(choice) - 1
         if 0 <= selected_index < len(attack_keys):
-            return attack_keys[selected_index]
+            return attack_keys[selected_index], args.policy
     except ValueError:
         pass
-    return attack_keys[0]
+    return attack_keys[0], args.policy
 
 
 def main() -> None:
-    attack_mode = _select_attack_mode()
-    print(f"[DemoController] attack_mode={attack_mode}", flush=True)
-    controller = DemoController()
+    attack_mode, policy_mode = _parse_args()
+    print(f"[DemoController] attack_mode={attack_mode} policy_mode={policy_mode}", flush=True)
+    controller = DemoController(policy_mode=policy_mode)
     asyncio.run(controller.run_demo(attack_mode=attack_mode))
 
 
