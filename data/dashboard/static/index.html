@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Residential IoT Defense System</title>
+  <title>Mininet Simulation · IoT Defense</title>
   <meta name="description" content="Real-time cybersecurity operations console for residential IoT network defense — featuring live packet capture, threat detection, multi-policy decision-making and automated response." />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body data-page="sim">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/></symbol>
@@ -23,6 +23,7 @@
     <symbol id="i-bars" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></symbol>
     <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2zM4 19a2 2 0 012-2h13"/></symbol>
     <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0zM7 6H4v2a3 3 0 003 3M17 6h3v2a3 3 0 01-3 3"/></symbol>
   </defs>
 </svg>
@@ -36,6 +37,12 @@
     <span class="sys-title"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-shield"/></svg> RESIDENTIAL IoT DEFENSE SYSTEM</span>
     <span class="sys-sub">Security Operations Console · Cyber Defense Demonstrator</span>
   </div>
+
+
+  <nav class="site-tabs" aria-label="Dashboards">
+    <a class="site-tab active" href="/" aria-current="page">Mininet Simulation</a>
+    <a class="site-tab" href="/live">Live Physical Demo</a>
+  </nav>
 
   <div class="header-sep"></div>
 
@@ -164,6 +171,41 @@
         <polygon id="arrow-attack" class="topo-arrow" opacity="0"
                  points="455,118 463,130 455,142" />
       </svg>
+    </div>
+  </section>
+
+  <!-- ── A2. ATTACK BRIEFING ─────────────────────────────── -->
+  <section class="card span-3 briefing-card" id="section-briefing" style="display:none" aria-labelledby="briefing-title">
+    <div class="card-header">
+      <span class="card-icon"><svg class="ic" width="16" height="16" aria-hidden="true"><use href="#i-book"/></svg></span>
+      <span class="card-title card-title-accent" id="briefing-title">Attack Briefing</span>
+      <span class="briefing-name" id="briefing-name"></span>
+      <span class="briefing-badges" id="briefing-badges"></span>
+      <button type="button" class="card-toggle" id="briefing-toggle" aria-expanded="true" aria-controls="briefing-body">Hide</button>
+    </div>
+    <div class="card-body" id="briefing-body">
+      <div class="briefing-grid">
+        <div class="briefing-col">
+          <div class="label">In plain terms</div>
+          <p class="briefing-summary" id="briefing-summary"></p>
+          <p class="briefing-lab" id="briefing-lab"></p>
+        </div>
+        <div class="briefing-col">
+          <div class="label">What happens</div>
+          <ol class="briefing-steps" id="briefing-steps"></ol>
+        </div>
+        <div class="briefing-col">
+          <div class="label">Why it matters</div>
+          <p class="briefing-text" id="briefing-impact"></p>
+          <div class="label briefing-gap">How this system spots it</div>
+          <p class="briefing-text" id="briefing-tell"></p>
+        </div>
+      </div>
+      <div class="briefing-live" id="briefing-live" role="status" aria-live="polite">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span class="live-label">Right now</span>
+        <span class="live-text" id="briefing-live-text"></span>
+      </div>
     </div>
   </section>
 

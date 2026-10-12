@@ -241,55 +241,11 @@ class DemoController:
         threat_event: ThreatEvent,
         context: Any,
     ) -> dict[str, Any]:
-        """Evaluate all three policies against the same security context."""
-        from iot_defense.defense.policy import RuleBasedDefensePolicy, StackelbergDefensePolicy
+        """Evaluate all three policies against the same security context
+        (shared with the live defender: see defense/pipeline.py)."""
+        from iot_defense.defense.pipeline import compute_proposals
 
-        rule_policy = RuleBasedDefensePolicy()
-        stack_policy = StackelbergDefensePolicy()
-
-        # rule_decision is the actual fallback target when Stackelberg
-        # fails (see the selection logic below) -- deliberately not
-        # wrapped in its own try/except, since there is nothing further
-        # to fall back to if the fallback itself raises.
-        rule_decision = rule_policy.decide(context)
-        stack_decision = None
-        stackelberg_reasoning: dict[str, Any] = {}
-        stackelberg_fallback_used = False
-        try:
-            stack_decision = stack_policy.decide(context)
-            stackelberg_reasoning = stack_decision.context.get("stackelberg_reasoning", {})
-        except Exception as exc:  # noqa: BLE001
-            # A real fallback, not just a comment claiming one exists --
-            # found during a system review that this branch never
-            # existed: selected decision was unconditionally
-            # stack_decision, so a raising StackelbergDefensePolicy would
-            # abort the whole run instead of actually falling back.
-            print(f"[DemoController] Stackelberg decide error: {exc}")
-            stackelberg_fallback_used = True
-
-        # PPO – load if model exists, else fall back to rule-based
-        ppo_decision = None
-        ppo_fallback_used = False
-        try:
-            from iot_defense.defense.ppo_policy import PPODefensePolicy
-            ppo = PPODefensePolicy(
-                model_path="models/ppo_defense",
-                fallback=RuleBasedDefensePolicy(),
-            )
-            ppo_decision = ppo.decide(context)
-            ppo_fallback_used = ppo.model is None
-        except Exception as exc:  # noqa: BLE001
-            print(f"[DemoController] PPO load error: {exc}")
-
-        comparison: dict[str, Any] = {
-            "rule_based": rule_decision.to_dict(),
-            "stackelberg": stack_decision.to_dict() if stack_decision else None,
-            "stackelberg_reasoning": stackelberg_reasoning,
-            "stackelberg_fallback_used": stackelberg_fallback_used,
-            "ppo": ppo_decision.to_dict() if ppo_decision else None,
-            "ppo_fallback_used": ppo_fallback_used,
-        }
-        return comparison, rule_decision, stack_decision, ppo_decision
+        return compute_proposals(context)
 
     @staticmethod
     def _feed_sample(packets: list[dict[str, Any]], limit: int = 20) -> tuple[list[dict[str, Any]], int]:

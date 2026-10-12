@@ -31,7 +31,7 @@ function fmtIso(ts) {
   if (!ts) return 'N/A';
   try {
     const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
-    return d.toLocaleTimeString('en-GB', { hour12: false, fractionalSecondDigits: 0 });
+    return d.toLocaleTimeString('en-GB', { hour12: false });  // (fractionalSecondDigits: 0 is a RangeError and made every timeline time fall back to raw ISO)
   } catch { return String(ts); }
 }
 
@@ -937,19 +937,126 @@ function renderArbiter(state) {
   }
 
   const foot = $('arbiter-footnote');
+  const unavailable = Object.entries(reasoning.excluded_unavailable || {})
+    .map(([name, action]) => `${policyLabel(name)} proposed ${action}`).join('; ');
   if (foot) {
-    foot.textContent =
+    foot.textContent = (unavailable ? `Not available on this device, so set aside: ${unavailable}. ` : '') +
       `Evidence = live Mininet outcomes recorded for "${safe(reasoning.label)}" with each proposed action. ` +
       'Policy confidence is the detector\'s confidence in the attack, shared by all policies, and is not used to choose a response.';
   }
 }
 
+
+// ── Attack briefing ───────────────────────────────────────────
+// Descriptions arrive with the attack list (/attacks, fetched once by
+// loadAttackOptions), which the server builds from the attack registry, so there is one briefing per registered attack and none
+// is hand-listed here.
+const ATTACK_BRIEFINGS = {};
+
+// Beginner-level wording for each pipeline phase. Generic on purpose: what the
+// attack itself does is already written in the card above.
+const PHASE_EXPLAIN = {
+  STARTING_NETWORK: 'Building the virtual home network: a sensor, a camera, a smart plug, an attacker and a decoy.',
+  BASELINE: 'Recording normal traffic first, so the system learns what a quiet network looks like.',
+  OBSERVING: 'Recording normal traffic first, so the system learns what a quiet network looks like.',
+  THREAT_DETECTED: 'The attack is running now. Its traffic is crossing the network and being captured and analysed.',
+  DECIDING: 'Something is wrong. Three strategies each suggest a response, and the arbiter picks the one with the best measured results.',
+  RESPONDING: 'Applying the chosen response to the network for real.',
+  DECOY_ACTIVE: 'Response applied: the attacker was redirected to a decoy, a fake device that wastes their time and records what they do.',
+  ISOLATED: 'Response applied: the targeted device was cut off from the network, so the attack cannot reach it.',
+  THROTTLED: 'Response applied: the attacker\'s traffic is rate-limited, so it can no longer flood the target while normal traffic keeps flowing.',
+  BLOCKED_SOURCE: 'Response applied: all traffic from the attacker\'s address is now dropped.',
+  QUARANTINED: 'Response applied: the target may now talk only to a short list of trusted devices.',
+  SESSIONS_RESET: 'Response applied: the attacker\'s live connections were terminated.',
+  FORENSICS_CAPTURED: 'Response applied: evidence was recorded for later analysis. Traffic was not blocked.',
+  BANDWIDTH_CAPPED: 'Response applied: the attacker\'s outgoing bandwidth is capped, so little data can leave.',
+  RESTORING: 'Undoing the response and checking the network works normally again.',
+  RESTORED: 'The response was undone and the network is back to normal.',
+  COMPLETE: 'The run is finished and the network is back to normal.',
+  CLEANUP: 'Shutting the virtual network down.',
+  ERROR: 'Something went wrong with this run. Check the event timeline for details.',
+};
+
+// Terms a beginner may not know, explained on hover. Only the first mention
+// in each block is marked up, so the text stays readable.
+const GLOSSARY = {
+  TCP: 'A reliable way to send data: both sides set up a connection first.',
+  UDP: 'A fast, no-connection way to send data. Nothing checks that it arrived.',
+  ICMP: 'The messages used by ping to check whether a device is reachable.',
+  SYN: 'The first message of a TCP connection: "I would like to connect".',
+  DNS: 'The internet\'s phone book, which turns names like example.com into addresses.',
+  MQTT: 'A lightweight messaging protocol many smart-home devices use.',
+  ping: 'A tiny "are you there?" message and its reply.',
+  port: 'A numbered door on a device. Each service listens on its own.',
+  ports: 'Numbered doors on a device. Each service listens on its own.',
+  botnet: 'A group of hijacked devices controlled together by one attacker.',
+  spoofed: 'Faked: the sender claims to be an address that is not really theirs.',
+  forged: 'Faked: the sender claims to be an address that is not really theirs.',
+};
+const GLOSSARY_RE = new RegExp(`\\b(${Object.keys(GLOSSARY).join('|')})\\b`, 'g');
+
+function withGlossary(text) {
+  const seen = new Set();
+  return escHtml(text).replace(GLOSSARY_RE, (term) => {
+    if (seen.has(term)) return term;
+    seen.add(term);
+    return `<abbr title="${escHtml(GLOSSARY[term])}">${term}</abbr>`;
+  });
+}
+
+let _briefingKey = null;
+function renderBriefing(state) {
+  const card = $('section-briefing');
+  if (!card) return;
+  const key = state.attack_mode;
+  const info = key ? ATTACK_BRIEFINGS[key] : null;
+  if (!info) { card.style.display = 'none'; _briefingKey = null; return; }
+  card.style.display = '';
+
+  // The static text only changes when a different attack starts.
+  if (_briefingKey !== key + (state.live ? ':live' : '')) {
+    _briefingKey = key + (state.live ? ':live' : '');
+    $('briefing-name').textContent = info.label;
+    const badges = [`<span class="briefing-badge cat">${escHtml(info.category)}</span>`];
+    badges.push(`<span class="briefing-badge dir">${info.direction === 'outbound' ? 'From inside: device sends data out' : 'From outside: attacker targets the device'}</span>`);
+    if (info.distributed) badges.push(`<span class="briefing-badge dist">Distributed · ${info.sources} sources</span>`);
+    $('briefing-badges').innerHTML = badges.join('');
+    $('briefing-summary').innerHTML = withGlossary(info.summary);
+    $('briefing-lab').textContent = state.live
+      ? `In this live demo: ${((state.nodes || {}).attacker || {}).ip || 'a real device'} sends this traffic to the protected box (${state.live.box_ip}).`
+      : `In this simulation: ${info.lab_note}`;
+    $('briefing-steps').innerHTML = info.steps.map(s => `<li>${withGlossary(s)}</li>`).join('');
+    $('briefing-impact').innerHTML = withGlossary(info.impact);
+    $('briefing-tell').innerHTML = withGlossary(info.tell);
+  }
+
+  const live = $('briefing-live');
+  const phase = state.phase;
+  $('briefing-live-text').textContent = PHASE_EXPLAIN[phase] || '';
+  live.classList.toggle('done', phase === 'COMPLETE' || phase === 'RESTORED' || phase === 'CLEANUP');
+  live.classList.toggle('error', phase === 'ERROR');
+}
+
+function initBriefingToggle() {
+  const btn = $('briefing-toggle');
+  const card = $('section-briefing');
+  if (!btn || !card) return;
+  btn.addEventListener('click', () => {
+    const collapsed = card.classList.toggle('collapsed');
+    btn.textContent = collapsed ? 'Show' : 'Hide';
+    btn.setAttribute('aria-expanded', String(!collapsed));
+  });
+}
+
+
 // ── Master render ─────────────────────────────────────────────
 let _lastPhase = null;
 
 function renderAll(state) {
+  window.__lastState = state;
   try { renderHeader(state); } catch(e) { console.error('header', e); }
   try { renderTopology(state); } catch(e) { console.error('topology', e); }
+  try { renderBriefing(state); } catch(e) { console.error('briefing', e); }
   try { renderTraffic(state); } catch(e) { console.error('traffic', e); }
   try { renderThreat(state); } catch(e) { console.error('threat', e); }
   try { renderContext(state); } catch(e) { console.error('context', e); }
@@ -1056,6 +1163,8 @@ async function loadAttackOptions() {
     if (!resp.ok) throw new Error(`status ${resp.status}`);
     const attacks = await resp.json();
     select.innerHTML = attacks.map(a => `<option value="${escHtml(a.key)}">${escHtml(a.label)}</option>`).join('');
+    attacks.forEach(a => { ATTACK_BRIEFINGS[a.key] = a; });
+    if (window.__lastState) renderBriefing(window.__lastState);
   } catch (e) {
     console.warn('[run-control] /attacks fetch failed:', e);
     select.innerHTML = '<option value="">Attack list unavailable</option>';
@@ -1137,8 +1246,11 @@ function initRunControl() {
 
 // ── Boot ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // The live page shares this file's renderers and boots itself in live.js.
+  if (document.body.dataset.page === 'live') return;
   startClock();
   loadInitialState();
   connectSSE();
   initRunControl();
+  initBriefingToggle();
 });

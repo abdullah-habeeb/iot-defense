@@ -46,6 +46,61 @@ def describe_for_display(packet: Any, protocol_name: str, src_ip: str, dst_ip: s
     }
 
 
+def packet_to_event(packet: Any, host_ip: str | None = None) -> dict[str, Any] | None:
+    """One captured scapy packet as the event dict the pipeline consumes.
+
+    Shared by the pcap reader (Mininet runs) and the live sensor, so a packet
+    is described identically wherever it was captured. `host_ip` is the
+    capturing host's own address, used only to label direction.
+    """
+    if not hasattr(packet, "payload"):
+        return None
+    ip_layer = packet.getlayer("IP")
+    arp_layer = packet.getlayer("ARP")
+    tcp_layer = packet.getlayer("TCP")
+    tcp_udp_layer = tcp_layer or packet.getlayer("UDP")
+    protocol_name = "UNKNOWN"
+    if tcp_udp_layer is not None:
+        protocol_name = "TCP" if tcp_udp_layer.name == "TCP" else "UDP"
+    if packet.haslayer("ICMP"):
+        protocol_name = "ICMP"
+    if packet.haslayer("ARP"):
+        protocol_name = "ARP"
+
+    src_ip = ip_layer.src if ip_layer is not None else (arp_layer.psrc if arp_layer is not None else "unknown")
+    dst_ip = ip_layer.dst if ip_layer is not None else (arp_layer.pdst if arp_layer is not None else "unknown")
+    display = describe_for_display(packet, protocol_name, src_ip, dst_ip)
+
+    direction = "unknown"
+    if host_ip is not None:
+        if dst_ip == host_ip:
+            direction = "inbound"
+        elif src_ip == host_ip:
+            direction = "outbound"
+
+    return {
+        "timestamp": float(packet.time),
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
+        "protocol": protocol_name,
+        "src_port": getattr(tcp_udp_layer, "sport", None),
+        "dst_port": getattr(tcp_udp_layer, "dport", None),
+        "packet_length": len(packet),
+        "ttl": int(ip_layer.ttl) if ip_layer is not None else None,
+        "direction": direction,
+        # int(), not the raw FlagValue -- keeps the event dict JSON-safe
+        # for the dashboard's SSE feed while still carrying real SYN/ACK
+        # bits for FeatureAggregator (port presence alone can't tell
+        # SYN/ACK apart -- every TCP packet has both ports set).
+        "tcp_flags": int(tcp_layer.flags) if tcp_layer is not None else None,
+        # Display-only: src_ip/dst_ip/protocol above stay exactly what
+        # FeatureAggregator keys flows on (it drops non-IPv4 packets
+        # because their src_ip is "unknown"); these describe the same
+        # packet for the dashboard feed without changing that.
+        **display,
+    }
+
+
 class PacketMonitor:
     """Capture packets from a Mininet host and convert them into structured events."""
 
@@ -241,51 +296,7 @@ class PacketMonitor:
             packets = rdpcap(capture_path)
         events: list[dict[str, Any]] = []
         for packet in packets:
-            if not hasattr(packet, "payload"):
-                continue
-            ip_layer = packet.getlayer("IP")
-            arp_layer = packet.getlayer("ARP")
-            tcp_layer = packet.getlayer("TCP")
-            tcp_udp_layer = tcp_layer or packet.getlayer("UDP")
-            protocol_name = "UNKNOWN"
-            if tcp_udp_layer is not None:
-                protocol_name = "TCP" if tcp_udp_layer.name == "TCP" else "UDP"
-            if packet.haslayer("ICMP"):
-                protocol_name = "ICMP"
-            if packet.haslayer("ARP"):
-                protocol_name = "ARP"
-
-            src_ip = ip_layer.src if ip_layer is not None else (arp_layer.psrc if arp_layer is not None else "unknown")
-            dst_ip = ip_layer.dst if ip_layer is not None else (arp_layer.pdst if arp_layer is not None else "unknown")
-            display = describe_for_display(packet, protocol_name, src_ip, dst_ip)
-
-            direction = "unknown"
-            if host_ip is not None:
-                if dst_ip == host_ip:
-                    direction = "inbound"
-                elif src_ip == host_ip:
-                    direction = "outbound"
-
-            event = {
-                "timestamp": float(packet.time),
-                "src_ip": src_ip,
-                "dst_ip": dst_ip,
-                "protocol": protocol_name,
-                "src_port": getattr(tcp_udp_layer, "sport", None),
-                "dst_port": getattr(tcp_udp_layer, "dport", None),
-                "packet_length": len(packet),
-                "ttl": int(ip_layer.ttl) if ip_layer is not None else None,
-                "direction": direction,
-                # int(), not the raw FlagValue -- keeps the event dict JSON-safe
-                # for the dashboard's SSE feed while still carrying real SYN/ACK
-                # bits for FeatureAggregator (port presence alone can't tell
-                # SYN/ACK apart -- every TCP packet has both ports set).
-                "tcp_flags": int(tcp_layer.flags) if tcp_layer is not None else None,
-                # Display-only: src_ip/dst_ip/protocol above stay exactly what
-                # FeatureAggregator keys flows on (it drops non-IPv4 packets
-                # because their src_ip is "unknown"); these describe the same
-                # packet for the dashboard feed without changing that.
-                **display,
-            }
-            events.append(event)
+            event = packet_to_event(packet, host_ip)
+            if event is not None:
+                events.append(event)
         return events
