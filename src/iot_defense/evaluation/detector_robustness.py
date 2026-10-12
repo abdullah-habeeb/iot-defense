@@ -55,6 +55,10 @@ DETECTION_FEATURE_OVERRIDES: dict[str, dict[str, float]] = {
     "replay_attack": {"protocol": "UDP", "average_packet_size": 100.0},
     "rogue_beacon": {"protocol": "UDP", "average_packet_size": 220.0},
     "c2_beacon": {"protocol": "UDP", "average_packet_size": 380.0, "inter_arrival_cv": 0.05},
+    "dos_distributed": {"protocol": "UDP", "packet_count": 300, "average_packet_size": 106.0},
+    "syn_flood_distributed": {"protocol": "TCP", "packet_count": 100, "tcp_syn_count": 100, "tcp_ack_count": 0, "average_packet_size": 54.0},
+    "icmp_flood_distributed": {"protocol": "ICMP", "packet_count": 100, "average_packet_size": 98.0},
+    "replay_distributed": {"protocol": "UDP", "packet_count": 18, "average_packet_size": 68.0},
 }
 
 
@@ -80,12 +84,16 @@ def run() -> list[dict[str, Any]]:
                 features[field] = base[field] * (1 + pct)
                 if field in ("packet_count", "unique_destination_ports"):
                     features[field] = max(0, round(features[field]))
-            event = detector.detect(features)
+            if scenario.per_flow_detectable:
+                classified = detector.detect(features).attack_type
+            else:  # distributed variants are recognized from destination aggregates
+                event = detector.detect_aggregate(features)
+                classified = event.attack_type if event else "normal"
             rows.append({
                 "attack_key": key,
                 "perturbation": dict(zip(present_fields, combo)),
-                "correctly_classified": event.attack_type == scenario.attack_type,
-                "actual_classification": event.attack_type,
+                "correctly_classified": classified == scenario.attack_type,
+                "actual_classification": classified,
             })
     return rows
 

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
-
-import yaml
 
 from iot_defense.defense.decision import DefenseAction
 
@@ -27,7 +24,11 @@ def _observed_threat_types() -> tuple[str, ...]:
     return ("NORMAL",) + tuple(scenario.observed_threat_key for scenario in ATTACK_SCENARIOS.values())
 
 
-ATTACKER_RESPONSE_STRATEGIES = ("CONTINUE", "RETREAT")
+# CONTINUE and RETREAT are always defined. ROTATE_SOURCE (switch to a fresh source address) exists only
+# for the payoffs that define it (config policy.game_model.follower_rotation); where it is absent it is
+# not a strategy at all, so it can never win a tie by default.
+ATTACKER_RESPONSE_STRATEGIES = ("CONTINUE", "RETREAT", "ROTATE_SOURCE")
+_CORE_RESPONSES = ("CONTINUE", "RETREAT")
 DEFENDER_STRATEGIES = tuple(DefenseAction)
 
 
@@ -77,21 +78,20 @@ class StackelbergSolution:
         }
 
 
-def _load_game_config() -> dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[3] / "config" / "policies.yaml"
-    if not config_path.exists():
-        return {}
-    with config_path.open("r", encoding="utf-8") as stream:
-        loaded = yaml.safe_load(stream) or {}
-    return loaded.get("policy", {}).get("stackelberg", {})
-
-
 class StackelbergGame:
-    """Solve a finite leader-follower game using explicit payoff values."""
+    """Solve a finite leader-follower game using explicit payoff values.
+
+    With no explicit payoffs, they are derived from the a-priori mechanism
+    model and shared objective (defense/game_model.py) -- never from a
+    registered attack's preferred_action or any measured outcome.
+    """
 
     def __init__(self, payoffs: dict[str, dict[str, dict[str, dict[str, float]]]] | None = None) -> None:
-        raw_payoffs = payoffs or _load_game_config().get("payoffs", {})
-        self.payoffs = self._parse_payoffs(raw_payoffs)
+        if payoffs is None:
+            from iot_defense.defense.game_model import build_game_payoffs
+
+            payoffs = build_game_payoffs()
+        self.payoffs = self._parse_payoffs(payoffs)
 
     @staticmethod
     def _parse_payoffs(
@@ -109,6 +109,7 @@ class StackelbergGame:
                         defender=float(response_values.get(response, {}).get("defender", 0.0)),
                     )
                     for response in ATTACKER_RESPONSE_STRATEGIES
+                    if response in _CORE_RESPONSES or response in response_values
                 }
         return parsed
 
@@ -117,8 +118,8 @@ class StackelbergGame:
         if observed_threat not in _observed_threat_types():
             raise ValueError(f"Unsupported observed threat type: {observed_threat}")
         candidates = [
-            (response, self.payoffs[observed_threat][defender_action][response].attacker)
-            for response in ATTACKER_RESPONSE_STRATEGIES
+            (response, payoff.attacker)
+            for response, payoff in self.payoffs[observed_threat][defender_action].items()
         ]
         return max(candidates, key=lambda candidate: candidate[1])
 
@@ -148,8 +149,7 @@ class StackelbergGame:
         for action in DEFENDER_STRATEGIES:
             attacker_response, attacker_utility = self.attacker_best_response(observed_threat, action)
             attacker_utilities = {
-                response: self.payoffs[observed_threat][action][response].attacker
-                for response in ATTACKER_RESPONSE_STRATEGIES
+                response: payoff.attacker for response, payoff in self.payoffs[observed_threat][action].items()
             }
             evaluations.append(
                 StrategyEvaluation(

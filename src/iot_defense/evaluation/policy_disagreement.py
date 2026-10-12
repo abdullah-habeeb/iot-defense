@@ -1,23 +1,16 @@
 """Policy-disagreement stress test: do rule-based, Stackelberg, and PPO
 ever actually choose different actions, and under what conditions?
 
-The main evaluation harness (harness.py) always classifies real captured
-traffic cleanly -- high confidence, well inside each attack's own
-registered thresholds -- so all three policies converge on the identical
-registry preferred_action on every single trial (confirmed directly: 0
-disagreements across 80 real trials x 3 policies). That is not a data
-bug; it is a direct, structural consequence of how the three policies
-were each independently built (rule-based's own thresholds, Stackelberg's
-payoff tables, and PPO's training reward are all separately designed to
-reach that same answer for a confidently-classified attack). It does
-mean the harness alone cannot support any claim that these are three
-meaningfully different decision mechanisms -- this module exists to
-supply that evidence directly, by testing where the three policies
-actually have room to disagree: synthetic SecurityContexts with
-threat_score/confidence perturbed around each attack's own registered
-action_score_min/action_confidence_min (ambiguous, near-boundary
-detections), plus entirely unregistered "novel" attack_types no policy
-was ever tuned for (out-of-distribution generalization).
+The main evaluation harness (harness.py) classifies real captured traffic
+cleanly -- high confidence, well inside each attack's own registered
+thresholds -- so the policies see little ambiguity there. This module tests
+where the three policies have the most room to disagree: synthetic
+SecurityContexts with threat_score/confidence perturbed around each
+attack's own registered action_score_min/action_confidence_min
+(ambiguous, near-boundary detections), plus entirely unregistered "novel"
+attack_types no policy was ever tuned for (out-of-distribution
+generalization). It reports action AGREEMENT only; which action is better
+is decided by measured outcomes (outcome_report.py), never here.
 
 No Mininet required -- this evaluates the three real policy classes
 directly against synthetic contexts, the same pattern
@@ -93,7 +86,7 @@ def run(model_path: str = "models/ppo_defense") -> list[dict[str, Any]]:
     policies = {
         "rule": RuleBasedDefensePolicy(),
         "stack": StackelbergDefensePolicy(),
-        "ppo": PPODefensePolicy(model_path=model_path, fallback=RuleBasedDefensePolicy()),
+        "ppo": PPODefensePolicy(model_path=model_path),
     }
 
     rows: list[dict[str, Any]] = []
