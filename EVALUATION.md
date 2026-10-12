@@ -162,6 +162,121 @@ unseen attacks.
   which affects all arms equally.
 - **PPO's training-seed sensitivity is small but its one systematic miss is a hedge, not noise** (next section).
 
+## Where the strategies differ: unseen attacks, an unreliable detector, a reactive attacker (2026-10-12)
+
+On the measured table Stackelberg and PPO choose the same action in 18 of 21 conditions, because the lab has one clearly
+best response per condition (a source block for inbound attacks, quarantine for outbound ones). Equal scores there are
+expected, and say little about two *different* strategies. The three experiments below each remove one shortcut that let
+them coincide. All three are offline except the last, which needed one new live Mininet measurement. Results and models
+live under `data/evaluation/` and `data/outcomes/` (gitignored); every command is resumable.
+
+### 1. Leave-one-out and objective shift (`evaluation/generalization.py`)
+
+PPO is retrained 90 times (30 tasks x 3 seeds, 120,000 steps each) on the outcome table with one attack, or one whole
+mechanism class, removed. Stackelberg never reads the table, so it is the control. Regret is against the measured table,
+which the held-out policies never saw.
+
+| Held out | Rule-based | Stackelberg | PPO (never saw it) | Arbiter | One fixed action |
+|---|---|---|---|---|---|
+| One attack (20) | 3.15 | **0.04** | 1.61 | 0.04 | 0.24 |
+| One class (17 attacks) | 3.13 | **0.05** | 2.19 | 0.05 | 0.23 |
+
+Stackelberg is better than PPO on 17 of 20 held-out attacks, equal on 3, worse on none. The 20 attacks fall into 9
+mechanism classes, so they are not independent and the sign-test p-values should be read as indicative. The arbiter has
+no evidence for a held-out attack and falls back to Stackelberg by design. PPO's failure is largely representational: it
+identifies an attack by a one-hot input, and the held-out slot is never trained. Giving it mechanism-class features is
+untested.
+
+Objective shift (weights changed, nothing re-measured; the raw rows are re-scored exactly). Only the intelligence-priority
+shift changes the best action (in 20 of 21 conditions); the service-critical and security-first shifts change none and
+cost-averse changes one, because the winning responses already cost almost no service.
+
+| Shift | Stackelberg rebuilt | PPO stale | PPO retrained | Arbiter + stale PPO | One fixed action |
+|---|---|---|---|---|---|
+| service_critical | 1.44 | 0.02 | 0.02 | 0.00 | 0.69 |
+| intelligence_priority | 2.82 | 3.11 | 0.01 | **0.96** | 0.15 |
+| cost_averse | 0.00 | 0.10 | 0.00 | 0.00 | 1.22 |
+| security_first | 0.02 | 0.01 | 0.14 | 0.00 | 0.30 |
+
+Stackelberg adapts instantly but only as well as its priors (perfect on costs, poor on service and intelligence). PPO
+needs retraining. The arbiter re-scores its evidence immediately. Retrained PPO is scored on the table it learned from, so
+it is an upper bound. A single fixed action (`FORENSIC_CAPTURE`) beats every adaptive arm except retrained PPO under the
+intelligence-priority objective, which belongs in any baseline table.
+
+### 2. Detector uncertainty (`evaluation/detector_uncertainty.py`)
+
+Every decision is made from an observation the detector may have got wrong, scored against the true condition's measured
+utility. Noise models: uniform wrong labels, an attack read as normal (and normal as an attack), a single-source attack
+read as its distributed twin, and the confusions the real detector made in the live harness (164 of 168 trials right).
+Arms include a PPO trained at a realistic benign share ("aware+prior") and a posterior-weighted arbiter
+(`PosteriorArbiter`: evidence averaged over what the label could mean, given the detector's error rates and the traffic
+mix). Mean regret at 90% benign traffic, relative to Stackelberg (negative = better):
+
+| Detector | Stackelberg | Aware+prior PPO | Posterior arbiter |
+|---|---|---|---|
+| Perfect | 0.00 | +0.21 | +0.13 |
+| Real (2.2% wrong) | 0.01 | +0.21 | +0.10 |
+| 20% of attacks missed | 0.71 | **-0.37** [-0.54, -0.22] | -0.13 [-0.27, -0.01] |
+| 30% of attacks missed | 0.95 | **-0.56** [-0.73, -0.39] | -0.24 [-0.38, -0.11] |
+| 30% uniform wrong labels | 0.89 | **-0.53** [-0.71, -0.37] | -0.21 [-0.35, -0.09] |
+
+A learned policy that has seen its detector's error statistics and the real traffic mix beats the label-trusting game by a
+solid margin when the detector degrades, and pays a premium (about 0.2 regret) when it does not. For the real detector
+there is no benefit, only the premium. Two warnings. A PPO trained with every condition equally often (about 5% benign)
+looks best at 5% benign and is badly wrong at realistic mixes (regret about 3.3): the apparent hedging gain was an artifact
+of the traffic prior, which is why results are reported at 90% and 99% benign. And the posterior arbiter's clean-case cost
+comes largely from the Laplace smoothing used when it estimates the detector's error rates; a smaller value should reduce
+it and has not been tried. The noise models are synthetic except the measured one; the arbiter's evidence is looked up
+under the label it is given, which is why the plain arbiter inherits the detector's errors.
+
+### 3. A reactive attacker (`evaluation/adaptive_table.py`, `adaptive_eval.py`)
+
+A scripted attacker runs the attack for two rounds against a response that stays in place; if round 1 is impeded (under
+half the un-responded packets get through) it switches to a fresh spoofed source address for round 2. Episode utility is
+the shared objective averaged over the two rounds. Four attacks that can be re-sent from a spoofed source were measured:
+`dos_flood`, `tcp_syn_flood`, `icmp_ping_flood`, `credential_replay`, 3 repetitions each, 132 probes, none invalid.
+
+- A source block is dodged: `BLOCK_SOURCE` contains 100% of round 1 and 0% of round 2 against every attack (utility 7.7 ->
+  5.2). `QUARANTINE` holds in both rounds (7.30). Against the UDP flood `THROTTLE` is best (7.57) and `BANDWIDTH_CAP`
+  holds (7.21), because spoofed packets still leave through the capped interface.
+- The best response flips from `BLOCK_SOURCE` to `THROTTLE` (UDP flood) or `QUARANTINE` (the other three).
+
+| Arm | Adaptive regret | Regret if the attacker does not react |
+|---|---|---|
+| Rule-based | 2.75 | 2.67 |
+| Stackelberg as deployed | 2.17 | 0.00 |
+| PPO trained on the standard table (3 seeds) | 2.17 | 0.00 |
+| Stackelberg anticipating rotation | **0.56** [0.00, 1.52] | 1.19 |
+| Arbiter, adaptive evidence, anticipating strategy among the proposals | **0.58** | 0.38 |
+| Arbiter, standard evidence, anticipating strategy among the proposals | 2.17 | 0.00 |
+| PPO trained on adaptive outcomes (3 seeds, in-sample) | **0.07** | 0.40 |
+
+"Anticipating rotation" is a third follower strategy in the Stackelberg game (`policy.game_model.follower_rotation`, off by
+default): a response keyed on the old address (source block, decoy redirect, session reset) stops applying once the
+address changes. It was written from mechanism knowledge before the adaptive measurement, though its author knew the likely
+outcome. Its predictions of which responses get dodged matched the measurement in 16 of 16 cases, with no false alarms or
+misses (that check does not depend on the scripted attacker's rule). Where the model is wrong, learning corrects it: its
+prior says `THROTTLE` contains an ICMP flood 80% of the time, measured 62% with 43% service loss, so it avoids the block
+correctly but picks a worse replacement than `QUARANTINE`, which the adaptive PPO finds. The arbiter helps only if some
+strategy proposes the good action, and only if its evidence reflects the threat.
+
+**Limits.** The attacker is scripted: this measures how each response fares against such an attacker, not that real
+attackers behave this way. Four spoofable attacks, three repetitions: the intervals are wide. The adaptive PPO is scored
+on the table it trained on. The un-responded UDP flood is very large (about 198,000 packets from the real address against
+1,200 from the spoofed one) and its baseline noise produces some negative containment readings on weak responses, clipped
+as in the standard table.
+
+### What the three experiments change about the conclusions
+
+The earlier statement stands: on the standard measured table there is no claim that PPO beats Stackelberg. What is new is
+*where* they differ, and why. A model-based strategy generalises to attacks it was never shown (experiment 1); a learned
+strategy adapts to a changed objective only when retrained, but wins when the detector is unreliable and the traffic mix is
+known (experiment 2); and against a reactive attacker both beat the naive strategies by about four times, by different
+routes with different failure modes (experiment 3). No single arm is best in all three, which is the case for keeping more
+than one strategy and an arbiter whose evidence matches the threat.
+
+---
+
 ---
 
 *Sections below are retained for the detection results, the Suricata comparison, the disclosed-defect history and the related work. Their policy-comparison numbers are superseded by the section above.*

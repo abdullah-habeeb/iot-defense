@@ -110,6 +110,17 @@ policy:
     attacker:
       gain: 5.0              # value to the attacker of an uncontained attack
       exposure_penalty: 2.0  # cost to the attacker of continuing against a response that contains it
+    # An optional third follower strategy: keep attacking from a fresh source address. Mechanism
+    # knowledge written BEFORE any adaptive measurement: a response keyed on the attacker's address
+    # (a source block, a decoy redirect, a session reset) stops applying once the address changes;
+    # a rate limit on the target, a default-deny allowlist or an isolation does not care. Only attacks
+    # that can be re-sent from a spoofed source (UDP/ICMP/SYN-only floods, UDP replay) can rotate.
+    # OFF by default: the deployed Stackelberg arm does not anticipate rotation unless this is enabled.
+    follower_rotation:
+      enabled: false
+      cost: 1.0              # what switching address costs the attacker
+      rotatable_attack_types: [dos_flood, tcp_syn_flood, icmp_ping_flood, credential_replay]
+      source_keyed_actions: [BLOCK_SOURCE, DECOY, RESET_SESSIONS]
     attack_class:
       reconnaissance_port_scan: probing
       dos_flood: flood

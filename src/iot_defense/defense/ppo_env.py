@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import gymnasium as gym
 import numpy as np
@@ -132,14 +132,22 @@ def noisy_context(
     label_error_rate: float,
     score_sigma: float,
     feature_jitter: float,
+    conditions: tuple[str, ...] | None = None,
+    label_sampler: Callable[[str, np.random.Generator], str] | None = None,
 ) -> tuple[SecurityContext, str]:
     """A detector observation of `true_condition` as a real detector could
     produce it: sometimes mislabelled, with jittered score/confidence/
     features and an arbitrary device-criticality tag. Returns the context
-    and the label the detector reported."""
-    conditions = TRAINING_SCENARIOS()
+    and the label the detector reported. `conditions` limits both the true
+    condition's possible mislabels and (for the caller) what is ever shown;
+    by default every registered condition."""
+    conditions = conditions or TRAINING_SCENARIOS()
     reported = true_condition
-    if rng.random() < label_error_rate:
+    if label_sampler is not None:
+        # A detector with a specific, possibly structured way of being wrong (see
+        # evaluation/detector_uncertainty.py); replaces the uniform label_error_rate.
+        reported = label_sampler(true_condition, rng)
+    elif rng.random() < label_error_rate:
         reported = str(rng.choice([c for c in conditions if c != true_condition]))
     base = context_for_scenario(reported)
     beliefs = base.beliefs
@@ -173,9 +181,24 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
         score_sigma: float = 0.07,
         feature_jitter: float = 0.5,
         reward_scale: float = 10.0,
+        conditions: tuple[str, ...] | None = None,
+        label_sampler: Callable[[str, np.random.Generator], str] | None = None,
+        condition_weights: dict[str, float] | None = None,
     ) -> None:
         super().__init__()
-        table.require_complete(TRAINING_SCENARIOS())
+        # `conditions` restricts which conditions are ever drawn, mislabelled
+        # as, or rewarded -- the held-out ones are invisible to training.
+        self.conditions = tuple(conditions) if conditions else TRAINING_SCENARIOS()
+        self.label_sampler = label_sampler
+        # How often each condition is drawn. None = uniformly (every condition equally often), which
+        # makes benign traffic ~5% of training. A deployed learner would see mostly benign traffic.
+        self._condition_probs = None
+        if condition_weights is not None:
+            weights = np.array([float(condition_weights.get(c, 0.0)) for c in self.conditions])
+            if weights.min() < 0 or weights.sum() <= 0:
+                raise ValueError("condition_weights must be non-negative and not all zero")
+            self._condition_probs = weights / weights.sum()
+        table.require_complete(self.conditions)
         self.table = table
         self.action_space = spaces.Discrete(len(DefenseAction))
         self.observation_space = spaces.Box(0.0, 1.0, shape=(OBSERVATION_SIZE(),), dtype=np.float32)
@@ -190,7 +213,16 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
         self._true_condition = "normal"
 
     @classmethod
-    def from_config(cls, table: "OutcomeTable", episode_length: int | None = None) -> "DefenseDecisionEnv":
+    def from_config(
+        cls,
+        table: "OutcomeTable",
+        episode_length: int | None = None,
+        *,
+        conditions: tuple[str, ...] | None = None,
+        reward_scale: float | None = None,
+        label_sampler: Callable[[str, np.random.Generator], str] | None = None,
+        condition_weights: dict[str, float] | None = None,
+    ) -> "DefenseDecisionEnv":
         config = load_ppo_training_config()
         return cls(
             table,
@@ -198,17 +230,22 @@ class DefenseDecisionEnv(gym.Env[np.ndarray, int]):
             label_error_rate=float(config["label_error_rate"]),
             score_sigma=float(config["score_noise_sigma"]),
             feature_jitter=float(config["feature_jitter"]),
-            reward_scale=float(config["reward_scale"]),
+            reward_scale=float(reward_scale if reward_scale is not None else config["reward_scale"]),
+            conditions=conditions,
+            label_sampler=label_sampler,
+            condition_weights=condition_weights,
         )
 
     def _draw(self) -> tuple[np.ndarray, str]:
-        self._true_condition = str(self.np_random.choice(TRAINING_SCENARIOS()))
+        self._true_condition = str(self.np_random.choice(self.conditions, p=self._condition_probs))
         context, reported = noisy_context(
             self._true_condition,
             self.np_random,
             label_error_rate=self.label_error_rate,
             score_sigma=self.score_sigma,
             feature_jitter=self.feature_jitter,
+            conditions=self.conditions,
+            label_sampler=self.label_sampler,
         )
         return self.encoder.encode(context), reported
 

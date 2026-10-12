@@ -46,6 +46,12 @@ from iot_defense.defense.executor import MininetResponseExecutor
 from iot_defense.detection.detector import UnifiedRuleBasedDetector
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
+from iot_defense.evaluation.adaptive_outcome import (
+    ADAPTIVE_CONDITIONS,
+    ROTATION_SOURCE_IP,
+    AdaptiveMeasurement,
+    is_mitigated,
+)
 from iot_defense.evaluation.outcome import Measurement
 from iot_defense.monitoring.monitor import PacketMonitor
 from iot_defense.network.topology import create_mininet_network
@@ -369,6 +375,111 @@ class RealMininetDefenseEnv:
             baseline_packets=residual if action == DefenseAction.ALLOW else 0,
             residual_packets=residual,
             service_loss=probed["service_loss"] if probed else INVALID_SERVICE_LOSS,
+            intel_verified=bool((probed and probed["decoy_hits"] > 0) or outcome.get("evidence_captured")),
+        )
+        return measurement, outcome
+
+    # ─── Reactive-attacker (two-round) measurement ──────────────────────────
+    # See evaluation/adaptive_outcome.py for the threat model and why this is a scripted reaction.
+
+    def _rotated_generator(self, condition: str, source_ip: str) -> Callable[[Any], Any]:
+        """The condition's attack re-sent from one fresh, spoofed source address: what a reactive
+        attacker switches to after being blocked. Only spoofable attacks have one."""
+        generator = self.traffic_gen
+        builders: dict[str, Callable[[Any], Any]] = {
+            "dos_flood": lambda net: generator.generate_dos_distributed_mininet_traffic(net, sources=(source_ip,)),
+            "tcp_syn_flood": lambda net: generator.generate_syn_flood_distributed_mininet_traffic(net, sources=(source_ip,)),
+            "icmp_ping_flood": lambda net: generator.generate_icmp_flood_distributed_mininet_traffic(net, sources=(source_ip,)),
+            "credential_replay": lambda net: generator.generate_replay_attack_distributed_mininet_traffic(
+                net, duration_seconds=20, spoofed_source_ips=(source_ip,)
+            ),
+        }
+        if condition not in builders:
+            raise ValueError(f"{condition!r} has no spoofed single-source variant; adaptive conditions: {ADAPTIVE_CONDITIONS}")
+        return builders[condition]
+
+    def _counted_round(
+        self, receiver: Any, senders: tuple[str, ...], generate: Callable[[Any], Any], action: DefenseAction
+    ) -> tuple[int, int]:
+        """One round: packets from `senders` that survive to the receiver's counter while `generate`
+        runs, and (for DECOY) how many of the attacker's connections the decoy logged."""
+        self._clear_counter(receiver, senders)  # a leaked rule from a crashed probe would be read first
+        installed = receiver.cmd(self._counter_rule("A", senders)).strip()
+        if "iptables" in installed.lower():
+            raise RuntimeError(f"could not install probe counter: {installed}")
+        started_at = time.time()
+        decoy_hits = 0
+        try:
+            generate(self.net)
+            residual = self._read_counter(receiver)
+            if action == DefenseAction.DECOY:
+                time.sleep(0.3)  # the decoy logs after it accepts
+                decoy_hits = self._decoy_hits_since(started_at)
+        finally:
+            self._clear_counter(receiver, senders)
+        return residual, decoy_hits
+
+    def measure_rotated_baseline(self, condition: str, rotated_ip: str = ROTATION_SOURCE_IP) -> int:
+        """Packets the fresh-source attack delivers with NO response: round 2's baseline whenever the
+        attacker rotates (its rate differs from the registered attack's)."""
+        endpoints = self._flow_endpoints(condition)
+        if endpoints is None:
+            raise ValueError("benign traffic has no reactive attacker")
+        residual, _ = self._counted_round(
+            endpoints[0], (rotated_ip,), self._rotated_generator(condition, rotated_ip), DefenseAction.ALLOW
+        )
+        return residual
+
+    def measure_adaptive(
+        self,
+        action: DefenseAction,
+        threat_event: ThreatEvent,
+        condition: str,
+        baseline1: int | None,
+        rotated_ip: str = ROTATION_SOURCE_IP,
+    ) -> tuple[AdaptiveMeasurement, dict[str, Any]]:
+        """Apply `action`, then run the attack twice against it with the response left in place.
+
+        Round 1 is the registered attack. If it was mitigated against `baseline1` (the block's
+        un-responded packet count; None for the block's first, un-responded probe, which can never be
+        mitigated) the attacker rotates to a fresh source for round 2; otherwise round 2 repeats
+        round 1. Baselines on the returned measurement are placeholders (ALLOW is its own); the block
+        builder supplies the block's consensus baselines."""
+        if condition not in ADAPTIVE_CONDITIONS:
+            raise ValueError(f"{condition!r} is not an adaptive condition; expected one of {ADAPTIVE_CONDITIONS}")
+        event = self._canonical_event(condition, threat_event)
+
+        def probe() -> dict[str, Any]:
+            receiver, senders1 = self._flow_endpoints(condition)
+            registered = self._attack_for(condition).generate_traffic
+            residual1, hits1 = self._counted_round(receiver, senders1, registered, action)
+            loss1 = self._legit_service_loss()
+            rotated = is_mitigated(residual1, baseline1)
+            if rotated:
+                senders2, generate2 = (rotated_ip,), self._rotated_generator(condition, rotated_ip)
+            else:
+                senders2, generate2 = senders1, registered
+            residual2, hits2 = self._counted_round(receiver, senders2, generate2, action)
+            loss2 = self._legit_service_loss()
+            return {
+                "residual1": residual1, "residual2": residual2, "rotated": rotated,
+                "service_loss1": loss1, "service_loss2": loss2, "decoy_hits": hits1 + hits2,
+            }
+
+        outcome = self._execute_and_verify(action, event, probe=probe)
+        probed = outcome.pop("probe", None)
+        is_allow = action == DefenseAction.ALLOW
+        measurement = AdaptiveMeasurement(
+            condition=condition,
+            action=action,
+            status=outcome["status"],
+            baseline1=probed["residual1"] if probed and is_allow else 0,
+            residual1=probed["residual1"] if probed else 0,
+            baseline2=probed["residual2"] if probed and is_allow else 0,
+            residual2=probed["residual2"] if probed else 0,
+            rotated=bool(probed and probed["rotated"]),
+            service_loss1=probed["service_loss1"] if probed else INVALID_SERVICE_LOSS,
+            service_loss2=probed["service_loss2"] if probed else INVALID_SERVICE_LOSS,
             intel_verified=bool((probed and probed["decoy_hits"] > 0) or outcome.get("evidence_captured")),
         )
         return measurement, outcome

@@ -124,6 +124,61 @@ class ArbiterPolicy:
         )
 
 
+class PosteriorArbiter(ArbiterPolicy):
+    """An arbiter that does not take the detector's label on trust.
+
+    The plain arbiter looks up evidence under the label it is given. That label comes from a
+    detector that is sometimes wrong, so a missed attack (reported as "normal") sends the arbiter to
+    the evidence for benign traffic. This one asks instead: given the detector said `label`, what is
+    the probability the truth is each condition, and how well does each proposed action do on average
+    over those possibilities?
+
+        P(true = t | reported = r)  is proportional to  P(reported = r | true = t) * P(true = t)
+
+    `confusion[t][r]` is how often the detector reports r when the truth is t, and `prior[t]` is how
+    common t is in deployment (mostly benign). The action's score is then the posterior-weighted mean
+    realized utility minus `risk_aversion` times the spread of utility across that mixture, so an
+    action that is excellent for the most likely truth but terrible for a plausible alternative is
+    penalised: hedging falls out of the arithmetic instead of being learned.
+
+    It still only chooses among the proposals it is given and never reads a preferred_action. With a
+    perfect detector (identity confusion) it reduces exactly to the plain arbiter.
+    """
+
+    def __init__(
+        self,
+        table: "OutcomeTable",
+        *,
+        confusion: dict[str, dict[str, float]],
+        prior: dict[str, float],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(table, **kwargs)
+        self.confusion = confusion
+        self.prior = prior
+
+    def posterior(self, reported: str) -> dict[str, float]:
+        weights = {t: p * self.confusion.get(t, {}).get(reported, 0.0) for t, p in self.prior.items()}
+        total = sum(weights.values())
+        if total <= 0.0:
+            return {reported: 1.0}  # a label the confusion model has never seen: trust it, as the plain arbiter does
+        return {t: w / total for t, w in weights.items() if w > 0.0}
+
+    def score(self, label: str, decision: DefenseDecision) -> dict[str, float | int] | None:
+        usable = []
+        for truth, weight in self.posterior(label).items():
+            samples = self.table.samples(truth, decision.action)
+            if len(samples) >= self.min_samples:
+                usable.append((weight, statistics.fmean(samples), statistics.pstdev(samples), len(samples)))
+        if not usable:
+            return None
+        total = sum(w for w, *_ in usable)
+        mean = sum(w * m for w, m, _, _ in usable) / total
+        # spread within each condition plus the spread BETWEEN the conditions the label could mean
+        spread = (sum(w * (sd**2 + (m - mean) ** 2) for w, m, sd, _ in usable) / total) ** 0.5
+        return {"mean": mean, "sd": spread, "n": sum(n for *_, n in usable), "score": mean - self.risk_aversion * spread}
+
+
 POLICY_MODES = ("arbiter", "stackelberg", "rule_based", "ppo")
 
 

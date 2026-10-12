@@ -13,7 +13,7 @@ import pytest
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.defense import game_model, stackelberg
 from iot_defense.defense.decision import DefenseAction
-from iot_defense.defense.game_model import build_game_payoffs
+from iot_defense.defense.game_model import build_game_payoffs, with_rotation
 from iot_defense.defense.objective import Objective, load_policy_section
 from iot_defense.defense.stackelberg import StackelbergGame
 
@@ -91,3 +91,70 @@ def test_stackelberg_modules_never_read_preferred_action(module):
         n.id for n in ast.walk(tree) if isinstance(n, ast.Name)
     }
     assert "preferred_action" not in used
+
+
+class TestFollowerRotation:
+    """The optional third follower strategy: switch to a fresh source address."""
+
+    @staticmethod
+    def rotating():
+        return build_game_payoffs(model=with_rotation(load_policy_section("game_model")))
+
+    def test_it_is_off_by_default_so_the_deployed_game_is_unchanged(self):
+        assert load_policy_section("game_model")["follower_rotation"]["enabled"] is False
+        for by_action in build_game_payoffs().values():
+            for by_response in by_action.values():
+                assert set(by_response) == {"CONTINUE", "RETREAT"}
+
+    def test_only_the_configured_spoofable_attacks_gain_the_strategy(self):
+        configured = set(load_policy_section("game_model")["follower_rotation"]["rotatable_attack_types"])
+        payoffs = self.rotating()
+        for scenario in ATTACK_SCENARIOS.values():
+            has = "ROTATE_SOURCE" in payoffs[scenario.observed_threat_key]["BLOCK_SOURCE"]
+            assert has == (scenario.attack_type in configured), scenario.attack_type
+        assert "ROTATE_SOURCE" not in payoffs["NORMAL"]["BLOCK_SOURCE"]
+
+    def test_a_source_keyed_response_is_dodged_by_rotating_and_an_unkeyed_one_is_not(self):
+        game = StackelbergGame(self.rotating())
+        assert game.attacker_best_response("DOS_FLOOD", DefenseAction.BLOCK_SOURCE)[0] == "ROTATE_SOURCE"
+        assert game.attacker_best_response("DOS_FLOOD", DefenseAction.THROTTLE)[0] == "RETREAT"
+        assert game.attacker_best_response("DOS_FLOOD", DefenseAction.ALLOW)[0] == "CONTINUE"  # nothing to dodge: rotating only costs
+
+    def test_rotation_cost_is_what_makes_it_a_choice_and_not_a_free_move(self):
+        cheap = with_rotation(load_policy_section("game_model"))
+        cheap["follower_rotation"]["cost"] = 0.0
+        costly = with_rotation(load_policy_section("game_model"))
+        costly["follower_rotation"]["cost"] = 100.0
+        free = build_game_payoffs(model=cheap)["DOS_FLOOD"]["ALLOW"]
+        assert free["ROTATE_SOURCE"]["attacker"] == pytest.approx(free["CONTINUE"]["attacker"])
+        prohibitive = StackelbergGame(build_game_payoffs(model=costly))
+        assert prohibitive.attacker_best_response("DOS_FLOOD", DefenseAction.BLOCK_SOURCE)[0] != "ROTATE_SOURCE"
+
+    def test_the_leader_anticipates_rotation_and_moves_off_the_source_block(self):
+        plain = StackelbergGame(build_game_payoffs()).solve("DOS_FLOOD")
+        anticipating = StackelbergGame(self.rotating()).solve("DOS_FLOOD")
+        assert plain.selected_action == DefenseAction.BLOCK_SOURCE
+        assert anticipating.selected_action not in (DefenseAction.BLOCK_SOURCE, DefenseAction.DECOY, DefenseAction.RESET_SESSIONS)
+        assert anticipating.predicted_attacker_strategy in ("RETREAT", "CONTINUE")
+        assert "ROTATE_SOURCE" in {c.predicted_attacker_strategy for c in anticipating.candidates}
+
+    def test_attacks_that_cannot_spoof_are_not_second_guessed(self):
+        for threat in ("BRUTE_FORCE", "RECONNAISSANCE_PORT_SCAN", "DATA_EXFILTRATION"):
+            key = next(s.observed_threat_key for s in ATTACK_SCENARIOS.values() if s.observed_threat_key.upper() == threat)
+            assert StackelbergGame(self.rotating()).solve(key).selected_action == StackelbergGame(build_game_payoffs()).solve(key).selected_action
+
+    def test_a_response_keyed_on_the_address_loses_its_intelligence_when_the_attacker_moves(self):
+        payoffs = self.rotating()["DOS_FLOOD"]["DECOY"]
+        gap = payoffs["CONTINUE"]["defender"] - payoffs["ROTATE_SOURCE"]["defender"]
+        assert gap > 0  # the decoy's containment and intelligence both vanish after the switch
+
+    def test_the_config_names_only_real_attacks_and_actions(self):
+        config = load_policy_section("game_model")["follower_rotation"]
+        assert set(config["rotatable_attack_types"]) <= {s.attack_type for s in ATTACK_SCENARIOS.values()}
+        assert set(config["source_keyed_actions"]) <= {a.value for a in DefenseAction}
+
+    def test_with_rotation_does_not_mutate_the_loaded_model(self):
+        model = load_policy_section("game_model")
+        before = copy.deepcopy(model)
+        with_rotation(model)
+        assert model == before

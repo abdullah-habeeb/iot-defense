@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from iot_defense.defense import arbiter as arbiter_module
-from iot_defense.defense.arbiter import ARBITER_NAME, POLICY_MODES, ArbiterPolicy, select_decision
+from iot_defense.defense.arbiter import ARBITER_NAME, POLICY_MODES, ArbiterPolicy, PosteriorArbiter, select_decision
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.objective import Objective
 from iot_defense.demo.controller import DemoController
@@ -232,3 +232,56 @@ class TestOfflineEvaluation:
         lines[0]["valid_measurement"] = False
         path.write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
         assert evaluate(path, self.table_path(tmp_path))["excluded_trials"] == 1
+
+
+class TestPosteriorArbiter:
+    """The arbiter that averages evidence over what the detector's label could really mean."""
+
+    OTHER = "tcp_syn_flood"
+
+    def table(self):
+        # LABEL: action A is excellent and B is useless. OTHER: the reverse.
+        rows = []
+        for label, good, poor in ((LABEL, A, B), (self.OTHER, B, A)):
+            for action, (residual, loss) in {good: (0, 0.0), poor: (100, 0.0), C: (0, 0.6), DefenseAction.ALLOW: (100, 0.0)}.items():
+                rows += [Measurement(label, action, "success", 100, residual, loss, False).to_row() for _ in range(3)]
+        return OutcomeTable(rows, OBJECTIVE)
+
+    def proposals(self):
+        return {"x": decision(A, "x"), "y": decision(B, "y")}
+
+    def test_with_a_perfect_detector_it_reduces_to_the_plain_arbiter(self):
+        table = self.table()
+        identity = {t: {r: float(r == t) for r in (LABEL, self.OTHER)} for t in (LABEL, self.OTHER)}
+        posterior = PosteriorArbiter(table, confusion=identity, prior={LABEL: 0.5, self.OTHER: 0.5})
+        plain = ArbiterPolicy(table)
+        for label in (LABEL, self.OTHER):
+            assert posterior.arbitrate(label, self.proposals()).action == plain.arbitrate(label, self.proposals()).action
+            assert posterior.score(label, decision(A))["mean"] == pytest.approx(plain.score(label, decision(A))["mean"])
+
+    def test_a_label_that_carries_no_information_is_not_taken_at_face_value(self):
+        table = self.table()
+        plain = ArbiterPolicy(table)
+        blind = {t: {LABEL: 0.5, self.OTHER: 0.5} for t in (LABEL, self.OTHER)}
+        arbiter = PosteriorArbiter(table, confusion=blind, prior={LABEL: 0.5, self.OTHER: 0.5})
+        assert plain.arbitrate(LABEL, self.proposals()).action == A  # the plain arbiter trusts the label
+        mixed = arbiter.score(LABEL, decision(A))
+        assert mixed["mean"] == pytest.approx((plain.score(LABEL, decision(A))["mean"] + plain.score(self.OTHER, decision(A))["mean"]) / 2)
+        assert mixed["sd"] > plain.score(LABEL, decision(A))["sd"]  # disagreement between the possible truths counts as risk
+
+    def test_the_prior_shifts_the_posterior(self):
+        confusion = {t: {LABEL: 0.5, self.OTHER: 0.5} for t in (LABEL, self.OTHER)}
+        likely = PosteriorArbiter(self.table(), confusion=confusion, prior={LABEL: 0.99, self.OTHER: 0.01})
+        assert likely.posterior(LABEL)[LABEL] == pytest.approx(0.99)
+        assert likely.arbitrate(LABEL, self.proposals()).action == A
+
+    def test_an_unseen_label_is_trusted_and_missing_evidence_falls_back(self):
+        arbiter = PosteriorArbiter(self.table(), confusion={}, prior={LABEL: 1.0})
+        assert arbiter.posterior("never_seen") == {"never_seen": 1.0}
+        assert arbiter.score("never_seen", decision(A)) is None
+        fell_back = arbiter.arbitrate("never_seen", self.proposals())
+        assert fell_back.context["arbiter_reasoning"]["basis"].startswith("no measured evidence")
+
+    def test_it_never_reads_a_registered_preferred_action(self):
+        source = inspect.getsource(PosteriorArbiter)
+        assert "ATTACK_SCENARIOS" not in source and ".preferred_action" not in source

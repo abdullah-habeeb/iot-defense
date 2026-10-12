@@ -128,6 +128,16 @@ class OutcomeTable:
         rows = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
         return cls(rows, objective or Objective.load())
 
+    def with_cells_from(self, other: "OutcomeTable") -> "OutcomeTable":
+        """A copy of this table in which every (condition, action) cell `other` has measured is replaced by
+        `other`'s samples (e.g. the standard table with the adaptive conditions re-measured against a
+        reactive attacker). Cells `other` lacks are kept as they are."""
+        merged = OutcomeTable([], self.objective)
+        merged._samples.update({key: list(values) for key, values in self._samples.items()})
+        merged._samples.update({key: list(values) for key, values in other._samples.items() if values})
+        merged.invalid_rows = self.invalid_rows
+        return merged
+
     def samples(self, condition: str, action: DefenseAction) -> list[float]:
         return self._samples.get((condition, action), [])
 
