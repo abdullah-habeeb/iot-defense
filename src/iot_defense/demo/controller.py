@@ -88,6 +88,7 @@ def _initial_state() -> dict[str, Any]:
         "threat_status": "NORMAL",
         "timeline": [],
         "traffic": [],
+        "traffic_background": 0,
         "threat_event": None,
         "security_context": None,
         "policy_comparison": None,
@@ -109,6 +110,7 @@ def _initial_state() -> dict[str, Any]:
             "bandwidth_caps": 0,
             "restorations": 0,
             "detection_latency_ms": None,
+            "decision_latency_ms": None,
             "response_latency_ms": None,
         },
         "timestamp": time.time(),
@@ -118,7 +120,14 @@ def _initial_state() -> dict[str, Any]:
 class DemoController:
     """Orchestrate the full IoT defense pipeline and publish state/events via SSE."""
 
-    def __init__(self) -> None:
+    def __init__(self, policy_mode: str = "arbiter") -> None:
+        from iot_defense.defense.arbiter import POLICY_MODES
+
+        if policy_mode not in POLICY_MODES:
+            raise ValueError(f"unknown policy mode {policy_mode!r}; expected one of {POLICY_MODES}")
+        self.policy_mode = policy_mode
+        self._arbiter: Any = None
+        self._arbiter_loaded = False
         self.state: dict[str, Any] = _initial_state()
         self.event_queue: asyncio.Queue = asyncio.Queue()
         self.data_dir = "/home/abdullah/iot-defense/data/dashboard"
@@ -204,60 +213,55 @@ class DemoController:
 
     # ─── Policy evaluation ────────────────────────────────────────────────────
 
+    def _arbitrate(self, context: Any, rule_decision: Any, stack_decision: Any, ppo_decision: Any) -> Any:
+        """The arbiter's decision over whichever policies proposed something, or
+        None when the mode does not use it or the measured table is missing."""
+        if self.policy_mode != "arbiter":
+            return None
+        if not self._arbiter_loaded:
+            from iot_defense.defense.arbiter import ArbiterPolicy
+
+            try:
+                self._arbiter = ArbiterPolicy.from_config()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[DemoController] arbiter unavailable: {exc}")
+            if self._arbiter is None:
+                print("[DemoController] no measured outcome table found -- executing Stackelberg instead", flush=True)
+            self._arbiter_loaded = True
+        if self._arbiter is None:
+            return None
+        proposals = {
+            name: decision
+            for name, decision in (("rule_based", rule_decision), ("stackelberg", stack_decision), ("ppo", ppo_decision))
+            if decision is not None
+        }
+        return self._arbiter.arbitrate(context.beliefs.threat_type, proposals)
+
     def _build_policy_comparison(
         self,
         threat_event: ThreatEvent,
         context: Any,
     ) -> dict[str, Any]:
-        """Evaluate all three policies against the same security context."""
-        from iot_defense.defense.policy import RuleBasedDefensePolicy, StackelbergDefensePolicy
+        """Evaluate all three policies against the same security context
+        (shared with the live defender: see defense/pipeline.py)."""
+        from iot_defense.defense.pipeline import compute_proposals
 
-        rule_policy = RuleBasedDefensePolicy()
-        stack_policy = StackelbergDefensePolicy()
+        return compute_proposals(context)
 
-        # rule_decision is the actual fallback target when Stackelberg
-        # fails (see the selection logic below) -- deliberately not
-        # wrapped in its own try/except, since there is nothing further
-        # to fall back to if the fallback itself raises.
-        rule_decision = rule_policy.decide(context)
-        stack_decision = None
-        stackelberg_reasoning: dict[str, Any] = {}
-        stackelberg_fallback_used = False
-        try:
-            stack_decision = stack_policy.decide(context)
-            stackelberg_reasoning = stack_decision.context.get("stackelberg_reasoning", {})
-        except Exception as exc:  # noqa: BLE001
-            # A real fallback, not just a comment claiming one exists --
-            # found during a system review that this branch never
-            # existed: selected decision was unconditionally
-            # stack_decision, so a raising StackelbergDefensePolicy would
-            # abort the whole run instead of actually falling back.
-            print(f"[DemoController] Stackelberg decide error: {exc}")
-            stackelberg_fallback_used = True
+    @staticmethod
+    def _feed_sample(packets: list[dict[str, Any]], limit: int = 20) -> tuple[list[dict[str, Any]], int]:
+        """The packets the dashboard feed shows for one capture, and how many
+        background packets (IPv6 neighbour discovery and similar kernel
+        housekeeping) were left out of it.
 
-        # PPO – load if model exists, else fall back to rule-based
-        ppo_decision = None
-        ppo_fallback_used = False
-        try:
-            from iot_defense.defense.ppo_policy import PPODefensePolicy
-            ppo = PPODefensePolicy(
-                model_path="models/ppo_defense",
-                fallback=RuleBasedDefensePolicy(),
-            )
-            ppo_decision = ppo.decide(context, stackelberg_info=stackelberg_reasoning)
-            ppo_fallback_used = ppo.model is None
-        except Exception as exc:  # noqa: BLE001
-            print(f"[DemoController] PPO load error: {exc}")
-
-        comparison: dict[str, Any] = {
-            "rule_based": rule_decision.to_dict(),
-            "stackelberg": stack_decision.to_dict() if stack_decision else None,
-            "stackelberg_reasoning": stackelberg_reasoning,
-            "stackelberg_fallback_used": stackelberg_fallback_used,
-            "ppo": ppo_decision.to_dict() if ppo_decision else None,
-            "ppo_fallback_used": ppo_fallback_used,
-        }
-        return comparison, rule_decision, stack_decision, ppo_decision
+        Real traffic is preferred and the most recent `limit` of it is shown.
+        Only a capture with nothing but background packets falls back to
+        showing those, so the feed is never empty for a non-empty capture.
+        """
+        foreground = [packet for packet in packets if not packet.get("background")]
+        if not foreground:
+            return packets[-limit:], 0
+        return foreground[-limit:], len(packets) - len(foreground)
 
     # ─── Packet observation ───────────────────────────────────────────────────
 
@@ -349,11 +353,29 @@ class DemoController:
 
         return threat_event
 
+    def _warm_up_policies(self) -> float:
+        """Evaluate the whole policy stack once on a made-up port scan and discard the result.
+
+        The first evaluation imports the RL library and loads the PPO model and the measured outcome
+        table, which took about 20 s on the demo VM: a pause between "threat detected" and "deciding"
+        that had nothing to do with detection. Doing it before the network starts moves that cost to
+        start-up. Uses its own decision history so the run's real history is untouched. Returns seconds."""
+        began = time.perf_counter()
+        probe = ThreatEvent.from_result(
+            source_ip=NODE_IPS["attacker"], destination_ip=NODE_IPS["sensor"], attack_type="reconnaissance_port_scan",
+            threat_score=0.9, confidence=0.88, detection_reason="start-up warm-up",
+            features={"packets_per_second": 90.0, "unique_destination_ports": 300}, detector_name="warm-up",
+        )
+        context = DecisionAgent().build_context(probe, device_criticality="high")
+        _, rule_decision, stack_decision, ppo_decision = self._build_policy_comparison(probe, context)
+        self._arbitrate(context, rule_decision, stack_decision, ppo_decision)  # loads the outcome table in arbiter mode
+        return time.perf_counter() - began
+
     # ─── Main pipeline ────────────────────────────────────────────────────────
 
     async def _run_evaluate_and_respond(self, threat_event: ThreatEvent) -> None:
         """Decision → Response pipeline for a single threat event."""
-        detect_start = time.perf_counter()
+        decide_start = time.perf_counter()
 
         # Build BDI-style security context. DecisionAgent tracks real event
         # history across the whole run -- previous_relevant_events on this
@@ -367,12 +389,22 @@ class DemoController:
         comparison, rule_decision, stack_decision, ppo_decision = self._build_policy_comparison(
             threat_event, context
         )
-        detection_latency_ms = (time.perf_counter() - detect_start) * 1000
 
-        # Selected decision: prefer Stackelberg (strategic), fall back to
-        # rule-based if it failed to decide at all -- a real conditional
-        # now, not just a comment (see _build_policy_comparison above).
-        selected = stack_decision if stack_decision is not None else rule_decision
+        # The executed decision depends on policy_mode: by default the arbiter
+        # runs the proposal (from any of the three policies) with the best
+        # measured evidence; a single policy can be forced instead. Every mode
+        # degrades to Stackelberg, then rule-based, if its own policy produced
+        # nothing (see select_decision).
+        from iot_defense.defense.arbiter import select_decision
+
+        arbiter_decision = self._arbitrate(context, rule_decision, stack_decision, ppo_decision)
+        if arbiter_decision is not None:
+            comparison["arbiter"] = arbiter_decision.to_dict()
+        selected = select_decision(
+            self.policy_mode, rule=rule_decision, stackelberg=stack_decision, ppo=ppo_decision, arbiter=arbiter_decision
+        )
+        # Time to build the context, evaluate all three policies and choose (not detection: see run_demo).
+        decision_latency_ms = (time.perf_counter() - decide_start) * 1000
 
         await self.update_state(
             {
@@ -384,7 +416,7 @@ class DemoController:
                 "threat_status": "THREAT_DETECTED",
                 "metrics": {
                     **self.state["metrics"],
-                    "detection_latency_ms": round(detection_latency_ms, 2),
+                    "decision_latency_ms": round(decision_latency_ms, 2),
                 },
                 "nodes": self._set_node_status({
                     "attacker": "ATTACKED",
@@ -395,7 +427,7 @@ class DemoController:
                 f"All policies evaluated. Rule-Based→{rule_decision.action.value}, "
                 + (f"Stackelberg→{stack_decision.action.value}" if stack_decision else "Stackelberg→FAILED (fell back to rule-based)")
                 + (f", PPO→{ppo_decision.action.value}" if ppo_decision else "")
-                + f". Selected: {selected.action.value}"
+                + f". Selected ({selected.policy_name}): {selected.action.value}"
             ),
         )
 
@@ -578,6 +610,9 @@ class DemoController:
                 {"phase": "STARTING_NETWORK", "attack_mode": attack_mode},
                 timeline_message=f"Initializing Mininet IoT network (attack mode: {attack_mode})",
             )
+            # Load the policies now, before the network exists, so the first decision is not slow.
+            warm_up_seconds = await asyncio.to_thread(self._warm_up_policies)
+            await self.update_state({}, timeline_message=f"Policies loaded ({warm_up_seconds:.1f} s)")
 
             from iot_defense.network.topology import create_mininet_network
             from iot_defense.monitoring.monitor import PacketMonitor
@@ -625,13 +660,14 @@ class DemoController:
             cap_path = await asyncio.to_thread(monitor.stop_capture, self.net, capture_session, 4.0)
             raw_packets = self._observe_packets(monitor.read_capture(self.net, "sensor", cap_path))
 
-            traffic_events = raw_packets[:20]
+            traffic_events, baseline_background = self._feed_sample(raw_packets)
             flows = aggregator.aggregate(raw_packets)
 
             await self.update_state(
                 {
                     "phase": "OBSERVING",
                     "traffic": traffic_events,
+                    "traffic_background": baseline_background,
                     "metrics": {
                         **self.state["metrics"],
                         "packets_observed": len(raw_packets),
@@ -706,6 +742,7 @@ class DemoController:
                 scenario.capture_packet_limit,
                 watchdog_seconds=scenario.capture_completion_timeout + 60.0,
             )
+            attack_started = time.perf_counter()
             attack_result = scenario.generate_traffic(self.net)
             atk_cap_path = await asyncio.to_thread(
                 monitor.stop_capture, self.net, atk_capture_session, scenario.capture_completion_timeout
@@ -719,16 +756,24 @@ class DemoController:
             # above; the detector is never told which attack (if any) it
             # should find.
             threat_event: ThreatEvent = self._classify_attack_traffic(atk_flows)
+            # From the start of the attack traffic to the detector's verdict. It includes the capture window,
+            # which has to finish before the flows can be classified.
+            detection_latency_ms = (time.perf_counter() - attack_started) * 1000
 
-            all_traffic = (traffic_events + atk_packets)[:20]
+            # The feed follows the capture the run is on: the attack's own
+            # packets now, not the baseline's (it used to show
+            # (baseline + attack)[:20], and the baseline already filled all 20).
+            attack_feed, attack_background = self._feed_sample(atk_packets)
             await self.update_state(
                 {
                     "threat_status": "THREAT_DETECTED",
-                    "traffic": all_traffic,
+                    "traffic": attack_feed,
+                    "traffic_background": attack_background,
                     "metrics": {
                         **self.state["metrics"],
                         "packets_observed": self.state["metrics"]["packets_observed"] + len(atk_packets),
                         "flows_analyzed": self.state["metrics"]["flows_analyzed"] + len(atk_flows),
+                        "detection_latency_ms": round(detection_latency_ms, 2),
                     },
                 },
                 timeline_message=(
@@ -868,9 +913,12 @@ class DemoController:
             self.cleanup()
 
 
-def _select_attack_mode() -> str:
-    """Resolve the attack mode from --attack, or prompt interactively if omitted."""
+def _parse_args() -> tuple[str, str]:
+    """Resolve (attack mode, policy mode) from the command line; the attack is
+    prompted for interactively if --attack is omitted."""
     import argparse
+
+    from iot_defense.defense.arbiter import POLICY_MODES
 
     attack_keys = list(ATTACK_SCENARIOS)
 
@@ -885,28 +933,37 @@ def _select_attack_mode() -> str:
             + ". Prompted interactively if omitted."
         ),
     )
+    parser.add_argument(
+        "--policy",
+        choices=POLICY_MODES,
+        default="arbiter",
+        help=(
+            "Which decision to execute: 'arbiter' (default) runs the proposal with the best measured "
+            "evidence across all three policies; the others force that single policy."
+        ),
+    )
     args = parser.parse_args()
     if args.attack is not None:
-        return args.attack
+        return args.attack, args.policy
 
     print("Select attack scenario:")
     for index, key in enumerate(attack_keys, start=1):
         scenario = ATTACK_SCENARIOS[key]
-        print(f"  [{index}] {scenario.label} -> expected response: {scenario.preferred_action.value}")
+        print(f"  [{index}] {scenario.label} -> rule-based default response: {scenario.preferred_action.value}")
     choice = input(f"Enter choice [1-{len(attack_keys)}] (default 1): ").strip()
     try:
         selected_index = int(choice) - 1
         if 0 <= selected_index < len(attack_keys):
-            return attack_keys[selected_index]
+            return attack_keys[selected_index], args.policy
     except ValueError:
         pass
-    return attack_keys[0]
+    return attack_keys[0], args.policy
 
 
 def main() -> None:
-    attack_mode = _select_attack_mode()
-    print(f"[DemoController] attack_mode={attack_mode}", flush=True)
-    controller = DemoController()
+    attack_mode, policy_mode = _parse_args()
+    print(f"[DemoController] attack_mode={attack_mode} policy_mode={policy_mode}", flush=True)
+    controller = DemoController(policy_mode=policy_mode)
     asyncio.run(controller.run_demo(attack_mode=attack_mode))
 
 

@@ -31,7 +31,7 @@ function fmtIso(ts) {
   if (!ts) return 'N/A';
   try {
     const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
-    return d.toLocaleTimeString('en-GB', { hour12: false, fractionalSecondDigits: 0 });
+    return d.toLocaleTimeString('en-GB', { hour12: false });  // (fractionalSecondDigits: 0 is a RangeError and made every timeline time fall back to raw ISO)
   } catch { return String(ts); }
 }
 
@@ -226,7 +226,7 @@ function renderTopology(state) {
 }
 
 // ── Live Traffic ─────────────────────────────────────────────
-const PROTO_CLASS = { TCP: 'proto-tcp', UDP: 'proto-udp', ICMP: 'proto-icmp', ARP: 'proto-arp' };
+const PROTO_CLASS = { TCP: 'proto-tcp', UDP: 'proto-udp', ICMP: 'proto-icmp', ARP: 'proto-arp', ICMPV6: 'proto-arp', IPV6: 'proto-arp' };
 
 function renderTraffic(state) {
   const traffic = state.traffic || [];
@@ -234,6 +234,10 @@ function renderTraffic(state) {
   const badge = $('traffic-count-badge');
   if (!tbody) return;
   const suspiciousCount = traffic.filter(p => p.packet_suspicious).length;
+  const winNote = $('traffic-window-note');
+  const hidden = Number(state.traffic_background || 0);
+  if (winNote) winNote.textContent = hidden ? `latest ${traffic.length} · ${hidden} background hidden` : `latest ${traffic.length}`;
+  if (winNote) winNote.title = 'Background = IPv6 neighbour discovery and other kernel housekeeping the detector ignores';
   if (badge) badge.textContent = suspiciousCount ? `${traffic.length} pkts · ${suspiciousCount} flagged` : `${traffic.length} pkts`;
 
   if (!traffic.length) {
@@ -242,14 +246,14 @@ function renderTraffic(state) {
   }
 
   const rows = [...traffic].reverse().slice(0, 20).map((pkt, idx) => {
-    const proto = String(pkt.protocol || pkt.proto || 'UNKNOWN').toUpperCase();
+    const proto = String(pkt.display_protocol || pkt.protocol || pkt.proto || 'UNKNOWN').toUpperCase();
     const cls = PROTO_CLASS[proto] || '';
     const rowCls = [idx === 0 ? 'tl-entry-new' : '', pkt.packet_suspicious ? 'pkt-suspicious' : ''].filter(Boolean).join(' ');
     const flag = pkt.packet_suspicious ? ' <span title="Flagged by packet-level heuristic detector">⚠</span>' : '';
     return `<tr class="${rowCls}">
       <td>${escHtml(fmtTimestamp(pkt.timestamp))}</td>
-      <td class="mono">${escHtml(safe(pkt.src_ip))}</td>
-      <td class="mono">${escHtml(safe(pkt.dst_ip))}</td>
+      <td class="mono">${escHtml(safe(pkt.display_src || pkt.src_ip))}</td>
+      <td class="mono">${escHtml(safe(pkt.display_dst || pkt.dst_ip))}</td>
       <td class="${cls}">${escHtml(proto)}${flag}</td>
       <td>${safe(pkt.src_port)}</td>
       <td>${safe(pkt.dst_port)}</td>
@@ -424,11 +428,21 @@ function renderPolicies(state) {
     return;
   }
 
+  // Which policy's proposal was executed (for the EXECUTED tag on its card)
+  const selNow = state.selected_decision || {};
+  const reasoningNow = arbiterReasoning(state);
+  let execFrom = null;
+  if (selNow.policy_name === 'ArbiterPolicy' && reasoningNow) execFrom = reasoningNow.chosen_from;
+  else if (/Rule/i.test(selNow.policy_name || '')) execFrom = 'rule_based';
+  else if (/Stackelberg/i.test(selNow.policy_name || '')) execFrom = 'stackelberg';
+  else if (/PPO/i.test(selNow.policy_name || '')) execFrom = 'ppo';
+  const execCls = key => (execFrom === key ? ' is-executed' : '');
+
   // ── Rule-Based card
   const rb = cmp.rule_based || {};
   const rbHtml = `
-    <div class="policy-card pc-rule">
-      <div class="policy-card-title">🔵 Rule-Based Policy</div>
+    <div class="policy-card pc-rule${execCls('rule_based')}">
+      <div class="policy-card-title"><span class="pdot"></span>Rule-Based Policy</div>
       ${actionChipHtml(rb.action)}
       <div class="policy-detail">
         <div class="policy-detail-row">
@@ -462,8 +476,8 @@ function renderPolicies(state) {
   }).join('');
 
   const skHtml = `
-    <div class="policy-card pc-stack">
-      <div class="policy-card-title">🟡 Stackelberg Policy</div>
+    <div class="policy-card pc-stack${execCls('stackelberg')}">
+      <div class="policy-card-title"><span class="pdot"></span>Stackelberg Policy</div>
       ${actionChipHtml(sk.action)}
       <div class="policy-detail">
         <div class="policy-detail-row">
@@ -498,8 +512,8 @@ function renderPolicies(state) {
   const ppoAction = pp ? pp.action : null;
   const ppoAi = pp && pp.context ? pp.context.ppo_action_index : null;
   const ppoHtml = `
-    <div class="policy-card pc-ppo">
-      <div class="policy-card-title">🟣 PPO Adaptive Policy</div>
+    <div class="policy-card pc-ppo${execCls('ppo')}">
+      <div class="policy-card-title"><span class="pdot"></span>PPO Adaptive Policy</div>
       ${actionChipHtml(ppoAction)}
       <div class="policy-detail">
         <div class="policy-detail-row">
@@ -550,7 +564,9 @@ function renderPolicies(state) {
     }
 
     const srEl = $('sel-reason');
-    if (srEl) srEl.textContent = safe(sel.reason);
+    if (srEl) srEl.textContent = sel.policy_name === 'ArbiterPolicy'
+      ? 'Chosen by measured evidence — see the Arbiter Verdict above for the full comparison.'
+      : safe(sel.reason);
   } else if (selWrap) {
     selWrap.style.display = 'none';
   }
@@ -790,19 +806,263 @@ function renderMetrics(state) {
   set('m-restorations', m.restorations);
   set('m-throttles',    m.throttles);
   set('m-detect-latency', m.detection_latency_ms !== undefined ? m.detection_latency_ms?.toFixed(1) : null);
+  set('m-decide-latency', m.decision_latency_ms  !== undefined ? m.decision_latency_ms?.toFixed(1) : null);
   set('m-resp-latency',   m.response_latency_ms  !== undefined ? m.response_latency_ms?.toFixed(1) : null);
 }
+
+// ── Arbiter verdict ───────────────────────────────────────────
+const POLICY_LABEL = { rule_based: 'Rule-based', stackelberg: 'Stackelberg', ppo: 'PPO' };
+const policyLabel = key => POLICY_LABEL[key] || safe(key);
+// Realized utility is bounded by the objective weights (5 + 3 + 2).
+const UTILITY_SCALE = 10;
+
+function arbiterReasoning(state) {
+  const cmp = state.policy_comparison || {};
+  const fromArbiter = cmp.arbiter && cmp.arbiter.context && cmp.arbiter.context.arbiter_reasoning;
+  if (fromArbiter) return fromArbiter;
+  const sel = state.selected_decision;
+  return (sel && sel.context && sel.context.arbiter_reasoning) || null;
+}
+
+function renderArbiter(state) {
+  const section = $('section-arbiter');
+  if (!section) return;
+  const reasoning = arbiterReasoning(state);
+  if (!state.policy_comparison || !reasoning) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+
+  const sel = state.selected_decision || {};
+  const rr = state.response_result;
+  const arbiterRan = sel.policy_name === 'ArbiterPolicy';
+  const noEvidence = String(reasoning.basis || '').startsWith('no measured evidence');
+
+  // Mode badge
+  const badge = $('arbiter-mode-badge');
+  if (badge) {
+    let text = 'EVIDENCE-BASED', css = 'rgba(6,182,212,0.12)', fg = 'var(--accent-cyan)', bd = 'rgba(6,182,212,0.35)';
+    if (!arbiterRan) { text = 'ARBITER BYPASSED'; css = 'rgba(245,158,11,0.1)'; fg = 'var(--accent-amber)'; bd = 'rgba(245,158,11,0.35)'; }
+    else if (noEvidence) { text = 'FALLBACK — NO EVIDENCE'; css = 'rgba(245,158,11,0.1)'; fg = 'var(--accent-amber)'; bd = 'rgba(245,158,11,0.35)'; }
+    badge.textContent = text;
+    badge.style.cssText = `background:${css};color:${fg};border:1px solid ${bd}`;
+  }
+  const formula = $('arbiter-formula');
+  if (formula) {
+    const ra = reasoning.risk_aversion;
+    formula.textContent = `score = measured utility − ${ra !== undefined ? safeNum(ra, 1) : '1.0'} × spread`;
+  }
+
+  // Rank proposals: scored by risk-adjusted score (desc), unscored last.
+  const proposals = Object.entries(reasoning.proposals || {}).map(([name, p]) => ({
+    name, action: p.action, ev: p.evidence || null,
+  }));
+  proposals.sort((a, b) => {
+    const sa = a.ev ? a.ev.score : -Infinity, sb = b.ev ? b.ev.score : -Infinity;
+    return sb - sa;
+  });
+  const winnerName = reasoning.chosen_from;
+  const winner = proposals.find(p => p.name === winnerName);
+  const runnerUps = proposals.filter(p => p.name !== winnerName && p.ev);
+  const next = runnerUps[0];
+
+  // ── Hero
+  const hero = $('arbiter-hero');
+  if (hero) {
+    const executed = rr ? rr.action : (winner ? winner.action : sel.action);
+    const status = rr ? String(safe(rr.status)).toUpperCase() : null;
+    const statusCls = status === 'SUCCESS' ? 'accent-green' : status === 'FAILED' ? 'accent-red' : 'accent-amber';
+    let why = '';
+    if (noEvidence) {
+      why = `<div class="hero-notice">No policy's proposal has measured evidence for this attack, so the arbiter fell back to <strong>${escHtml(policyLabel(winnerName))}</strong>.</div>`;
+    } else if (winner && winner.ev) {
+      const w = winner.ev.score;
+      if (!next) {
+        why = `<div class="hero-why">Only proposal with measured evidence — risk-adjusted utility <span class="num">${safeNum(w, 2)}</span>.</div>`;
+      } else {
+        const gap = w - next.ev.score;
+        if (gap < 0.005) {
+          why = `<div class="hero-why">Tied with <strong>${escHtml(next.action)}</strong> (${escHtml(policyLabel(next.name))}) at <span class="num">${safeNum(w, 2)}</span>; the tie goes to the policy earlier in the order Stackelberg › PPO › Rule-based.</div>`;
+        } else {
+          const worst = runnerUps[runnerUps.length - 1];
+          const tail = worst && worst !== next
+            ? `, and <span class="num">+${safeNum(w - worst.ev.score, 2)}</span> over ${escHtml(worst.action)}`
+            : '';
+          why = `<div class="hero-why">Highest risk-adjusted measured utility (<span class="num">${safeNum(w, 2)}</span>): <span class="num">+${safeNum(gap, 2)}</span> over ${escHtml(next.action)} (${escHtml(policyLabel(next.name))})${tail}.</div>`;
+        }
+      }
+    }
+    const notice = arbiterRan ? '' :
+      `<div class="hero-notice">This run forced <strong>${escHtml(safe(sel.policy_name))}</strong> (<code>--policy</code>). The table shows what the arbiter would have chosen.</div>`;
+    hero.innerHTML = `
+      <div class="hero-eyebrow">${arbiterRan ? 'Executed response' : 'Arbiter would execute'}</div>
+      ${actionChipHtml(arbiterRan ? executed : (winner ? winner.action : null)).replace('policy-action-chip', 'policy-action-chip hero-action')}
+      <div class="hero-from">Proposed by <strong>${escHtml(policyLabel(winnerName))}</strong></div>
+      ${why}
+      ${notice}
+      <div class="hero-result"><span>Execution</span> <b class="${status ? statusCls : ''}">${status || 'PENDING'}</b></div>`;
+  }
+
+  // ── Evidence table
+  const tbody = $('evidence-tbody');
+  if (tbody) {
+    tbody.innerHTML = proposals.map((p, i) => {
+      const ev = p.ev;
+      const isWin = p.name === winnerName;
+      const pct = ev ? Math.max(0, Math.min(100, (ev.mean / UTILITY_SCALE) * 100)) : 0;
+      const verdict = isWin
+        ? '<span class="verdict-pill win"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"/></svg>Executed</span>'
+        : '<span class="verdict-pill lose">Overruled</span>';
+      if (!ev) {
+        return `<tr class="nodata">
+          <td>${i + 1}</td>
+          <td class="policy-cell"><span class="policy-dot dot-${escHtml(p.name)}"></span>${escHtml(policyLabel(p.name))}</td>
+          <td>${actionChipHtml(p.action)}</td>
+          <td colspan="4">No measurements for this action</td>
+          <td>${verdict}</td></tr>`;
+      }
+      return `<tr class="${isWin ? 'winner' : ''}">
+        <td>${i + 1}</td>
+        <td class="policy-cell"><span class="policy-dot dot-${escHtml(p.name)}"></span>${escHtml(policyLabel(p.name))}</td>
+        <td>${actionChipHtml(p.action)}</td>
+        <td class="col-bar"><div class="util-cell">
+          <div class="util-track" role="img" aria-label="Measured utility ${safeNum(ev.mean, 2)} out of ${UTILITY_SCALE}"><div class="util-fill" style="width:${pct.toFixed(1)}%"></div></div>
+          <span class="util-val">${safeNum(ev.mean, 2)}</span>
+        </div></td>
+        <td class="num">±${safeNum(ev.sd, 2)}</td>
+        <td class="num">${safe(ev.n)}</td>
+        <td class="num">${safeNum(ev.score, 2)}</td>
+        <td>${verdict}</td></tr>`;
+    }).join('');
+  }
+
+  const foot = $('arbiter-footnote');
+  const unavailable = Object.entries(reasoning.excluded_unavailable || {})
+    .map(([name, action]) => `${policyLabel(name)} proposed ${action}`).join('; ');
+  if (foot) {
+    foot.textContent = (unavailable ? `Not available on this device, so set aside: ${unavailable}. ` : '') +
+      `Evidence = live Mininet outcomes recorded for "${safe(reasoning.label)}" with each proposed action. ` +
+      'Policy confidence is the detector\'s confidence in the attack, shared by all policies, and is not used to choose a response.';
+  }
+}
+
+
+// ── Attack briefing ───────────────────────────────────────────
+// Descriptions arrive with the attack list (/attacks, fetched once by
+// loadAttackOptions), which the server builds from the attack registry, so there is one briefing per registered attack and none
+// is hand-listed here.
+const ATTACK_BRIEFINGS = {};
+
+// Beginner-level wording for each pipeline phase. Generic on purpose: what the
+// attack itself does is already written in the card above.
+const PHASE_EXPLAIN = {
+  STARTING_NETWORK: 'Building the virtual home network: a sensor, a camera, a smart plug, an attacker and a decoy.',
+  BASELINE: 'Recording normal traffic first, so the system learns what a quiet network looks like.',
+  OBSERVING: 'Recording normal traffic first, so the system learns what a quiet network looks like.',
+  THREAT_DETECTED: 'The attack is running now. Its traffic is crossing the network and being captured and analysed.',
+  DECIDING: 'Something is wrong. Three strategies each suggest a response, and the arbiter picks the one with the best measured results.',
+  RESPONDING: 'Applying the chosen response to the network for real.',
+  DECOY_ACTIVE: 'Response applied: the attacker was redirected to a decoy, a fake device that wastes their time and records what they do.',
+  ISOLATED: 'Response applied: the targeted device was cut off from the network, so the attack cannot reach it.',
+  THROTTLED: 'Response applied: the attacker\'s traffic is rate-limited, so it can no longer flood the target while normal traffic keeps flowing.',
+  BLOCKED_SOURCE: 'Response applied: all traffic from the attacker\'s address is now dropped.',
+  QUARANTINED: 'Response applied: the target may now talk only to a short list of trusted devices.',
+  SESSIONS_RESET: 'Response applied: the attacker\'s live connections were terminated.',
+  FORENSICS_CAPTURED: 'Response applied: evidence was recorded for later analysis. Traffic was not blocked.',
+  BANDWIDTH_CAPPED: 'Response applied: the attacker\'s outgoing bandwidth is capped, so little data can leave.',
+  RESTORING: 'Undoing the response and checking the network works normally again.',
+  RESTORED: 'The response was undone and the network is back to normal.',
+  COMPLETE: 'The run is finished and the network is back to normal.',
+  CLEANUP: 'Shutting the virtual network down.',
+  ERROR: 'Something went wrong with this run. Check the event timeline for details.',
+};
+
+// Terms a beginner may not know, explained on hover. Only the first mention
+// in each block is marked up, so the text stays readable.
+const GLOSSARY = {
+  TCP: 'A reliable way to send data: both sides set up a connection first.',
+  UDP: 'A fast, no-connection way to send data. Nothing checks that it arrived.',
+  ICMP: 'The messages used by ping to check whether a device is reachable.',
+  SYN: 'The first message of a TCP connection: "I would like to connect".',
+  DNS: 'The internet\'s phone book, which turns names like example.com into addresses.',
+  MQTT: 'A lightweight messaging protocol many smart-home devices use.',
+  ping: 'A tiny "are you there?" message and its reply.',
+  port: 'A numbered door on a device. Each service listens on its own.',
+  ports: 'Numbered doors on a device. Each service listens on its own.',
+  botnet: 'A group of hijacked devices controlled together by one attacker.',
+  spoofed: 'Faked: the sender claims to be an address that is not really theirs.',
+  forged: 'Faked: the sender claims to be an address that is not really theirs.',
+};
+const GLOSSARY_RE = new RegExp(`\\b(${Object.keys(GLOSSARY).join('|')})\\b`, 'g');
+
+function withGlossary(text) {
+  const seen = new Set();
+  return escHtml(text).replace(GLOSSARY_RE, (term) => {
+    if (seen.has(term)) return term;
+    seen.add(term);
+    return `<abbr title="${escHtml(GLOSSARY[term])}">${term}</abbr>`;
+  });
+}
+
+let _briefingKey = null;
+function renderBriefing(state) {
+  const card = $('section-briefing');
+  if (!card) return;
+  const key = state.attack_mode;
+  const info = key ? ATTACK_BRIEFINGS[key] : null;
+  if (!info) { card.style.display = 'none'; _briefingKey = null; return; }
+  card.style.display = '';
+
+  // The static text only changes when a different attack starts.
+  if (_briefingKey !== key + (state.live ? ':live' : '')) {
+    _briefingKey = key + (state.live ? ':live' : '');
+    $('briefing-name').textContent = info.label;
+    const badges = [`<span class="briefing-badge cat">${escHtml(info.category)}</span>`];
+    badges.push(`<span class="briefing-badge dir">${info.direction === 'outbound' ? 'From inside: device sends data out' : 'From outside: attacker targets the device'}</span>`);
+    if (info.distributed) badges.push(`<span class="briefing-badge dist">Distributed · ${info.sources} sources</span>`);
+    $('briefing-badges').innerHTML = badges.join('');
+    $('briefing-summary').innerHTML = withGlossary(info.summary);
+    $('briefing-lab').textContent = state.live
+      ? `In this live demo: ${((state.nodes || {}).attacker || {}).ip || 'a real device'} sends this traffic to the protected box (${state.live.box_ip}).`
+      : `In this simulation: ${info.lab_note}`;
+    $('briefing-steps').innerHTML = info.steps.map(s => `<li>${withGlossary(s)}</li>`).join('');
+    $('briefing-impact').innerHTML = withGlossary(info.impact);
+    $('briefing-tell').innerHTML = withGlossary(info.tell);
+  }
+
+  const live = $('briefing-live');
+  const phase = state.phase;
+  $('briefing-live-text').textContent = PHASE_EXPLAIN[phase] || '';
+  live.classList.toggle('done', phase === 'COMPLETE' || phase === 'RESTORED' || phase === 'CLEANUP');
+  live.classList.toggle('error', phase === 'ERROR');
+}
+
+function initBriefingToggle() {
+  const btn = $('briefing-toggle');
+  const card = $('section-briefing');
+  if (!btn || !card) return;
+  btn.addEventListener('click', () => {
+    const collapsed = card.classList.toggle('collapsed');
+    btn.textContent = collapsed ? 'Show' : 'Hide';
+    btn.setAttribute('aria-expanded', String(!collapsed));
+  });
+}
+
 
 // ── Master render ─────────────────────────────────────────────
 let _lastPhase = null;
 
 function renderAll(state) {
+  window.__lastState = state;
   try { renderHeader(state); } catch(e) { console.error('header', e); }
   try { renderTopology(state); } catch(e) { console.error('topology', e); }
+  try { renderBriefing(state); } catch(e) { console.error('briefing', e); }
   try { renderTraffic(state); } catch(e) { console.error('traffic', e); }
   try { renderThreat(state); } catch(e) { console.error('threat', e); }
   try { renderContext(state); } catch(e) { console.error('context', e); }
   try { renderPolicies(state); } catch(e) { console.error('policies', e); }
+  try { renderArbiter(state); } catch(e) { console.error('arbiter', e); }
   try { renderResponse(state); } catch(e) { console.error('response', e); }
   try { renderTimeline(state); } catch(e) { console.error('timeline', e); }
   try { renderMetrics(state); } catch(e) { console.error('metrics', e); }
@@ -904,6 +1164,8 @@ async function loadAttackOptions() {
     if (!resp.ok) throw new Error(`status ${resp.status}`);
     const attacks = await resp.json();
     select.innerHTML = attacks.map(a => `<option value="${escHtml(a.key)}">${escHtml(a.label)}</option>`).join('');
+    attacks.forEach(a => { ATTACK_BRIEFINGS[a.key] = a; });
+    if (window.__lastState) renderBriefing(window.__lastState);
   } catch (e) {
     console.warn('[run-control] /attacks fetch failed:', e);
     select.innerHTML = '<option value="">Attack list unavailable</option>';
@@ -985,8 +1247,11 @@ function initRunControl() {
 
 // ── Boot ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // The live page shares this file's renderers and boots itself in live.js.
+  if (document.body.dataset.page === 'live') return;
   startClock();
   loadInitialState();
   connectSSE();
   initRunControl();
+  initBriefingToggle();
 });

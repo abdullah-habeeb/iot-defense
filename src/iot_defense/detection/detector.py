@@ -1165,6 +1165,156 @@ class RuleBasedC2BeaconDetector(Detector):
         )
 
 
+def destination_aggregates(flows: list[Any]) -> list[dict[str, Any]]:
+    """Per-(destination, protocol) aggregate feature dicts over every flow
+    that shares them, for attacks no single flow can reveal.
+
+    Each source address of a distributed attack forms its own small flow
+    (FeatureAggregator groups by source/destination pair), so per-flow
+    detection sees N unremarkable trickles. Only groups with two or more
+    distinct sources are returned -- a lone source is the per-flow
+    detectors' job. `unique_source_ips` is the signal they need.
+    """
+    groups: dict[tuple[str, str], list[Any]] = {}
+    for flow in flows:
+        groups.setdefault((flow.destination_ip, flow.protocol), []).append(flow)
+    aggregates: list[dict[str, Any]] = []
+    for (destination_ip, protocol), group in groups.items():
+        sources = {flow.source_ip for flow in group}
+        if len(sources) < 2:
+            continue
+        total = sum(flow.packet_count for flow in group)
+        total_bytes = sum(flow.bytes_total for flow in group)
+        starts = [flow.window_start for flow in group if flow.window_start is not None]
+        ends = [flow.window_end for flow in group if flow.window_end is not None]
+        duration = (max(ends) - min(starts)) if starts and ends else max(flow.duration for flow in group)
+        aggregates.append(
+            {
+                "source_ip": max(group, key=lambda flow: flow.packet_count).source_ip,
+                "destination_ip": destination_ip,
+                "protocol": protocol,
+                "duration": duration,
+                "packet_count": total,
+                "packets_per_second": total / duration if duration > 0 else float(total),
+                "bytes_total": total_bytes,
+                "average_packet_size": total_bytes / total if total else 0.0,
+                "unique_destination_ports": max(flow.unique_destination_ports for flow in group),
+                "unique_source_ips": len(sources),
+                "tcp_syn_count": sum(flow.tcp_syn_count for flow in group),
+                "tcp_ack_count": sum(flow.tcp_ack_count for flow in group),
+            }
+        )
+    return aggregates
+
+
+class RuleBasedDistributedSourcesDetector(Detector):
+    """Detect an attack spread across many source addresses.
+
+    Works on destination aggregates only (see destination_aggregates): on a
+    single flow's features `unique_source_ips` is absent and this always
+    reports normal, so it can sit in the registry like any other detector.
+    Normal traffic in this lab has at most two sources per destination;
+    the distributed attacks use six, so min_unique_sources=4 sits with real
+    margin on both sides. Each registered variant is told apart by its
+    protocol and rate window.
+    """
+
+    operates_on_aggregates = True
+
+    def __init__(
+        self,
+        *,
+        attack_type: str,
+        protocol: str,
+        min_packet_count: int,
+        threat_score: float,
+        confidence: float,
+        reason: str,
+        min_unique_sources: int = 4,
+        min_packets_per_second: float = 0.0,
+        max_packets_per_second: float | None = None,
+        max_average_packet_size: float | None = None,
+        min_tcp_syn_count: int = 0,
+        max_tcp_ack_fraction: float | None = None,
+    ) -> None:
+        self.attack_type = attack_type
+        self.protocol = protocol
+        self.min_packet_count = min_packet_count
+        self.threat_score = threat_score
+        self.confidence = confidence
+        self.reason = reason
+        self.min_unique_sources = min_unique_sources
+        self.min_packets_per_second = min_packets_per_second
+        self.max_packets_per_second = max_packets_per_second
+        self.max_average_packet_size = max_average_packet_size
+        self.min_tcp_syn_count = min_tcp_syn_count
+        self.max_tcp_ack_fraction = max_tcp_ack_fraction
+
+    def _matches(self, features: dict[str, Any]) -> bool:
+        packet_count = int(features.get("packet_count", 0))
+        packets_per_second = float(features.get("packets_per_second", 0.0))
+        if str(features.get("protocol", "")).upper() != self.protocol:
+            return False
+        if int(features.get("unique_source_ips", 0)) < self.min_unique_sources:
+            return False
+        if packet_count < self.min_packet_count or packets_per_second < self.min_packets_per_second:
+            return False
+        if self.max_packets_per_second is not None and packets_per_second >= self.max_packets_per_second:
+            return False
+        if self.max_average_packet_size is not None and float(features.get("average_packet_size", 0.0)) > self.max_average_packet_size:
+            return False
+        if int(features.get("tcp_syn_count", 0)) < self.min_tcp_syn_count:
+            return False
+        if self.max_tcp_ack_fraction is not None and int(features.get("tcp_ack_count", 0)) > self.max_tcp_ack_fraction * packet_count:
+            return False
+        return True
+
+    def detect(self, features: dict[str, Any]) -> ThreatEvent:
+        is_threat = self._matches(features)
+        return ThreatEvent.from_result(
+            source_ip=str(features.get("source_ip", "unknown")),
+            destination_ip=str(features.get("destination_ip", "unknown")),
+            attack_type=self.attack_type if is_threat else "normal",
+            threat_score=self.threat_score if is_threat else 0.05,
+            confidence=self.confidence if is_threat else 0.9,
+            detection_reason=self.reason if is_threat else "traffic pattern does not meet distributed-source criteria",
+            features=features,
+            detector_name=type(self).__name__,
+        )
+
+
+def build_distributed_dos_detector() -> Detector:
+    return RuleBasedDistributedSourcesDetector(
+        attack_type="dos_flood_distributed", protocol="UDP", min_packet_count=100, min_packets_per_second=100.0,
+        threat_score=0.9, confidence=0.85,
+        reason="a high-rate UDP flood arriving from many source addresses at once, none individually flood-like",
+    )
+
+
+def build_distributed_syn_flood_detector() -> Detector:
+    return RuleBasedDistributedSourcesDetector(
+        attack_type="tcp_syn_flood_distributed", protocol="TCP", min_packet_count=50, min_packets_per_second=30.0,
+        min_tcp_syn_count=50, max_tcp_ack_fraction=0.1, threat_score=0.88, confidence=0.84,
+        reason="SYN-only connection attempts arriving from many source addresses with no completed handshakes",
+    )
+
+
+def build_distributed_icmp_flood_detector() -> Detector:
+    return RuleBasedDistributedSourcesDetector(
+        attack_type="icmp_ping_flood_distributed", protocol="ICMP", min_packet_count=50, min_packets_per_second=30.0,
+        threat_score=0.82, confidence=0.8,
+        reason="an ICMP echo flood arriving from many source addresses at once",
+    )
+
+
+def build_distributed_replay_detector() -> Detector:
+    return RuleBasedDistributedSourcesDetector(
+        attack_type="credential_replay_distributed", protocol="UDP", min_packet_count=12,
+        max_packets_per_second=5.0, max_average_packet_size=200.0, threat_score=0.74, confidence=0.7,
+        reason="a repeated burst of uniform small UDP packets spread across many source addresses",
+    )
+
+
 class UnifiedRuleBasedDetector(Detector):
     """Classify captured flow features without being told which attack (if
     any) is actually happening.
@@ -1206,6 +1356,16 @@ class UnifiedRuleBasedDetector(Detector):
             raise ValueError("UnifiedRuleBasedDetector requires at least one detector")
         return fallback_normal_event  # every rule set agrees: normal traffic
 
+    def detect_aggregate(self, aggregate: dict[str, Any]) -> ThreatEvent | None:
+        """The first aggregate-only detector (distributed attacks) that flags
+        this destination aggregate, or None if none does."""
+        for detector in self.detectors.values():
+            if getattr(detector, "operates_on_aggregates", False):
+                event = detector.detect(aggregate)
+                if event.attack_type != "normal":
+                    return event
+        return None
+
     def detect_flows(self, flows: list[Any]) -> ThreatEvent:
         """Classify every flow in a capture window, not just a single
         pre-selected one -- returns the first genuinely flagged flow's
@@ -1226,6 +1386,13 @@ class UnifiedRuleBasedDetector(Detector):
         position in the capture fixes that without weakening detection
         for the common case, where the first flow already is the signal.
         """
+        # Aggregate-only detectors first: a distributed attack's per-source
+        # slices can look like a different (or no) attack flow by flow.
+        for aggregate in destination_aggregates(flows):
+            event = self.detect_aggregate(aggregate)
+            if event is not None:
+                return event
+
         fallback_normal_event: ThreatEvent | None = None
         for flow in flows:
             event = self.detect(flow.to_dict())
