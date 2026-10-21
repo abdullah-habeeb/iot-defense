@@ -32,7 +32,7 @@ from iot_defense.defense.result import ResponseResult
 from iot_defense.detection.threat_event import ThreatEvent
 from iot_defense.live.backend import SUPPORTED_ACTIONS, IptablesBackend, UnsafeTargetError, run_command
 from iot_defense.live.service import LegitService
-from iot_defense.live.window import WindowedDetector
+from iot_defense.live.window import WindowedDetector, sustained_alarms
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 # Its own file: the simulation dashboard owns state.json (see dashboard/server.py).
@@ -450,8 +450,12 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_calibrate(args: argparse.Namespace) -> int:
     box_ip = args.box_ip or interface_ip(args.iface)
     events: "queue.SimpleQueue[dict[str, Any]]" = queue.SimpleQueue()
+    # Serve the page exactly as `run` does: the phone needs something to load, and its polling is the traffic to calibrate on.
+    service = LegitService(port=args.port)
+    port = service.start()
     sniffer = start_sniffer(args.iface, box_ip, events)
-    print(f"[calibrate] recording {args.seconds}s of NORMAL traffic to {box_ip} on {args.iface}. Use the phone as you will in the demo; no attack.", flush=True)
+    print(f"[calibrate] recording {args.seconds}s of NORMAL traffic to {box_ip} on {args.iface}.", flush=True)
+    print(f"[calibrate] NOW open http://{box_ip}:{port} on the phone and leave it open, as in the demo. No attack.", flush=True)
     recorded: list[dict[str, Any]] = []
     deadline = time.time() + args.seconds
     try:
@@ -464,6 +468,8 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
                     break
     finally:
         sniffer.stop()
+        trusted = service.trusted_clients()
+        service.stop()
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(json.dumps(e, default=str) + "\n" for e in recorded), encoding="utf-8")
@@ -471,10 +477,20 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     alarms = probe.scan_for_false_alarms(recorded)
     sources = sorted({e["src_ip"] for e in recorded})
     print(f"[calibrate] {len(recorded)} packets from {len(sources)} sources: {sources}")
-    if alarms:
-        print(f"[calibrate] FALSE ALARMS: {len(alarms)} (first: {alarms[0]}). Do not demo until this is explained.")
+    print(f"[calibrate] devices that completed real requests to the page (trusted): {sorted(trusted) or 'none: did the phone open the page?'}")
+    if not trusted:
+        print("[calibrate] NO TRUSTED DEVICE: the phone never loaded the page, so this recording says nothing about it. Run again with the page open on the phone.")
+        return 2
+    # Judge alarms the way the defender acts on them: only runs of consecutive checks count, and a trusted device is never acted on.
+    runs = sustained_alarms(alarms, args.confirm_ticks)
+    ignored = [r for r in runs if r["source_ip"] in trusted]
+    real = [r for r in runs if r["source_ip"] not in trusted]
+    transient = len(alarms) - sum(r["checks"] for r in runs)
+    print(f"[calibrate] {len(alarms)} flagged checks: {transient} one-off (never acted on), {len(ignored)} sustained from trusted devices (ignored), {len(real)} sustained from others.")
+    if real:
+        print(f"[calibrate] FALSE ALARM from an untrusted source (first: {real[0]}). Do not demo until this is explained.")
         return 1
-    print("[calibrate] no false alarms: normal traffic is not mistaken for an attack.")
+    print("[calibrate] OK: nothing the defender would act on. Normal traffic is not mistaken for an attack.")
     return 0
 
 
@@ -506,6 +522,8 @@ def main(argv: list[str] | None = None) -> int:
     cal_p = sub.add_parser("calibrate", help="record normal traffic and confirm it raises no alarm")
     common(cal_p)
     cal_p.add_argument("--seconds", type=float, default=120.0)
+    cal_p.add_argument("--port", type=int, default=8080, help="port of the page the phone opens (same as `run`)")
+    cal_p.add_argument("--confirm-ticks", type=int, default=2, help="consecutive flagged checks the defender needs before acting")
     cal_p.add_argument("--output", default=str(REPO_ROOT / "data" / "live" / "calibration.jsonl"))
     cal_p.set_defaults(func=cmd_calibrate)
     res_p = sub.add_parser("restore", help="remove every firewall rule this tool added")

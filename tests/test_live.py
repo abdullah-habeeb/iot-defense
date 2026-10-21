@@ -18,7 +18,7 @@ from iot_defense.live import defender as live_defender
 from iot_defense.live.backend import CHAIN, SUPPORTED_ACTIONS, IptablesBackend, UnsafeTargetError
 from iot_defense.live.defender import LiveDefender, LiveState, replay_events
 from iot_defense.live.service import LegitService
-from iot_defense.live.window import WindowedDetector, is_routable_peer
+from iot_defense.live.window import WindowedDetector, is_routable_peer, sustained_alarms
 
 BOX = "192.168.43.10"
 PHONE = "192.168.43.20"
@@ -154,6 +154,37 @@ class TestWindowedDetector:
 
     def test_is_routable_peer(self):
         assert is_routable_peer("192.168.1.5") and not is_routable_peer("127.0.0.1") and not is_routable_peer("fe80::1")
+
+
+class TestSustainedAlarms:
+    """Calibration must judge alarms the way the defender acts on them (two checks in a row)."""
+
+    @staticmethod
+    def alarm(at, source=PHONE, kind="exploit_payload_injection"):
+        return {"at": at, "source_ip": source, "attack_type": kind, "reason": "x"}
+
+    def test_a_one_off_alarm_is_not_sustained(self):
+        assert sustained_alarms([self.alarm(102.0)]) == []
+
+    def test_consecutive_alarms_from_one_source_are_one_sustained_run(self):
+        runs = sustained_alarms([self.alarm(102.0), self.alarm(103.0), self.alarm(104.0)])
+        assert len(runs) == 1 and runs[0]["checks"] == 3 and runs[0]["source_ip"] == PHONE and runs[0]["start"] == 102.0
+
+    def test_a_gap_ends_the_run(self):
+        assert sustained_alarms([self.alarm(102.0), self.alarm(110.0)]) == []
+        assert len(sustained_alarms([self.alarm(102.0), self.alarm(103.0), self.alarm(120.0), self.alarm(121.0)])) == 2
+
+    def test_sources_are_tracked_separately(self):
+        runs = sustained_alarms([self.alarm(102.0), self.alarm(102.0, ATTACKER), self.alarm(103.0), self.alarm(103.0, ATTACKER, "brute_force")])
+        assert {r["source_ip"] for r in runs} == {PHONE, ATTACKER}
+
+    def test_the_required_run_length_is_configurable(self):
+        assert len(sustained_alarms([self.alarm(102.0)], confirm_ticks=1)) == 1
+        assert sustained_alarms([self.alarm(102.0), self.alarm(103.0)], confirm_ticks=3) == []
+
+    def test_the_phones_normal_polling_has_no_sustained_alarm(self):
+        alarms = WindowedDetector([BOX]).scan_for_false_alarms(browsing())
+        assert sustained_alarms(alarms) == []
 
 
 # ── firewall backend ──────────────────────────────────────────────────────────

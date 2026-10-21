@@ -43,14 +43,18 @@ real `iptables`. It must end with `SELF-TEST PASSED`.
 
 ## 3. Before the demo: calibrate on normal traffic
 
-In one terminal start recording, then use the phone normally against the box for two minutes (open
-`http://<box-ip>:8080`, leave it open):
+Start recording. It serves the same page the demo does, so as soon as it says so, open
+`http://<box-ip>:8080` on the phone and leave it open for the two minutes:
 
 ```bash
 sudo .venv/bin/python3 -m iot_defense.live.defender calibrate --iface enp0s8 --seconds 120
 ```
 
-It must print `no false alarms`. If it does not, do not demo until the cause is understood.
+It must end with `OK: nothing the defender would act on`. A flagged check that lasts one second is normal (the first
+packets of any new client look unusual for a moment) and is not a problem; only runs of consecutive flagged checks
+count, and a device that completed real requests to the page is never acted on. If it says `NO TRUSTED DEVICE`, the
+phone never loaded the page: run it again with the page open. If it says `FALSE ALARM from an untrusted source`, do
+not demo until the cause is understood.
 
 ## 4. Demo
 

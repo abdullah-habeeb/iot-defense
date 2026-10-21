@@ -17,6 +17,28 @@ from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
 
 
+def sustained_alarms(alarms: list[dict[str, Any]], confirm_ticks: int = 2, step: float = 1.0) -> list[dict[str, Any]]:
+    """Runs of consecutive alarms from one source: the only ones the defender would act on.
+
+    The defender needs `confirm_ticks` flagged checks in a row before it changes the firewall, because the
+    first packets of any new client are few and large and read for one check as an exploit. Returns one
+    entry per run that long: {source_ip, attack_type, start, checks}."""
+    runs: list[dict[str, Any]] = []
+    open_runs: dict[str, dict[str, Any]] = {}
+    for alarm in sorted(alarms, key=lambda a: float(a["at"])):
+        source = alarm["source_ip"]
+        current = open_runs.get(source)
+        if current is not None and float(alarm["at"]) - current["last"] <= step * 1.5:
+            current["checks"] += 1
+            current["last"] = float(alarm["at"])
+        else:
+            current = {"source_ip": source, "attack_type": alarm["attack_type"], "start": float(alarm["at"]),
+                       "checks": 1, "last": float(alarm["at"])}
+            open_runs[source] = current
+            runs.append(current)
+    return [{k: v for k, v in run.items() if k != "last"} for run in runs if run["checks"] >= confirm_ticks]
+
+
 def is_routable_peer(address: str) -> bool:
     """A source address worth analysing (and, if it attacks, worth blocking):
     a real unicast IPv4 peer, not loopback, multicast, broadcast or unset."""
