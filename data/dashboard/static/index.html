@@ -283,12 +283,17 @@
           <div class="metric-label">Throttles</div>
           <div class="metric-unit">applied</div>
         </div>
-        <div class="metric-card" style="grid-column:span 2">
+        <div class="metric-card" style="grid-column:span 2" title="From the first attack packet to the detector's verdict (includes the capture window)">
           <div class="metric-val" id="m-detect-latency">—</div>
           <div class="metric-label">Detection Latency</div>
-          <div class="metric-unit">ms</div>
+          <div class="metric-unit">ms · first attack packet to verdict</div>
         </div>
-        <div class="metric-card" style="grid-column:span 2">
+        <div class="metric-card" style="grid-column:span 2" title="Time to evaluate the three policies and choose a response">
+          <div class="metric-val" id="m-decide-latency">—</div>
+          <div class="metric-label">Decision Latency</div>
+          <div class="metric-unit">ms · policies and arbiter</div>
+        </div>
+        <div class="metric-card" title="Time to apply the chosen response">
           <div class="metric-val" id="m-resp-latency">—</div>
           <div class="metric-label">Response Latency</div>
           <div class="metric-unit">ms</div>

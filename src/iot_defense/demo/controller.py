@@ -110,6 +110,7 @@ def _initial_state() -> dict[str, Any]:
             "bandwidth_caps": 0,
             "restorations": 0,
             "detection_latency_ms": None,
+            "decision_latency_ms": None,
             "response_latency_ms": None,
         },
         "timestamp": time.time(),
@@ -352,11 +353,29 @@ class DemoController:
 
         return threat_event
 
+    def _warm_up_policies(self) -> float:
+        """Evaluate the whole policy stack once on a made-up port scan and discard the result.
+
+        The first evaluation imports the RL library and loads the PPO model and the measured outcome
+        table, which took about 20 s on the demo VM: a pause between "threat detected" and "deciding"
+        that had nothing to do with detection. Doing it before the network starts moves that cost to
+        start-up. Uses its own decision history so the run's real history is untouched. Returns seconds."""
+        began = time.perf_counter()
+        probe = ThreatEvent.from_result(
+            source_ip=NODE_IPS["attacker"], destination_ip=NODE_IPS["sensor"], attack_type="reconnaissance_port_scan",
+            threat_score=0.9, confidence=0.88, detection_reason="start-up warm-up",
+            features={"packets_per_second": 90.0, "unique_destination_ports": 300}, detector_name="warm-up",
+        )
+        context = DecisionAgent().build_context(probe, device_criticality="high")
+        _, rule_decision, stack_decision, ppo_decision = self._build_policy_comparison(probe, context)
+        self._arbitrate(context, rule_decision, stack_decision, ppo_decision)  # loads the outcome table in arbiter mode
+        return time.perf_counter() - began
+
     # ─── Main pipeline ────────────────────────────────────────────────────────
 
     async def _run_evaluate_and_respond(self, threat_event: ThreatEvent) -> None:
         """Decision → Response pipeline for a single threat event."""
-        detect_start = time.perf_counter()
+        decide_start = time.perf_counter()
 
         # Build BDI-style security context. DecisionAgent tracks real event
         # history across the whole run -- previous_relevant_events on this
@@ -370,7 +389,6 @@ class DemoController:
         comparison, rule_decision, stack_decision, ppo_decision = self._build_policy_comparison(
             threat_event, context
         )
-        detection_latency_ms = (time.perf_counter() - detect_start) * 1000
 
         # The executed decision depends on policy_mode: by default the arbiter
         # runs the proposal (from any of the three policies) with the best
@@ -385,6 +403,8 @@ class DemoController:
         selected = select_decision(
             self.policy_mode, rule=rule_decision, stackelberg=stack_decision, ppo=ppo_decision, arbiter=arbiter_decision
         )
+        # Time to build the context, evaluate all three policies and choose (not detection: see run_demo).
+        decision_latency_ms = (time.perf_counter() - decide_start) * 1000
 
         await self.update_state(
             {
@@ -396,7 +416,7 @@ class DemoController:
                 "threat_status": "THREAT_DETECTED",
                 "metrics": {
                     **self.state["metrics"],
-                    "detection_latency_ms": round(detection_latency_ms, 2),
+                    "decision_latency_ms": round(decision_latency_ms, 2),
                 },
                 "nodes": self._set_node_status({
                     "attacker": "ATTACKED",
@@ -590,6 +610,9 @@ class DemoController:
                 {"phase": "STARTING_NETWORK", "attack_mode": attack_mode},
                 timeline_message=f"Initializing Mininet IoT network (attack mode: {attack_mode})",
             )
+            # Load the policies now, before the network exists, so the first decision is not slow.
+            warm_up_seconds = await asyncio.to_thread(self._warm_up_policies)
+            await self.update_state({}, timeline_message=f"Policies loaded ({warm_up_seconds:.1f} s)")
 
             from iot_defense.network.topology import create_mininet_network
             from iot_defense.monitoring.monitor import PacketMonitor
@@ -719,6 +742,7 @@ class DemoController:
                 scenario.capture_packet_limit,
                 watchdog_seconds=scenario.capture_completion_timeout + 60.0,
             )
+            attack_started = time.perf_counter()
             attack_result = scenario.generate_traffic(self.net)
             atk_cap_path = await asyncio.to_thread(
                 monitor.stop_capture, self.net, atk_capture_session, scenario.capture_completion_timeout
@@ -732,6 +756,9 @@ class DemoController:
             # above; the detector is never told which attack (if any) it
             # should find.
             threat_event: ThreatEvent = self._classify_attack_traffic(atk_flows)
+            # From the start of the attack traffic to the detector's verdict. It includes the capture window,
+            # which has to finish before the flows can be classified.
+            detection_latency_ms = (time.perf_counter() - attack_started) * 1000
 
             # The feed follows the capture the run is on: the attack's own
             # packets now, not the baseline's (it used to show
@@ -746,6 +773,7 @@ class DemoController:
                         **self.state["metrics"],
                         "packets_observed": self.state["metrics"]["packets_observed"] + len(atk_packets),
                         "flows_analyzed": self.state["metrics"]["flows_analyzed"] + len(atk_flows),
+                        "detection_latency_ms": round(detection_latency_ms, 2),
                     },
                 },
                 timeline_message=(
