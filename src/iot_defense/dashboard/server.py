@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,7 @@ from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.demo.controller import DemoController
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-_REPO_ROOT = Path("/home/abdullah/iot-defense")
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _STATIC_DIR = _REPO_ROOT / "data" / "dashboard" / "static"
 _STATIC_DIR.mkdir(parents=True, exist_ok=True)
 _STATE_FILE = _REPO_ROOT / "data" / "dashboard" / "state.json"
@@ -251,7 +250,7 @@ async def message_stream(request: Request) -> StreamingResponse:
                 last_sent = json.dumps(controller.state, default=str)
                 yield f"data: {last_sent}\n\n"
             except Exception:  # noqa: BLE001
-                yield f"data: {{}}\n\n"
+                yield "data: {}\n\n"
         try:
             last_mtime = _STATE_FILE.stat().st_mtime
         except OSError:

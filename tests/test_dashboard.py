@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 
 # ── Ensure state file exists before importing app ──────────────────────────────
-_STATE_DIR = Path("/home/abdullah/iot-defense/data/dashboard")
+_STATE_DIR = Path(__file__).resolve().parents[1] / "data" / "dashboard"
 _STATE_DIR.mkdir(parents=True, exist_ok=True)
 _STATE_FILE = _STATE_DIR / "state.json"
 if not _STATE_FILE.exists():

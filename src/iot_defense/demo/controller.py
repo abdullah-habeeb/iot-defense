@@ -7,14 +7,12 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
-from iot_defense.defense.policy import (
-    RuleBasedDefensePolicy,
-    StackelbergDefensePolicy,
-)
+from iot_defense.defense.policy import RuleBasedDefensePolicy
 from iot_defense.detection.flow_features import FeatureAggregator
 from iot_defense.detection.threat_event import ThreatEvent
 from iot_defense.observability.logger import StructuredLogger
@@ -130,12 +128,13 @@ class DemoController:
         self._arbiter_loaded = False
         self.state: dict[str, Any] = _initial_state()
         self.event_queue: asyncio.Queue = asyncio.Queue()
-        self.data_dir = "/home/abdullah/iot-defense/data/dashboard"
+        repo_root = Path(__file__).resolve().parents[3]
+        self.data_dir = str(repo_root / "data" / "dashboard")
         os.makedirs(self.data_dir, exist_ok=True)
         self.state_file = f"{self.data_dir}/state.json"
         self.net: Any = None
         self.executor: Any = None
-        self.event_logger = StructuredLogger(log_dir="/home/abdullah/iot-defense/data/logs")
+        self.event_logger = StructuredLogger(log_dir=str(repo_root / "data" / "logs"))
         self.metrics_collector = MetricsCollector()
         # DecisionAgent owns real cross-event history for this run: every
         # threat_event recorded through it becomes available as
@@ -743,7 +742,7 @@ class DemoController:
                 watchdog_seconds=scenario.capture_completion_timeout + 60.0,
             )
             attack_started = time.perf_counter()
-            attack_result = scenario.generate_traffic(self.net)
+            scenario.generate_traffic(self.net)
             atk_cap_path = await asyncio.to_thread(
                 monitor.stop_capture, self.net, atk_capture_session, scenario.capture_completion_timeout
             )
@@ -876,9 +875,9 @@ class DemoController:
             # executor.restore() itself checks both and undoes whichever
             # (if either) actually applies to this target.
             try:
-                restore_details = self.executor.restore(threat_event.destination_ip)
-            except Exception:  # noqa: BLE001
-                restore_details = {"operation": "restore", "status": "nothing_isolated"}
+                self.executor.restore(threat_event.destination_ip)
+            except Exception:  # noqa: BLE001 - nothing was isolated, so there is nothing to restore
+                pass
 
             restore_nodes = {n: "RESTORED" for n in ["sensor", "attacker", "decoy", "camera", "smart_plug"]}
             await self.update_state(
