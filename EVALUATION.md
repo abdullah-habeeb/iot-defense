@@ -212,14 +212,34 @@ table. (5) Intervals are over trials that share one testbed, so they understate 
 evidence; it contains nothing. That it scores best here is a property of the objective (intelligence weight 2, no cost
 for the attack that goes on), and a different objective could rank it differently.
 
-**Not yet measured live.** Fresh live paired trials need root. `evaluation/harness.py --live-arbiter-arms` adds two arms
-(`arbiter_live_before`, `arbiter_live_after`) that are applied and measured like any other; analyse with
-`python -m iot_defense.evaluation.arbiter_candidates_eval --fresh-results <file>`:
+**Fresh live trials (2026-10-26).** `evaluation/harness.py --live-arbiter-arms` adds two arms (`arbiter_live_before`,
+`arbiter_live_after`) that are applied and measured like any other; 8 new trials in each of the 21 situations (168), 1,176
+rows, 0 invalid measurements, 0 execution failures, 0 probe errors, run on the VM in 5.7 h (not the 2 h I had estimated:
+two more arms and extra measurements per trial). The arbiter's evidence (the outcome table) does not contain these
+trials. Analysis: `python -m iot_defense.evaluation.arbiter_candidates_eval --fresh-results data/evaluation/results_arbiter_live.jsonl`.
 
-```bash
-sudo .venv/bin/python3 -m iot_defense.evaluation.harness --trials-per-condition 8 --live-arbiter-arms \
-  --output data/evaluation/results_arbiter_live.jsonl --no-pcaps --restart   # about 2 hours
-```
+| Live defender, 168 fresh trials | Mean utility (95% CI) |
+|---|---|
+| Arbiter, proposals only (`arbiter_live_before`) | 6.074 [5.740, 6.396] |
+| Arbiter, proposals + supported actions (`arbiter_live_after`) | 6.517 [6.272, 6.747] |
+| After minus before (paired) | **+0.443 [+0.326, +0.565]**; 40 of 168 trials differ; Wilcoxon p = 2.2e-8 |
+
+The held-out-block estimate above predicted +0.442 [+0.326, +0.563] and 40 of 168 trials; the fresh measurement gives
+the same size and the same set of changed situations (the four attacks plus `credential_replay_distributed`, plus one
+`rogue_config_beacon` trial). Per situation (mean utility, before -> after): data_exfiltration 2.90 -> 4.70,
+dns_tunneling_exfiltration 2.95 -> 4.71, firmware_tampering 2.74 -> 4.64, c2_beaconing 2.94 -> 4.49 (one trial the
+detector called "normal" and so did not change), credential_replay_distributed 2.44 -> 4.58, rogue_config_beacon
+4.47 -> 4.63; the other 15 situations are identical. FORENSIC_CAPTURE verified evidence in 8 of 8 trials for each of data_exfiltration,
+dns_tunneling_exfiltration and firmware_tampering, and 7 of 8 for c2_beaconing. The unconstrained arms of the same run reproduce the
+earlier harness (rule-based 4.299, Stackelberg 7.256, PPO 7.279, against 4.272, 7.226, 7.254), and the detector named
+166 of 168 situations correctly.
+
+What this does not change. The live defender is still about 0.75 below the unconstrained arms (6.517 against about 7.27)
+because it cannot apply QUARANTINE, ISOLATE or DECOY: for data exfiltration the best measured response is QUARANTINE (7.30)
+and the best the device can apply is FORENSIC_CAPTURE (4.70). The fresh trials are new measurements, but of the same
+lab, scripted attackers, detector and policies, with evidence from the same table; they remove the circularity of
+grading the arbiter on the rows it read, not the single-lab limit. FORENSIC_CAPTURE's score depends on the objective
+(intelligence weight 2, no cost for the attack that continues).
 
 ### What it does not support
 
