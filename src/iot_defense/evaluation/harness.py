@@ -18,6 +18,12 @@ metric anywhere in the evaluation.
 
 These trials are fresh: they never read the outcome table PPO trained on.
 
+`--live-arbiter-arms` adds two arms that answer one question on fresh trials: what does the arbiter execute on the live
+defender (which can apply only live.backend.SUPPORTED_ACTIONS) when it scores only the policies' proposals
+(`arbiter_live_before`) and when it also scores every supported action nobody proposed (`arbiter_live_after`)? Both arms
+read the outcome table, which does not contain these trials; each arm's action is then applied and measured like any
+other. Without the flag the arms, rows and results files are exactly as before.
+
 Requires root (Mininet).
 """
 
@@ -33,7 +39,8 @@ from pathlib import Path
 from typing import Any
 
 from iot_defense.defense.context import build_security_context
-from iot_defense.defense.decision import DefenseAction
+from iot_defense.defense.arbiter import ArbiterPolicy
+from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.objective import Objective
 from iot_defense.defense.policy import RuleBasedDefensePolicy, StackelbergDefensePolicy
 from iot_defense.defense.ppo_env import TRAINING_SCENARIOS, _scenario_by_attack_type
@@ -44,6 +51,7 @@ from iot_defense.evaluation.outcome import Measurement, consensus_baseline, real
 
 CONDITIONS: tuple[str, ...] = TRAINING_SCENARIOS()
 ARMS_PER_TRIAL = 5
+LIVE_ARBITER_ARMS = ("arbiter_live_before", "arbiter_live_after")
 SETTLE_SECONDS = 1.0
 
 
@@ -68,6 +76,38 @@ def _preserve_pcap(env: RealMininetDefenseEnv, pcap_dir: str | Path | None, tria
     return str(destination)
 
 
+def live_arbiters() -> dict[str, ArbiterPolicy]:
+    """The two arbiters compared by --live-arbiter-arms: proposals only, and proposals plus every supported action."""
+    built = {}
+    for arm, consider_all in zip(LIVE_ARBITER_ARMS, (False, True)):
+        arbiter = ArbiterPolicy.from_config(consider_all_supported=consider_all)
+        if arbiter is None:
+            raise RuntimeError("--live-arbiter-arms needs the measured outcome table (policy.arbiter.outcome_table_path)")
+        built[arm] = arbiter
+    return built
+
+
+def live_arbiter_decisions(context: Any, proposals: dict[str, DefenseDecision], arbiters: dict[str, ArbiterPolicy]) -> dict[str, DefenseDecision]:
+    """What each arbiter would execute on the live defender for these proposals: proposals it cannot apply are set aside
+    first, and with nothing left to choose among it alerts (exactly what the live pipeline does)."""
+    from iot_defense.defense.pipeline import arbitrate_for_device
+    from iot_defense.live.backend import SUPPORTED_ACTIONS
+
+    own = {name: proposals[name] for name in ("rule_based", "stackelberg", "ppo")}
+    decisions = {}
+    for arm, arbiter in arbiters.items():
+        chosen, _kept, _excluded = arbitrate_for_device(arbiter, context.beliefs.threat_type, own, SUPPORTED_ACTIONS)
+        if chosen is None:
+            beliefs = context.beliefs
+            chosen = DefenseDecision.create(
+                action=DefenseAction.ALERT, target_ip=beliefs.destination_device, source_ip=beliefs.source_device,
+                reason="None of the policies proposed an action this device can perform; alerting only.",
+                confidence=beliefs.confidence, threat_score=beliefs.threat_score, policy_name="LiveSafeFallback", context={},
+            )
+        decisions[arm] = chosen
+    return decisions
+
+
 def run_trial(
     env: RealMininetDefenseEnv,
     trial: int,
@@ -75,6 +115,7 @@ def run_trial(
     ppo_policy: PPODefensePolicy,
     objective: Objective,
     pcap_dir: str | Path | None = None,
+    arbiters: dict[str, ArbiterPolicy] | None = None,
 ) -> list[dict[str, Any]]:
     """One real trial: observe real traffic for `condition`, collect every
     arm's decision on the identical context, measure ALLOW then each other
@@ -95,6 +136,8 @@ def run_trial(
         "always_allow": AlwaysAllowBaseline().decide(context),
         "naive_block_all": NaiveBlockAllBaseline().decide(context),
     }
+    if arbiters:
+        decisions.update(live_arbiter_decisions(context, decisions, arbiters))
 
     to_measure = [a for a in DefenseAction if a in {d.action for d in decisions.values()} - {DefenseAction.ALLOW}]
     random.Random(f"{trial}:{condition}").shuffle(to_measure)  # no fixed order across trials
@@ -145,17 +188,19 @@ def run_trial(
     return rows
 
 
-def run_fingerprint(model_path: str | Path) -> str:
+def run_fingerprint(model_path: str | Path, live_arbiter_arms: bool = False) -> str:
     """Identifies the setup a results file was produced under: the PPO model
     and the full policy/objective config. Resuming under a different one
     would silently mix two experiments in one file."""
     digest = hashlib.sha256()
     for path in (Path(model_path).with_suffix(".zip"), Path(__file__).resolve().parents[3] / "config" / "policies.yaml"):
         digest.update(path.read_bytes())
+    if live_arbiter_arms:
+        digest.update(b"live-arbiter-arms")  # a file with the extra arms must not be resumed without them, or the reverse
     return digest.hexdigest()
 
 
-def prepare_output(output: Path, fingerprint: str, resume: bool) -> set[tuple[int, str]]:
+def prepare_output(output: Path, fingerprint: str, resume: bool, arms_per_trial: int = ARMS_PER_TRIAL) -> set[tuple[int, str]]:
     """Open a results file for (re)starting a run; returns the (trial,
     condition) blocks already complete.
 
@@ -180,7 +225,7 @@ def prepare_output(output: Path, fingerprint: str, resume: bool) -> set[tuple[in
                 key = (row["trial"], row["condition"])
                 blocks.setdefault(key, []).append(line)
                 arms.setdefault(key, set()).add(row["arm"])
-        complete = {key for key, seen in arms.items() if len(seen) == ARMS_PER_TRIAL and len(blocks[key]) == ARMS_PER_TRIAL}
+        complete = {key for key, seen in arms.items() if len(seen) == arms_per_trial and len(blocks[key]) == arms_per_trial}
         output.write_text("".join(line + "\n" for key, lines in blocks.items() if key in complete for line in lines), encoding="utf-8")
         return complete
     output.write_text("", encoding="utf-8")
@@ -195,6 +240,7 @@ def run_harness(
     pcap_dir: str | Path | None = "data/evaluation/pcaps",
     model_path: str = "models/ppo_defense",
     resume: bool = True,
+    live_arbiter_arms: bool = False,
 ) -> dict[str, Any]:
     """Run the full trial matrix, appending one JSON line per (trial,
     condition, arm) as it goes so a mid-run failure keeps every completed
@@ -208,7 +254,9 @@ def run_harness(
     env._ensure_network()
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    done = prepare_output(output, run_fingerprint(model_path), resume)
+    arbiters = live_arbiters() if live_arbiter_arms else None
+    arms_per_trial = ARMS_PER_TRIAL + (len(LIVE_ARBITER_ARMS) if live_arbiter_arms else 0)
+    done = prepare_output(output, run_fingerprint(model_path, live_arbiter_arms), resume, arms_per_trial)
     if done:
         print(f"[harness] resuming: {len(done)} complete trial blocks already in {output}", flush=True)
 
@@ -221,7 +269,7 @@ def run_harness(
                 for condition in CONDITIONS:
                     if (trial, condition) in done:
                         continue
-                    rows = run_trial(env, trial, condition, ppo_policy, objective, pcap_dir=pcap_dir)
+                    rows = run_trial(env, trial, condition, ppo_policy, objective, pcap_dir=pcap_dir, arbiters=arbiters)
                     for row in rows:
                         row["trial"] = trial
                         fh.write(json.dumps(row) + "\n")
@@ -258,6 +306,11 @@ def main() -> None:
         "--restart", action="store_true",
         help="Discard an existing results file and start over (default: resume it).",
     )
+    parser.add_argument(
+        "--live-arbiter-arms", action="store_true",
+        help="Also measure what the arbiter executes on the live defender with proposals only (arbiter_live_before) "
+        "and with every supported action as a candidate (arbiter_live_after).",
+    )
     args = parser.parse_args()
     summary = run_harness(
         trials_per_condition=args.trials_per_condition,
@@ -265,6 +318,7 @@ def main() -> None:
         pcap_dir=None if args.no_pcaps else args.pcap_dir,
         model_path=args.model_path,
         resume=not args.restart,
+        live_arbiter_arms=args.live_arbiter_arms,
     )
     print(json.dumps(summary, indent=2))
 

@@ -11,6 +11,11 @@ Two configurations are compared:
   * after:  traffic in both directions, last 60 s, decides again when the attack's name changes and stays changed.
 
     python -m iot_defense.evaluation.defender_replay --per-class 5
+
+`--arbiter-candidates proposals|supported` fixes whether the arbiter scores only the policies' proposals or every
+response the live defender can apply (policy.arbiter.consider_all_supported); the default follows the configuration.
+Regret here is graded against the same measured table the arbiter reads, so it is an in-sample reference, not a
+held-out estimate (evaluation/arbiter_candidates_eval.py holds blocks out).
 """
 
 from __future__ import annotations
@@ -49,7 +54,7 @@ class RecordingRunner:
         return 0, ""
 
 
-def run_capture(path: Path, policy: str, config: dict[str, Any], scratch: Path) -> dict[str, Any] | None:
+def run_capture(path: Path, policy: str, config: dict[str, Any], scratch: Path, arbiter_consider_all: bool | None = None) -> dict[str, Any] | None:
     events = read_events(path, SENSOR_IP)
     protected = sorted(ip for ip in protected_from_subnet(events, LAB_SUBNET) if ip != ATTACKER_IP)
     if not protected or not events:
@@ -62,7 +67,7 @@ def run_capture(path: Path, policy: str, config: dict[str, Any], scratch: Path) 
     live = {"mode": "replay", "iface": "lab0", "box_ip": protected[0], "static_allow": [], "supported_actions": [], "blocks": [],
             "trusted": [], "served_recent": 0, "dry_run": True, "kernel_expiry": True, "policy_mode": policy}
     state = LiveState(scratch / "state.json", live)
-    pipeline = PolicyPipeline(policy, supported_actions=SUPPORTED_ACTIONS)
+    pipeline = PolicyPipeline(policy, supported_actions=SUPPORTED_ACTIONS, arbiter_consider_all=arbiter_consider_all)
     window = WindowedDetector(protected, window_seconds=config["window_seconds"], directions=config["directions"])
     defender = LiveDefender(box_ip=protected[0], backend=backend, pipeline=pipeline, state=state, window=window,
                             relabel=config["relabel"])
@@ -115,7 +120,7 @@ def score(table: OutcomeTable, truth: str, decisions: list[dict[str, Any]]) -> d
     }
 
 
-def evaluate(pcap_dir: str | Path, table_path: str | Path, policy: str, per_class: int | None) -> dict[str, Any]:
+def evaluate(pcap_dir: str | Path, table_path: str | Path, policy: str, per_class: int | None, arbiter_consider_all: bool | None = None) -> dict[str, Any]:
     table = OutcomeTable.from_jsonl(table_path)
     by_class: dict[str, list[Path]] = defaultdict(list)
     for path in sorted(Path(pcap_dir).glob("*.pcap")):
@@ -124,8 +129,8 @@ def evaluate(pcap_dir: str | Path, table_path: str | Path, policy: str, per_clas
             by_class[match.group(2)].append(path)
     # Load the policies once, before timing anything, as the live defender does at start-up.
     with tempfile.TemporaryDirectory() as warm:
-        PolicyPipeline(policy, supported_actions=SUPPORTED_ACTIONS)
-    result: dict[str, Any] = {"policy": policy, "configs": {}}
+        PolicyPipeline(policy, supported_actions=SUPPORTED_ACTIONS, arbiter_consider_all=arbiter_consider_all)
+    result: dict[str, Any] = {"policy": policy, "arbiter_consider_all_supported": arbiter_consider_all, "configs": {}}
     for name, config in CONFIGS:
         classes: dict[str, Any] = {}
         for truth, paths in sorted(by_class.items()):
@@ -133,7 +138,7 @@ def evaluate(pcap_dir: str | Path, table_path: str | Path, policy: str, per_clas
             for path in paths:
                 with tempfile.TemporaryDirectory() as scratch:
                     try:
-                        outcome = run_capture(path, policy, config, Path(scratch))
+                        outcome = run_capture(path, policy, config, Path(scratch), arbiter_consider_all)
                     except Exception:  # noqa: BLE001 - an empty capture carries no information
                         continue
                 if outcome is None:
@@ -174,8 +179,9 @@ def _fmt(v: float | None, spec: str = ".2f") -> str:
 
 def render_markdown(result: dict[str, Any]) -> str:
     names = list(result["configs"])
+    candidates = {None: "as configured", False: "the policies' proposals only", True: "the proposals plus every supported response"}[result.get("arbiter_consider_all_supported")]
     lines = ["# The whole live defender, replayed on saved lab attacks", "",
-             f"Policy: {result['policy']}. Each capture drives the real defender (detection, policy pipeline, response executor) against a recording firewall. "
+             f"Policy: {result['policy']} (arbiter candidates: {candidates}). Each capture drives the real defender (detection, policy pipeline, response executor) against a recording firewall. "
              "Regret is how far the response chosen falls below the best response *the live defender can apply* for the true attack, "
              "by the measured outcome table (0 = the best available). 'First' is the response decided at the first confirmed alarm; 'final' is the last one decided "
              "within one block lifetime (60 s) of it.", ""]
@@ -210,8 +216,11 @@ def main() -> None:
     parser.add_argument("--policy", default="arbiter", choices=["arbiter", "stackelberg", "rule_based", "ppo"])
     parser.add_argument("--per-class", type=int, default=5)
     parser.add_argument("--output-dir", default="data/evaluation")
+    parser.add_argument("--arbiter-candidates", choices=["config", "proposals", "supported"], default="config",
+                        help="which actions the arbiter scores: only the proposals, the proposals plus every response the live defender can apply, or whatever policy.arbiter says")
     args = parser.parse_args()
-    result = evaluate(args.pcap_dir, args.table, args.policy, args.per_class)
+    consider_all = {"config": None, "proposals": False, "supported": True}[args.arbiter_candidates]
+    result = evaluate(args.pcap_dir, args.table, args.policy, args.per_class, consider_all)
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "defender_replay.json").write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
