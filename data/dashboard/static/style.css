@@ -1066,6 +1066,8 @@ button, select { cursor: pointer; }
 .dot-rule_based { background: var(--accent-blue) !important; }
 .dot-stackelberg { background: var(--accent-amber) !important; }
 .dot-ppo { background: var(--accent-purple) !important; }
+.dot-none { background: transparent !important; box-shadow: inset 0 0 0 1px var(--text-muted); }
+.evidence-table tr.unproposed .policy-cell { font-style: italic; color: var(--text-muted); }
 .evidence-table .policy-action-chip { width: auto; margin: 0; padding: 0.2rem 0.6rem; font-size: 0.72rem; }
 .col-bar { min-width: 190px; }
 .util-cell { display: flex; align-items: center; gap: 0.55rem; }

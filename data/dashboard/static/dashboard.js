@@ -854,18 +854,29 @@ function renderArbiter(state) {
     formula.textContent = `score = measured utility − ${ra !== undefined ? safeNum(ra, 1) : '1.0'} × spread`;
   }
 
-  // Rank proposals: scored by risk-adjusted score (desc), unscored last.
-  const proposals = Object.entries(reasoning.proposals || {}).map(([name, p]) => ({
-    name, action: p.action, ev: p.evidence || null,
-  }));
+  // Candidate actions: the policies' proposals plus, when policy.arbiter.consider_all_supported is on, every action this
+  // device can perform that no policy proposed (names = []). Older payloads only carry the proposals.
+  const candidates = Array.isArray(reasoning.candidates) && reasoning.candidates.length
+    ? reasoning.candidates.map(c => ({ names: c.proposed_by || [], action: c.action, ev: c.evidence || null }))
+    : Object.entries(reasoning.proposals || {}).map(([name, p]) => ({ names: [name], action: p.action, ev: p.evidence || null }));
+  // Rank by risk-adjusted score (desc), unscored last. An unproposed action with no measurements is not listed (counted in the footnote).
+  const unlistedNoData = candidates.filter(p => !p.names.length && !p.ev).length;
+  const proposals = candidates.filter(p => p.names.length || p.ev);
   proposals.sort((a, b) => {
     const sa = a.ev ? a.ev.score : -Infinity, sb = b.ev ? b.ev.score : -Infinity;
     return sb - sa;
   });
   const winnerName = reasoning.chosen_from;
-  const winner = proposals.find(p => p.name === winnerName);
-  const runnerUps = proposals.filter(p => p.name !== winnerName && p.ev);
+  const winner = reasoning.chosen_action
+    ? proposals.find(p => p.action === reasoning.chosen_action)
+    : proposals.find(p => p.names.includes(winnerName));
+  const runnerUps = proposals.filter(p => p !== winner && p.ev);
   const next = runnerUps[0];
+  const policiesLabel = p => (p.names.length ? p.names.map(policyLabel).join(' + ') : 'Not proposed');
+  const policyCellHtml = p => (p.names.length
+    ? p.names.map(n => `<span class="policy-dot dot-${escHtml(n)}"></span>${escHtml(policyLabel(n))}`).join(' + ')
+    : '<span class="policy-dot dot-none"></span>Not proposed');
+  const winnerProposed = !!(winner && winner.names.length);
 
   // ── Hero
   const hero = $('arbiter-hero');
@@ -875,21 +886,21 @@ function renderArbiter(state) {
     const statusCls = status === 'SUCCESS' ? 'accent-green' : status === 'FAILED' ? 'accent-red' : 'accent-amber';
     let why = '';
     if (noEvidence) {
-      why = `<div class="hero-notice">No policy's proposal has measured evidence for this attack, so the arbiter fell back to <strong>${escHtml(policyLabel(winnerName))}</strong>.</div>`;
+      why = `<div class="hero-notice">No candidate action has measured evidence for this attack, so the arbiter fell back to <strong>${escHtml(policyLabel(winnerName))}</strong>.</div>`;
     } else if (winner && winner.ev) {
       const w = winner.ev.score;
       if (!next) {
-        why = `<div class="hero-why">Only proposal with measured evidence — risk-adjusted utility <span class="num">${safeNum(w, 2)}</span>.</div>`;
+        why = `<div class="hero-why">Only candidate with measured evidence — risk-adjusted utility <span class="num">${safeNum(w, 2)}</span>.</div>`;
       } else {
         const gap = w - next.ev.score;
         if (gap < 0.005) {
-          why = `<div class="hero-why">Tied with <strong>${escHtml(next.action)}</strong> (${escHtml(policyLabel(next.name))}) at <span class="num">${safeNum(w, 2)}</span>; the tie goes to the policy earlier in the order Stackelberg › PPO › Rule-based.</div>`;
+          why = `<div class="hero-why">Tied with <strong>${escHtml(next.action)}</strong> (${escHtml(policiesLabel(next))}) at <span class="num">${safeNum(w, 2)}</span>; a tie goes to an action a policy proposed, then to the policy earlier in the order Stackelberg › PPO › Rule-based.</div>`;
         } else {
           const worst = runnerUps[runnerUps.length - 1];
           const tail = worst && worst !== next
             ? `, and <span class="num">+${safeNum(w - worst.ev.score, 2)}</span> over ${escHtml(worst.action)}`
             : '';
-          why = `<div class="hero-why">Highest risk-adjusted measured utility (<span class="num">${safeNum(w, 2)}</span>): <span class="num">+${safeNum(gap, 2)}</span> over ${escHtml(next.action)} (${escHtml(policyLabel(next.name))})${tail}.</div>`;
+          why = `<div class="hero-why">Highest risk-adjusted measured utility (<span class="num">${safeNum(w, 2)}</span>): <span class="num">+${safeNum(gap, 2)}</span> over ${escHtml(next.action)} (${escHtml(policiesLabel(next))})${tail}.</div>`;
         }
       }
     }
@@ -898,7 +909,9 @@ function renderArbiter(state) {
     hero.innerHTML = `
       <div class="hero-eyebrow">${arbiterRan ? 'Executed response' : 'Arbiter would execute'}</div>
       ${actionChipHtml(arbiterRan ? executed : (winner ? winner.action : null)).replace('policy-action-chip', 'policy-action-chip hero-action')}
-      <div class="hero-from">Proposed by <strong>${escHtml(policyLabel(winnerName))}</strong></div>
+      <div class="hero-from">${winner && !winnerProposed
+        ? 'Not proposed by any policy: <strong>the best-evidenced action this device can perform</strong>'
+        : `Proposed by <strong>${escHtml(policyLabel(winnerName))}</strong>`}</div>
       ${why}
       ${notice}
       <div class="hero-result"><span>Execution</span> <b class="${status ? statusCls : ''}">${status || 'PENDING'}</b></div>`;
@@ -909,7 +922,7 @@ function renderArbiter(state) {
   if (tbody) {
     tbody.innerHTML = proposals.map((p, i) => {
       const ev = p.ev;
-      const isWin = p.name === winnerName;
+      const isWin = p === winner;
       const pct = ev ? Math.max(0, Math.min(100, (ev.mean / UTILITY_SCALE) * 100)) : 0;
       const verdict = isWin
         ? '<span class="verdict-pill win"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"/></svg>Executed</span>'
@@ -917,14 +930,14 @@ function renderArbiter(state) {
       if (!ev) {
         return `<tr class="nodata">
           <td>${i + 1}</td>
-          <td class="policy-cell"><span class="policy-dot dot-${escHtml(p.name)}"></span>${escHtml(policyLabel(p.name))}</td>
+          <td class="policy-cell">${policyCellHtml(p)}</td>
           <td>${actionChipHtml(p.action)}</td>
           <td colspan="4">No measurements for this action</td>
           <td>${verdict}</td></tr>`;
       }
-      return `<tr class="${isWin ? 'winner' : ''}">
+      return `<tr class="${[isWin ? 'winner' : '', p.names.length ? '' : 'unproposed'].join(' ').trim()}">
         <td>${i + 1}</td>
-        <td class="policy-cell"><span class="policy-dot dot-${escHtml(p.name)}"></span>${escHtml(policyLabel(p.name))}</td>
+        <td class="policy-cell">${policyCellHtml(p)}</td>
         <td>${actionChipHtml(p.action)}</td>
         <td class="col-bar"><div class="util-cell">
           <div class="util-track" role="img" aria-label="Measured utility ${safeNum(ev.mean, 2)} out of ${UTILITY_SCALE}"><div class="util-fill" style="width:${pct.toFixed(1)}%"></div></div>
@@ -942,7 +955,9 @@ function renderArbiter(state) {
     .map(([name, action]) => `${policyLabel(name)} proposed ${action}`).join('; ');
   if (foot) {
     foot.textContent = (unavailable ? `Not available on this device, so set aside: ${unavailable}. ` : '') +
-      `Evidence = live Mininet outcomes recorded for "${safe(reasoning.label)}" with each proposed action. ` +
+      `Evidence = live Mininet outcomes recorded for "${safe(reasoning.label)}" with each candidate action` +
+      (reasoning.consider_all_supported ? ' (the proposals plus every action this device can perform; "Not proposed" rows were suggested by no policy)' : ' (the policies\' proposals only)') +
+      (unlistedNoData ? `; ${unlistedNoData} other supported action${unlistedNoData === 1 ? ' has' : 's have'} no measurements for it and ${unlistedNoData === 1 ? 'is' : 'are'} not listed` : '') + '. ' +
       'Policy confidence is the detector\'s confidence in the attack, shared by all policies, and is not used to choose a response.';
   }
 }
