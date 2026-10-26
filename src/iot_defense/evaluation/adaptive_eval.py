@@ -36,7 +36,7 @@ from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.game_model import build_game_payoffs, with_rotation
 from iot_defense.defense.objective import Objective, load_policy_section
 from iot_defense.defense.policy import RuleBasedDefensePolicy, StackelbergDefensePolicy
-from iot_defense.defense.ppo_env import TRAINING_SCENARIOS, context_for_scenario, load_ppo_training_config
+from iot_defense.defense.ppo_env import context_for_scenario, load_ppo_training_config
 from iot_defense.defense.ppo_policy import PPODefensePolicy
 from iot_defense.defense.stackelberg import StackelbergGame
 from iot_defense.evaluation.adaptive_outcome import ADAPTIVE_CONDITIONS, AdaptiveOutcomeTable

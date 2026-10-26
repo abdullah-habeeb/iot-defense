@@ -127,9 +127,6 @@ def evaluate(pcap_dir: str | Path, table_path: str | Path, policy: str, per_clas
         match = PCAP_NAME.search(path.name)
         if match and (per_class is None or len(by_class[match.group(2)]) < per_class):
             by_class[match.group(2)].append(path)
-    # Load the policies once, before timing anything, as the live defender does at start-up.
-    with tempfile.TemporaryDirectory() as warm:
-        PolicyPipeline(policy, supported_actions=SUPPORTED_ACTIONS, arbiter_consider_all=arbiter_consider_all)
     result: dict[str, Any] = {"policy": policy, "arbiter_consider_all_supported": arbiter_consider_all, "configs": {}}
     for name, config in CONFIGS:
         classes: dict[str, Any] = {}

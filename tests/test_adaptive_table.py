@@ -7,7 +7,6 @@ protocol is exercised for real without Mininet.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest

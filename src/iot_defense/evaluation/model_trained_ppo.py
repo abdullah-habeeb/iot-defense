@@ -165,7 +165,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="data/evaluation/model_trained_ppo")
     parser.add_argument("--noise-sigma", type=float, default=0.0)
     args = parser.parse_args()
-    report = run(tuple(args.seeds), args.timesteps, args.table, args.output_dir, args.noise_sigma)
+    run(tuple(args.seeds), args.timesteps, args.table, args.output_dir, args.noise_sigma)
     print((Path(args.output_dir) / "model_trained_ppo.md").read_text(encoding="utf-8"))
 
 

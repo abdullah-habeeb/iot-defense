@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from scapy.all import Packet, rdpcap
+from scapy.all import rdpcap
 
 _PID_RE = re.compile(r"^\d+$")
 

@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 # Import AFTER mocking to avoid triggering imports in generate_dataset
 # We must use patch.dict to safely patch sys.modules without permanent global impact
-import sys
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.ml.generate_dataset import _DATASET_GENERATION_UNSUPPORTED, get_scenario_type
 

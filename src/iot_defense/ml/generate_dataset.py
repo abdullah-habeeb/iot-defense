@@ -403,9 +403,6 @@ def generate_dataset(
     rng = random.Random(seed)
     target_options = [("sensor", "10.0.0.10"), ("camera", "10.0.0.20"), ("smart_plug", "10.0.0.30")]
 
-    # Benign variations
-    normal_ports_pool = [5683, 1883, 80, 443, 8080, 9999, 10001]
-
     # Recon variations - split into known and unseen
     recon_known_port_sets = [
         [22, 80, 443, 8080],
