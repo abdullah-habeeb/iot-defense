@@ -30,7 +30,7 @@ from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.pipeline import PolicyPipeline
 from iot_defense.defense.result import ResponseResult
 from iot_defense.detection.threat_event import ThreatEvent
-from iot_defense.live.backend import SUPPORTED_ACTIONS, IptablesBackend, UnsafeTargetError, run_command
+from iot_defense.live.backend import SUPPORTED_ACTIONS, UNAVAILABLE_REASONS, IptablesBackend, UnsafeTargetError, run_command
 from iot_defense.live.service import LegitService
 from iot_defense.live.window import WindowedDetector, sustained_alarms
 
@@ -465,7 +465,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     state.update({"phase": "OBSERVING"}, message="Starting: loading the policies (slow the first time)")
     service = LegitService(port=args.port)
     defender = LiveDefender(
-        box_ip=box_ip, backend=backend, pipeline=PolicyPipeline(args.policy, supported_actions=SUPPORTED_ACTIONS),
+        box_ip=box_ip, backend=backend, pipeline=PolicyPipeline(args.policy, supported_actions=SUPPORTED_ACTIONS, unavailable_reasons=UNAVAILABLE_REASONS),
         state=state, window=WindowedDetector([box_ip], window_seconds=args.window, directions=args.directions), service=service,
         relabel=not args.no_relabel,
     )

@@ -78,6 +78,7 @@ def arbitrate_for_device(
     label: str,
     proposals: dict[str, DefenseDecision],
     supported: Iterable[DefenseAction] | None,
+    reasons: dict[DefenseAction, str] | None = None,
 ) -> tuple[DefenseDecision | None, dict[str, DefenseDecision], dict[str, str]]:
     """Set aside proposals the device cannot perform, then let the arbiter choose.
 
@@ -85,7 +86,11 @@ def arbitrate_for_device(
     When every proposal was set aside the arbiter can still choose among the actions the device can perform
     (policy.arbiter.consider_all_supported); a set-aside proposal then only lends its target, source and context
     to the decision it executes. The decision is None when there is no arbiter, nothing is available to choose
-    among, or no candidate has measured evidence and no available proposal to fall back to."""
+    among, or no candidate has measured evidence and no available proposal to fall back to.
+
+    The decision's reasoning also lists each set-aside action under "unavailable" with who proposed it, its measured
+    evidence (so the dashboard can show that a better-measured response exists but cannot be applied) and, from
+    `reasons`, why this device cannot apply it."""
     allowed = frozenset(supported) if supported is not None else None
     kept = dict(proposals)
     dropped: dict[str, DefenseDecision] = {}
@@ -103,7 +108,18 @@ def arbitrate_for_device(
         decision = arbiter.arbitrate(label, kept, available=allowed, template=template)
     except ValueError:
         return None, kept, excluded
-    decision.context["arbiter_reasoning"]["excluded_unavailable"] = excluded
+    reasoning = decision.context["arbiter_reasoning"]
+    reasoning["excluded_unavailable"] = excluded
+    by_action: dict[DefenseAction, list[str]] = {}
+    for name, dropped_decision in dropped.items():
+        by_action.setdefault(dropped_decision.action, []).append(name)
+    reasoning["unavailable"] = sorted(
+        (
+            {"action": action.value, "proposed_by": names, "evidence": arbiter.score_action(label, action), "reason": (reasons or {}).get(action)}
+            for action, names in by_action.items()
+        ),
+        key=lambda u: -u["evidence"]["score"] if u["evidence"] else float("inf"),
+    )
     return decision, kept, excluded
 
 
@@ -127,6 +143,7 @@ class PolicyPipeline:
         arbiter: ArbiterPolicy | None = None,
         ppo_model_path: str = DEFAULT_PPO_MODEL_PATH,
         arbiter_consider_all: bool | None = None,
+        unavailable_reasons: dict[DefenseAction, str] | None = None,
     ) -> None:
         from iot_defense.defense.arbiter import POLICY_MODES
 
@@ -138,6 +155,7 @@ class PolicyPipeline:
         self._arbiter = arbiter
         self._arbiter_loaded = arbiter is not None
         self._arbiter_consider_all = arbiter_consider_all  # None: use policy.arbiter.consider_all_supported
+        self.unavailable_reasons = unavailable_reasons or {}
 
     def _load_arbiter(self) -> ArbiterPolicy | None:
         if not self._arbiter_loaded:
@@ -158,7 +176,9 @@ class PolicyPipeline:
             if decision is not None
         }
         arbiter = self._load_arbiter() if self.policy_mode == "arbiter" else None
-        arbiter_decision, proposals, excluded = arbitrate_for_device(arbiter, context.beliefs.threat_type, proposals, self.supported)
+        arbiter_decision, proposals, excluded = arbitrate_for_device(
+            arbiter, context.beliefs.threat_type, proposals, self.supported, self.unavailable_reasons
+        )
         if arbiter_decision is not None:
             comparison["arbiter"] = arbiter_decision.to_dict()
         comparison["excluded_unavailable"] = excluded

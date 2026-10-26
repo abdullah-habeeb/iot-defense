@@ -877,6 +877,11 @@ function renderArbiter(state) {
     ? p.names.map(n => `<span class="policy-dot dot-${escHtml(n)}"></span>${escHtml(policyLabel(n))}`).join(' + ')
     : '<span class="policy-dot dot-none"></span>Not proposed');
   const winnerProposed = !!(winner && winner.names.length);
+  // Proposals this device cannot perform: shown with their measured score and the reason, never as candidates.
+  const unavailRows = (reasoning.unavailable || []).map(u => ({ names: u.proposed_by || [], action: u.action, ev: u.evidence || null, reason: u.reason || '' }));
+  const betterButUnavailable = (winner && winner.ev)
+    ? unavailRows.filter(u => u.ev && u.ev.score > winner.ev.score).sort((a, b) => b.ev.score - a.ev.score)[0]
+    : null;
 
   // ── Hero
   const hero = $('arbiter-hero');
@@ -904,6 +909,9 @@ function renderArbiter(state) {
         }
       }
     }
+    const unavailNote = betterButUnavailable
+      ? `<div class="hero-notice">Better measured, but unavailable here: <strong>${escHtml(betterButUnavailable.action)}</strong> (<span class="num">${safeNum(betterButUnavailable.ev.score, 2)}</span>). ${escHtml(betterButUnavailable.reason || 'This device cannot perform it.')}</div>`
+      : '';
     const notice = arbiterRan ? '' :
       `<div class="hero-notice">This run forced <strong>${escHtml(safe(sel.policy_name))}</strong> (<code>--policy</code>). The table shows what the arbiter would have chosen.</div>`;
     hero.innerHTML = `
@@ -913,6 +921,7 @@ function renderArbiter(state) {
         ? 'Not proposed by any policy: <strong>the best-evidenced action this device can perform</strong>'
         : `Proposed by <strong>${escHtml(policyLabel(winnerName))}</strong>`}</div>
       ${why}
+      ${unavailNote}
       ${notice}
       <div class="hero-result"><span>Execution</span> <b class="${status ? statusCls : ''}">${status || 'PENDING'}</b></div>`;
   }
@@ -920,9 +929,31 @@ function renderArbiter(state) {
   // ── Evidence table
   const tbody = $('evidence-tbody');
   if (tbody) {
-    tbody.innerHTML = proposals.map((p, i) => {
+    // Available candidates are ranked 1..n; set-aside proposals sit in score order among them, unranked, with their reason.
+    const rows = [...proposals.map(p => ({ ...p, unavailable: false })), ...unavailRows.map(u => ({ ...u, unavailable: true }))];
+    const scoreOf = r => (r.ev ? r.ev.score : -1e9);
+    rows.sort((a, b) => scoreOf(b) - scoreOf(a));
+    let rank = 0;
+    tbody.innerHTML = rows.map(p => {
       const ev = p.ev;
-      const isWin = p === winner;
+      if (p.unavailable) {
+        const pctU = ev ? Math.max(0, Math.min(100, (ev.mean / UTILITY_SCALE) * 100)) : 0;
+        const measured = ev
+          ? `<td class="col-bar"><div class="util-cell">
+              <div class="util-track" role="img" aria-label="Measured utility ${safeNum(ev.mean, 2)} out of ${UTILITY_SCALE}"><div class="util-fill" style="width:${pctU.toFixed(1)}%"></div></div>
+              <span class="util-val">${safeNum(ev.mean, 2)}</span></div></td>
+             <td class="num">±${safeNum(ev.sd, 2)}</td><td class="num">${safe(ev.n)}</td><td class="num">${safeNum(ev.score, 2)}</td>`
+          : '<td colspan="4">No measurements for this action</td>';
+        return `<tr class="unavailable">
+          <td>–</td>
+          <td class="policy-cell">${policyCellHtml(p)}</td>
+          <td>${actionChipHtml(p.action)}</td>
+          ${measured}
+          <td><span class="verdict-pill unavail">Unavailable here</span></td></tr>
+          <tr class="unavailable-reason"><td></td><td colspan="7">${escHtml(p.reason || 'This device cannot perform this response.')}</td></tr>`;
+      }
+      const i = rank++;
+      const isWin = !!winner && p.action === winner.action;  // rows are copies, so compare by action
       const pct = ev ? Math.max(0, Math.min(100, (ev.mean / UTILITY_SCALE) * 100)) : 0;
       const verdict = isWin
         ? '<span class="verdict-pill win"><svg class="ic" width="12" height="12" aria-hidden="true"><use href="#i-check"/></svg>Executed</span>'
@@ -954,7 +985,7 @@ function renderArbiter(state) {
   const unavailable = Object.entries(reasoning.excluded_unavailable || {})
     .map(([name, action]) => `${policyLabel(name)} proposed ${action}`).join('; ');
   if (foot) {
-    foot.textContent = (unavailable ? `Not available on this device, so set aside: ${unavailable}. ` : '') +
+    foot.textContent = (unavailable && !unavailRows.length ? `Not available on this device, so set aside: ${unavailable}. ` : '') +
       `Evidence = live Mininet outcomes recorded for "${safe(reasoning.label)}" with each candidate action` +
       (reasoning.consider_all_supported ? ' (the proposals plus every action this device can perform; "Not proposed" rows were suggested by no policy)' : ' (the policies\' proposals only)') +
       (unlistedNoData ? `; ${unlistedNoData} other supported action${unlistedNoData === 1 ? ' has' : 's have'} no measurements for it and ${unlistedNoData === 1 ? 'is' : 'are'} not listed` : '') + '. ' +

@@ -145,5 +145,9 @@ firewall actions per hour on a benign device; see `docs/FUTURE_WORK.md`.
   (`policy.arbiter.consider_all_supported`, on by default): for exfiltration, C2 beaconing, DNS tunneling and
   firmware tampering, where every policy proposes QUARANTINE or ISOLATE, it executes FORENSIC_CAPTURE instead of
   alerting only. The Arbiter Verdict table marks such rows "Not proposed".
+  A proposal this device cannot apply is listed too, with its measured score, an "Unavailable here" verdict and a
+  one-line reason (for QUARANTINE: it needs default-deny on outgoing traffic, this firewall only filters incoming
+  traffic, and that is not built yet), so the screen shows both what the best measured response would have been and
+  why it was not executed.
 * The arbiter's track record comes from the lab measurements. Here it is applied, not re-measured.
 * The detector thresholds were tuned on lab traffic. That is why step 3 exists.

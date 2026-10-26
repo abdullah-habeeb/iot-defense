@@ -44,6 +44,15 @@ SUPPORTED_ACTIONS = frozenset(
         DefenseAction.THROTTLE,
     }
 )
+# Why each other response is unavailable here, in one sentence for the dashboard. Every action not in SUPPORTED_ACTIONS
+# must have one (a test checks), so a proposal that is set aside always says why.
+UNAVAILABLE_REASONS = {
+    DefenseAction.QUARANTINE: "Needs default-deny on outgoing traffic too; this firewall only filters incoming traffic, and that is not built yet.",
+    DefenseAction.ISOLATE: "Would take this machine's own network link down, cutting off its legitimate users as well; not implemented here.",
+    DefenseAction.DECOY: "Needs a second machine to redirect the attacker to; the live defender is one machine.",
+    DefenseAction.BANDWIDTH_CAP: "Caps the attacker's own network link, which a single protected machine does not control.",
+    DefenseAction.RESET_SESSIONS: "Kills established connections; not implemented on the live defender.",
+}
 
 Runner = Callable[[list[str]], tuple[int, str]]
 

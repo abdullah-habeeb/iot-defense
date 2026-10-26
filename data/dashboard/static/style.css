@@ -1068,6 +1068,9 @@ button, select { cursor: pointer; }
 .dot-ppo { background: var(--accent-purple) !important; }
 .dot-none { background: transparent !important; box-shadow: inset 0 0 0 1px var(--text-muted); }
 .evidence-table tr.unproposed .policy-cell { font-style: italic; color: var(--text-muted); }
+.evidence-table tr.unavailable td { opacity: 0.8; }
+.evidence-table tr.unavailable-reason td { padding-top: 0; font-size: 0.78em; font-style: italic; color: var(--text-muted); }
+.verdict-pill.unavail { color: var(--accent-amber); border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.1); }
 .evidence-table .policy-action-chip { width: auto; margin: 0; padding: 0.2rem 0.6rem; font-size: 0.72rem; }
 .col-bar { min-width: 190px; }
 .util-cell { display: flex; align-items: center; gap: 0.55rem; }
