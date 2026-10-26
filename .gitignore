@@ -27,3 +27,7 @@ data/captures/
 
 # Live demo runtime state (regenerated every run)
 data/dashboard/state.json
+data/dashboard/live_state.json
+
+# Public datasets downloaded for evaluation (large, not ours to redistribute)
+data/external/

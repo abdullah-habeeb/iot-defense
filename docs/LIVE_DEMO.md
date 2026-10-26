@@ -89,6 +89,37 @@ What happens, in order:
 
 Stop with Ctrl+C: every firewall rule the tool added is removed.
 
+### Naming the attack correctly: `--window`, `--directions`, and deciding again
+
+By default the defender looks at the last 5 seconds of traffic *arriving* at the box. That is fast, and it is what
+the steps above were validated with, but it names several attacks wrongly: the first packets of an attack often look
+like a different attack, and the evidence that separates them (a regular beacon interval, repeated payloads) takes
+longer than 5 seconds to build up.
+
+```
+sudo .venv/bin/python3 -m iot_defense.live.defender run --iface enp0s8 --window 60 --directions both
+```
+
+* `--window 60` reads the last minute of traffic.
+* `--directions both` also reads what the box sends, which the rules were tuned on and which is the only view of
+  attacks that start inside a device.
+* The defender still acts on the first confirmed name (waiting would give the attacker free seconds). If the name
+  then changes to one it has not held before, and stays changed for two checks, it decides again and applies the new
+  response only if it differs from the one in place (at most twice per source; add `--no-relabel` to turn this off).
+  It never falls back to a name it already moved on from.
+
+Measured on 5 saved lab captures of each of the 16 single-source attacks (`evaluation/defender_replay.py`): the
+default names 7 of 16 correctly by the end of the first block; `--window 60 --directions both` names all 16 correctly.
+The slowest take up to 32 seconds (buffer overflow, MQTT flood, slow loris, C2 beaconing).
+
+**Do not use this setting for the phone demo.** The protected page polls every 2 seconds over one TCP connection. In a
+5 s window that is 2-3 requests; in a 60 s window it is about 30 regular small requests from one address to one port,
+which the brute-force rule reads as an attack. Replaying the recorded phone traffic (data/live/calibration.jsonl)
+flagged 110 of 111 checks as brute force with `--window 60 --directions both`, against 3 with the default. The phone is
+never blocked once it completes two real requests (it is trusted), but any other regularly polling device would be.
+Use the default for the physical demo and this setting for rehearsals and replays of recorded attacks. On public IoT traffic (one Amazon Echo, 5.5 hours) the defender would take about 17 (default) and 21 (60 s window)
+firewall actions per hour on a benign device; see `docs/FUTURE_WORK.md`.
+
 ## 5. Safety
 
 * All rules live in one chain, `IOTDEF`, hooked only to the interface you name. The NAT adapter that
@@ -105,8 +136,9 @@ Stop with Ctrl+C: every firewall rule the tool added is removed.
 ## 6. What is and is not claimed
 
 * It protects the one machine it runs on (like a smart-home hub), not a whole home network.
-* Detection covers traffic *to* the box, over IPv4. IPv6 and outbound attacks (exfiltration, beacons)
-  are not handled live.
+* By default detection covers traffic *to* the box, over IPv4. With `--directions both` it also reads what the box sends
+  (needed to name exfiltration and beacons), but the only responses it can apply act on the remote address, and IPv6 is
+  not handled.
 * The responses available here are ALLOW, ALERT, FORENSIC_CAPTURE, BLOCK_SOURCE and THROTTLE. A
   policy that proposes something else (a decoy needs a second machine) is set aside and the dashboard
   says so.
