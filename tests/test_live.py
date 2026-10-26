@@ -336,8 +336,23 @@ class TestPolicyPipeline:
 
     def test_when_nothing_proposed_is_available_it_alerts_and_changes_nothing(self, monkeypatch):
         self.patch_proposals(monkeypatch, decision(DefenseAction.DECOY, "r"), decision(DefenseAction.ISOLATE, "s"), decision(DefenseAction.QUARANTINE, "p"))
-        evaluation = PolicyPipeline("arbiter", supported_actions=SUPPORTED_ACTIONS).decide(self.context())
+        evaluation = PolicyPipeline("arbiter", supported_actions=SUPPORTED_ACTIONS, arbiter_consider_all=False).decide(self.context())
         assert evaluation.selected.action == DefenseAction.ALERT and evaluation.selected.policy_name == "LiveSafeFallback"
+
+    def test_when_nothing_proposed_is_available_the_arbiter_can_still_choose_a_supported_action(self, monkeypatch, synthetic_table):
+        from iot_defense.defense.arbiter import NOT_PROPOSED, ArbiterPolicy
+
+        self.patch_proposals(monkeypatch, decision(DefenseAction.DECOY, "r"), decision(DefenseAction.ISOLATE, "s"), decision(DefenseAction.QUARANTINE, "p"))
+        arbiter = ArbiterPolicy(synthetic_table, consider_all_supported=True)
+        pipeline = PolicyPipeline("arbiter", supported_actions=SUPPORTED_ACTIONS, arbiter=arbiter)
+        context = self.context()
+        evaluation = pipeline.decide(context)
+        best = max(SUPPORTED_ACTIONS, key=lambda a: arbiter.score_action(context.beliefs.threat_type, a)["score"])
+        assert evaluation.selected.action == best and evaluation.selected.policy_name == "ArbiterPolicy"
+        reasoning = evaluation.selected.context["arbiter_reasoning"]
+        assert reasoning["chosen_from"] == NOT_PROPOSED
+        assert reasoning["excluded_unavailable"] == {"rule_based": "DECOY", "stackelberg": "ISOLATE", "ppo": "QUARANTINE"}
+        assert evaluation.comparison["arbiter"]["action"] == best.value
 
     def test_without_a_constraint_nothing_is_excluded(self, monkeypatch):
         self.patch_proposals(monkeypatch, decision(DefenseAction.DECOY, "r"), decision(DefenseAction.ISOLATE, "s"), decision(DefenseAction.QUARANTINE, "p"))

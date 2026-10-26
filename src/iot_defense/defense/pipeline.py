@@ -5,7 +5,9 @@ policies propose, and which proposal runs? The live defender adds one
 constraint the Mininet lab does not have: a real device can only perform the
 responses its backend implements (no decoy host, for instance), so proposals
 for unavailable actions are set aside before the arbiter chooses, and the
-dashboard is told which ones and why.
+dashboard is told which ones and why. With policy.arbiter.consider_all_supported the arbiter also scores every
+action the device CAN perform, so a policy that proposed something unavailable no longer forces a fallback to ALERT
+when a performable action has better measured evidence.
 """
 
 from __future__ import annotations
@@ -71,6 +73,40 @@ def compute_proposals(
     return comparison, rule_decision, stack_decision, ppo_decision
 
 
+def arbitrate_for_device(
+    arbiter: ArbiterPolicy | None,
+    label: str,
+    proposals: dict[str, DefenseDecision],
+    supported: Iterable[DefenseAction] | None,
+) -> tuple[DefenseDecision | None, dict[str, DefenseDecision], dict[str, str]]:
+    """Set aside proposals the device cannot perform, then let the arbiter choose.
+
+    Returns (the arbiter's decision or None, the proposals the device can perform, {policy: action set aside}).
+    When every proposal was set aside the arbiter can still choose among the actions the device can perform
+    (policy.arbiter.consider_all_supported); a set-aside proposal then only lends its target, source and context
+    to the decision it executes. The decision is None when there is no arbiter, nothing is available to choose
+    among, or no candidate has measured evidence and no available proposal to fall back to."""
+    allowed = frozenset(supported) if supported is not None else None
+    kept = dict(proposals)
+    dropped: dict[str, DefenseDecision] = {}
+    if allowed is not None:
+        for name, decision in list(kept.items()):
+            if decision.action not in allowed:
+                dropped[name] = kept.pop(name)
+    excluded = {name: decision.action.value for name, decision in dropped.items()}
+    if arbiter is None:
+        return None, kept, excluded
+    template = next(iter(dropped.values()), None) if dropped and not kept else None
+    if not kept and not (arbiter.consider_all_supported and template is not None):
+        return None, kept, excluded
+    try:
+        decision = arbiter.arbitrate(label, kept, available=allowed, template=template)
+    except ValueError:
+        return None, kept, excluded
+    decision.context["arbiter_reasoning"]["excluded_unavailable"] = excluded
+    return decision, kept, excluded
+
+
 @dataclass
 class PolicyEvaluation:
     comparison: dict[str, Any]
@@ -90,6 +126,7 @@ class PolicyPipeline:
         supported_actions: Iterable[DefenseAction] | None = None,
         arbiter: ArbiterPolicy | None = None,
         ppo_model_path: str = DEFAULT_PPO_MODEL_PATH,
+        arbiter_consider_all: bool | None = None,
     ) -> None:
         from iot_defense.defense.arbiter import POLICY_MODES
 
@@ -100,11 +137,12 @@ class PolicyPipeline:
         self.ppo_model_path = ppo_model_path
         self._arbiter = arbiter
         self._arbiter_loaded = arbiter is not None
+        self._arbiter_consider_all = arbiter_consider_all  # None: use policy.arbiter.consider_all_supported
 
     def _load_arbiter(self) -> ArbiterPolicy | None:
         if not self._arbiter_loaded:
             try:
-                self._arbiter = ArbiterPolicy.from_config()
+                self._arbiter = ArbiterPolicy.from_config(consider_all_supported=self._arbiter_consider_all)
             except Exception as exc:  # noqa: BLE001
                 print(f"[PolicyPipeline] arbiter unavailable: {exc}", flush=True)
             if self._arbiter is None:
@@ -119,19 +157,8 @@ class PolicyPipeline:
             for name, decision in (("rule_based", rule), ("stackelberg", stack), ("ppo", ppo))
             if decision is not None
         }
-        excluded: dict[str, str] = {}
-        if self.supported is not None:
-            for name, decision in list(proposals.items()):
-                if decision.action not in self.supported:
-                    excluded[name] = decision.action.value
-                    del proposals[name]
-
-        arbiter_decision = None
-        if self.policy_mode == "arbiter" and proposals:
-            arbiter = self._load_arbiter()
-            if arbiter is not None:
-                arbiter_decision = arbiter.arbitrate(context.beliefs.threat_type, proposals)
-                arbiter_decision.context["arbiter_reasoning"]["excluded_unavailable"] = excluded
+        arbiter = self._load_arbiter() if self.policy_mode == "arbiter" else None
+        arbiter_decision, proposals, excluded = arbitrate_for_device(arbiter, context.beliefs.threat_type, proposals, self.supported)
         if arbiter_decision is not None:
             comparison["arbiter"] = arbiter_decision.to_dict()
         comparison["excluded_unavailable"] = excluded
@@ -160,4 +187,4 @@ class PolicyPipeline:
         return PolicyEvaluation(comparison=comparison, selected=selected, arbiter=arbiter_decision, excluded=excluded)
 
 
-__all__ = ["ARBITER_NAME", "PolicyEvaluation", "PolicyPipeline", "compute_proposals"]
+__all__ = ["ARBITER_NAME", "PolicyEvaluation", "PolicyPipeline", "arbitrate_for_device", "compute_proposals"]

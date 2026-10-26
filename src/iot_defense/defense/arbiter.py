@@ -1,33 +1,51 @@
-"""Execute the proposal with the best measured evidence of working.
+"""Execute the response with the best measured evidence of working.
 
 The three policies (rule-based, Stackelberg, PPO) each propose an action for
 the same context. The arbiter does not pick a favourite policy: it scores each
-proposed ACTION by what was measured when that action was applied against this
+candidate ACTION by what was measured when that action was applied against this
 kind of attack in live Mininet (evaluation/outcome_table.py) -- the mean
 realized utility, minus a penalty proportional to its run-to-run spread so an
 erratic action loses to a dependable one -- and executes the best-scoring
-proposal. It can only choose among the proposals it is given, and it never
-reads a registered preferred_action.
+candidate. It never reads a registered preferred_action.
 
-With no usable evidence for any proposal (an attack label never measured, or a
-missing table) it falls back to the first available policy in `fallback_order`
-and says so in its reasoning.
+Which actions are candidates is a setting (policy.arbiter.consider_all_supported):
+
+  * false: only the policies' proposals. A device that cannot perform what the
+    policies proposed has nothing to choose from and alerts.
+  * true:  the proposals plus every action the device can perform (all of
+    DefenseAction when nothing restricts it). A policy that proposes a response
+    the device cannot apply no longer forces a fallback to ALERT when a
+    performable action has better evidence. Each candidate records who
+    proposed it, or "not_proposed" when it is a supported action no policy chose.
+
+With no usable evidence for any candidate (an attack label never measured, or
+a missing table) it falls back to the first available policy in
+`fallback_order` and says so in its reasoning.
+
+Ties on the risk-adjusted score are broken deterministically: a proposed action
+over one nobody proposed; then the policy order (Stackelberg, PPO, rule-based) of
+its best-ranked proposer; then DefenseAction declaration order.
 """
 
 from __future__ import annotations
 
 import statistics
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterable
 
-from iot_defense.defense.decision import DefenseDecision
+from iot_defense.defense.decision import DefenseAction, DefenseDecision
 from iot_defense.defense.objective import load_policy_section
 
 if TYPE_CHECKING:
     from iot_defense.evaluation.outcome import OutcomeTable
 
 ARBITER_NAME = "ArbiterPolicy"
+NOT_PROPOSED = "not_proposed"
 TIE_EPSILON = 1e-9
+# Policy-specific entries of a proposal's context; they describe that policy's own action, so they are not carried
+# over to an action the policy did not propose.
+POLICY_SPECIFIC_CONTEXT = ("stackelberg_reasoning", "ppo_observation", "ppo_action_index")
+ALSO_SCORED_IN_REASON = 3
 
 
 class ArbiterPolicy:
@@ -38,16 +56,19 @@ class ArbiterPolicy:
         risk_aversion: float = 1.0,
         min_samples: int = 2,
         fallback_order: tuple[str, ...] = ("stackelberg", "ppo", "rule_based"),
+        consider_all_supported: bool = False,
     ) -> None:
         self.table = table
         self.risk_aversion = risk_aversion
         self.min_samples = min_samples
         self.fallback_order = fallback_order
+        self.consider_all_supported = consider_all_supported
 
     @classmethod
-    def from_config(cls) -> "ArbiterPolicy | None":
+    def from_config(cls, *, consider_all_supported: bool | None = None) -> "ArbiterPolicy | None":
         """Build from policy.arbiter; None when the measured outcome table is
-        not available (the caller then falls back to a single policy)."""
+        not available (the caller then falls back to a single policy).
+        `consider_all_supported`, when given, overrides the configured setting."""
         from iot_defense.evaluation.outcome import OutcomeTable
 
         config = load_policy_section("arbiter")
@@ -56,71 +77,131 @@ class ArbiterPolicy:
             path = Path(__file__).resolve().parents[3] / path
         if not path.exists():
             return None
+        if consider_all_supported is None:
+            consider_all_supported = bool(config.get("consider_all_supported", False))
         return cls(
             OutcomeTable.from_jsonl(path),
             risk_aversion=float(config["risk_aversion"]),
             min_samples=int(config["min_samples"]),
+            consider_all_supported=consider_all_supported,
         )
 
-    def score(self, label: str, decision: DefenseDecision) -> dict[str, float | int] | None:
-        """Evidence for one proposal: measured mean utility, spread and the
+    def score_action(self, label: str, action: DefenseAction) -> dict[str, float | int] | None:
+        """Evidence for one action: measured mean utility, spread and the
         risk-adjusted score; None when too few valid measurements exist."""
-        samples = self.table.samples(label, decision.action)
+        samples = self.table.samples(label, action)
         if len(samples) < self.min_samples:
             return None
         mean = statistics.fmean(samples)
         spread = statistics.pstdev(samples)
         return {"mean": mean, "sd": spread, "n": len(samples), "score": mean - self.risk_aversion * spread}
 
-    def arbitrate(self, label: str, proposals: dict[str, DefenseDecision]) -> DefenseDecision:
-        """Choose among `proposals` (policy name -> its decision) for an attack
-        the detector labelled `label`."""
-        if not proposals:
+    def score(self, label: str, decision: DefenseDecision) -> dict[str, float | int] | None:
+        """Evidence for one proposal."""
+        return self.score_action(label, decision.action)
+
+    def arbitrate(
+        self,
+        label: str,
+        proposals: dict[str, DefenseDecision],
+        *,
+        available: Iterable[DefenseAction] | None = None,
+        template: DefenseDecision | None = None,
+    ) -> DefenseDecision:
+        """Choose among the candidate actions for an attack the detector labelled `label`.
+
+        `proposals` maps policy name -> its decision (only those the device can perform). `available` is the set of
+        actions the device can perform (None: no restriction); it only matters when `consider_all_supported` is on.
+        `template` supplies the target, source and context for the executed decision when nothing was proposed (all
+        proposals set aside) -- it is not a proposal and is never scored."""
+        if not proposals and not (self.consider_all_supported and template is not None):
             raise ValueError("arbitrate() needs at least one proposal")
-        evidence = {name: self.score(label, decision) for name, decision in proposals.items()}
-        scored = {name: e for name, e in evidence.items() if e is not None}
         order = {name: index for index, name in enumerate(self.fallback_order)}
 
         def rank(name: str) -> int:
             return order.get(name, len(order))
 
+        proposers: dict[DefenseAction, list[str]] = {}
+        for name in sorted(proposals, key=rank):
+            proposers.setdefault(proposals[name].action, []).append(name)
+        candidates: list[DefenseAction] = list(proposers)
+        if self.consider_all_supported:
+            allowed = set(DefenseAction) if available is None else set(available)
+            candidates += [action for action in DefenseAction if action in allowed and action not in proposers]
+
+        evidence = {action: self.score_action(label, action) for action in candidates}
+        scored = {action: e for action, e in evidence.items() if e is not None}
+        enum_index = {action: index for index, action in enumerate(DefenseAction)}
+
+        def tie_break(action: DefenseAction) -> tuple[int, int, int]:
+            if action in proposers:
+                return (0, rank(proposers[action][0]), enum_index[action])
+            return (1, len(order), enum_index[action])
+
+        base = proposals[min(proposals, key=rank)] if proposals else template
+        assert base is not None
         if scored:
             best = max(e["score"] for e in scored.values())
-            winner = min((n for n, e in scored.items() if e["score"] >= best - TIE_EPSILON), key=rank)
+            chosen_action = min((a for a, e in scored.items() if e["score"] >= best - TIE_EPSILON), key=tie_break)
+            chosen_from = proposers[chosen_action][0] if chosen_action in proposers else NOT_PROPOSED
             basis = "measured evidence"
+        elif proposals:
+            chosen_from = min(proposals, key=rank)
+            chosen_action = proposals[chosen_from].action
+            scope = "candidate action" if self.consider_all_supported else "proposal"
+            basis = f"no measured evidence for any {scope} -- fell back to {chosen_from}"
         else:
-            winner = min(proposals, key=rank)
-            basis = "no measured evidence for any proposal -- fell back to " + winner
+            raise ValueError("no measured evidence for any candidate action and no proposal to fall back to")
 
-        chosen = proposals[winner]
-        lines = []
-        for name, decision in sorted(proposals.items(), key=lambda kv: rank(kv[0])):
-            e = evidence[name]
-            detail = (
+        proposed = chosen_action in proposers
+        executed = proposals[chosen_from] if proposed else base
+        context = {k: v for k, v in executed.context.items() if proposed or k not in POLICY_SPECIFIC_CONTEXT}
+
+        def describe(action: DefenseAction) -> str:
+            e = evidence[action]
+            return (
                 f"measured utility {e['mean']:.2f}+/-{e['sd']:.2f} over {e['n']} runs (risk-adjusted {e['score']:.2f})"
                 if e is not None
                 else "no measurements"
             )
-            lines.append(f"{decision.action.value} from {name}: {detail}")
+
+        lines = [f"{proposals[name].action.value} from {name}: {describe(proposals[name].action)}" for name in sorted(proposals, key=rank)]
+        also = sorted((a for a in candidates if a not in proposers and evidence[a] is not None), key=lambda a: (-evidence[a]["score"], tie_break(a)))
+        if also:
+            lines.append("also scored (not proposed): " + ", ".join(f"{a.value} {evidence[a]['score']:.2f}" for a in also[:ALSO_SCORED_IN_REASON]))
+
+        def sort_key(action: DefenseAction) -> tuple[int, float, tuple[int, int, int]]:
+            """Best-scoring first, candidates without evidence last."""
+            e = evidence[action]
+            return (0, -float(e["score"]), tie_break(action)) if e is not None else (1, 0.0, tie_break(action))
+
         reasoning: dict[str, Any] = {
             "label": label,
-            "chosen_from": winner,
+            "chosen_from": chosen_from,
+            "chosen_action": chosen_action.value,
+            "chosen_proposed": proposed,
             "basis": basis,
             "risk_aversion": self.risk_aversion,
+            "consider_all_supported": self.consider_all_supported,
             "proposals": {
-                name: {"action": decision.action.value, "evidence": evidence[name]}
+                name: {"action": decision.action.value, "evidence": evidence[decision.action]}
                 for name, decision in proposals.items()
             },
+            "candidates": [
+                {"action": action.value, "proposed_by": list(proposers.get(action, [])), "evidence": evidence[action]}
+                for action in sorted(candidates, key=sort_key)
+            ],
         }
+        origin = f"proposed by {chosen_from}" if proposed else "not proposed by any policy; best-evidenced action the device can perform"
         return DefenseDecision.create(
-            action=chosen.action,
-            target_ip=chosen.target_ip,
-            source_ip=chosen.source_ip,
-            reason=f"Executing {chosen.action.value} (proposed by {winner}); {basis}. " + "; ".join(lines) + ".",
-            confidence=chosen.confidence,
-            threat_score=chosen.threat_score,
+            action=chosen_action,
+            target_ip=executed.target_ip,
+            source_ip=executed.source_ip,
+            reason=f"Executing {chosen_action.value} ({origin}); {basis}." + (" " + "; ".join(lines) + "." if lines else ""),
+            confidence=executed.confidence,
+            threat_score=executed.threat_score,
             policy_name=ARBITER_NAME,
-            context={**chosen.context, "arbiter_reasoning": reasoning},
+            context={**context, "arbiter_reasoning": reasoning},
         )
 
 
@@ -164,10 +245,10 @@ class PosteriorArbiter(ArbiterPolicy):
             return {reported: 1.0}  # a label the confusion model has never seen: trust it, as the plain arbiter does
         return {t: w / total for t, w in weights.items() if w > 0.0}
 
-    def score(self, label: str, decision: DefenseDecision) -> dict[str, float | int] | None:
+    def score_action(self, label: str, action: DefenseAction) -> dict[str, float | int] | None:
         usable = []
         for truth, weight in self.posterior(label).items():
-            samples = self.table.samples(truth, decision.action)
+            samples = self.table.samples(truth, action)
             if len(samples) >= self.min_samples:
                 usable.append((weight, statistics.fmean(samples), statistics.pstdev(samples), len(samples)))
         if not usable:
