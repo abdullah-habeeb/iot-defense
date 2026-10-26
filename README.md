@@ -121,14 +121,14 @@ sudo .venv/bin/python3 -m iot_defense.evaluation.harness --trials-per-condition 
 ```
 
 ## Which response the demo executes: the arbiter
-The three policies each propose an action; the live demo does not favour one of them. `defense/arbiter.py` scores each proposed **action** by what was measured when that action was applied against this kind of attack in live Mininet (the outcome table): mean realized utility minus `risk_aversion` x its run-to-run spread, so an erratic action loses to a dependable one. It executes the best-scoring proposal. It can only choose among the proposals it is given, never reads `preferred_action`, and with no measured evidence for any proposal (an attack label never measured, or no outcome table) it falls back to Stackelberg and says so in its reasoning (`policy.arbiter` in `config/policies.yaml`).
+The three policies each propose an action; the live demo does not favour one of them. `defense/arbiter.py` scores each proposed **action** by what was measured when that action was applied against this kind of attack in live Mininet (the outcome table): mean realized utility minus `risk_aversion` x its run-to-run spread, so an erratic action loses to a dependable one. It executes the best-scoring candidate. With `policy.arbiter.consider_all_supported: true` (the default) the candidates are the policies' proposals **plus every response the device can perform** (all ten in the Mininet lab, the five the live defender supports), so a proposal the device cannot apply no longer forces a fallback to ALERT; set it to `false` for the earlier proposals-only behaviour. The arbiter never reads `preferred_action`, and with no measured evidence for any candidate (an attack label never measured, or no outcome table) it falls back to Stackelberg and says so in its reasoning (`policy.arbiter` in `config/policies.yaml`). Held-out-block results for the change are in EVALUATION.md ("Arbiter candidates").
 
 ```bash
 sudo .venv/bin/python3 -m iot_defense.demo.controller --attack dos_distributed                  # arbiter (default)
 sudo .venv/bin/python3 -m iot_defense.demo.controller --attack dos_distributed --policy ppo     # force one policy: arbiter|stackelberg|rule_based|ppo
 ```
 
-`python -m iot_defense.evaluation.arbiter_eval` scores the arbiter on the held-out harness trials without a new live run (it only ever executes one of the three proposals, and the harness measured every distinct proposal); see EVALUATION.md.
+`python -m iot_defense.evaluation.arbiter_eval` scores the proposals-only arbiter on the held-out harness trials without a new live run (it only ever executes one of the three proposals, and the harness measured every distinct proposal); `python -m iot_defense.evaluation.arbiter_candidates_eval` compares proposals-only with every-supported-response by holding out each measurement block; see EVALUATION.md.
 
 ## Controlled ML detection experiment
 A reproducible controlled dataset and Random Forest detector. The dataset-generation pipeline (`ml/generate_dataset.py`, `ml/schema.py`) is registry-driven and covers all 16 registered attacks (17 classes with `normal`; `c2_beacon` generates real traffic and labels correctly, but see "Attack types" above for why its own detecting feature is excluded from `FEATURE_COLUMNS`). Generate labelled rows from fresh Mininet runs with:

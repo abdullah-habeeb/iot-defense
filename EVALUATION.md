@@ -147,6 +147,80 @@ table, so on an attack or environment that was never measured it has no evidence
 trials are fresh, but the conditions are the ones the table covers, so this is not evidence of generalization to
 unseen attacks.
 
+### Arbiter candidates: proposals only, or every response the device can apply (2026-10-26)
+
+**The defect.** The arbiter scored only the three policies' proposals. The live defender can apply five responses
+(ALLOW, ALERT, FORENSIC_CAPTURE, BLOCK_SOURCE, THROTTLE); for data exfiltration, C2 beaconing, DNS tunneling and
+firmware tampering every policy proposes QUARANTINE or ISOLATE, so all proposals were set aside and the defender fell
+back to ALERT. With the better detector settings (`--window 60 --directions both`, re-decision) the final response for
+those four attacks had regret about 1.8 against FORENSIC_CAPTURE, which the same table scores best of the five.
+
+**The change.** `policy.arbiter.consider_all_supported` (default `true`): the candidates are the proposals plus every
+action the device can perform (all ten when nothing restricts it, as in the Mininet lab). Each candidate is scored by
+the unchanged rule (measured mean minus `risk_aversion` x spread, `min_samples` required). Ties: a proposed action over
+an unproposed one, then Stackelberg > PPO > rule-based, then `DefenseAction` order. `false` reproduces the earlier
+behaviour exactly (checked: a replay with it off matches the old code on all 16 attacks, both detector
+configurations). The reasoning records, per candidate, who proposed it (`proposed_by`, empty for "not proposed") and the
+dashboard's Arbiter Verdict table labels unproposed candidates "Not proposed". The no-evidence fallback is unchanged.
+
+**Grading without circularity** (`evaluation/arbiter_candidates_eval.py`). The arbiter reads the outcome table, so
+grading it on the rows it read would be circular, and scoring more candidates adds a selection bias (the best of more
+noisy means). So each of the table's three measurement blocks is held out in turn: the arbiter is built from the other
+two and graded on the held-out block's own measurements. Proposals and detector labels come from the 168 harness trials,
+so detector errors are included.
+
+Live defender (five supported responses), 168 trials x 3 folds:
+
+| | Before (proposals only) | After (+ supported actions) |
+|---|---|---|
+| Held-out utility, mean of 21 situations | 6.045 | 6.486 |
+| Per trial, after minus before | | +0.442, 95% CI [+0.326, +0.563]; 40 of 168 trials differ; Wilcoxon p = 2.6e-8 |
+| Regret vs the best live action in the full table (in-sample reference) | 0.462 | 0.020 |
+| Situations whose most frequent choice changed | | 5 of 21 |
+
+Per situation that changed (held-out utility before -> after; in-sample regret before -> after):
+
+| Situation | Policies propose | Before -> after | Held-out utility | Regret |
+|---|---|---|---|---|
+| data_exfiltration | ISOLATE / QUARANTINE / QUARANTINE | ALERT -> FORENSIC_CAPTURE | 2.48 -> 4.28 | 1.80 -> 0.00 |
+| dns_tunneling_exfiltration | DECOY / QUARANTINE / QUARANTINE | ALERT -> FORENSIC_CAPTURE | 2.80 -> 4.60 | 1.80 -> 0.00 |
+| firmware_tampering | QUARANTINE (all three) | ALERT -> FORENSIC_CAPTURE | 2.79 -> 4.56 | 1.77 -> 0.00 |
+| c2_beaconing | ISOLATE / QUARANTINE / QUARANTINE | ALERT -> FORENSIC_CAPTURE | 2.92 -> 4.28 | 1.78 -> 0.43 |
+| credential_replay_distributed (not targeted) | THROTTLE / QUARANTINE / QUARANTINE | THROTTLE -> FORENSIC_CAPTURE | 2.80 -> 4.90 | 2.10 -> 0.00 |
+
+c2_beaconing keeps 0.43 because the detector labelled 2 of its 8 trials "normal" (so ALLOW is chosen); that is a detector
+miss, not an arbiter choice. `rogue_config_beacon` improves 4.07 -> 4.53 (regret 0.46 -> 0.00) because in 2 of its 8 trials the detector
+called it DNS tunneling, whose proposals the device cannot apply, and the proposals-only arbiter alerted. The other 15 situations are identical before and after. In the lab (all ten
+responses available) nothing changes in any of the 168 trials (utility 7.271 both ways): the best response was already a
+proposal.
+
+Whole defender replayed on 5 saved captures per attack (`evaluation/defender_replay.py --arbiter-candidates ...`):
+
+| Detector configuration | Attacks whose final action changed | Mean final regret over the attacks that decided |
+|---|---|---|
+| original (5 s, inbound, decides once) | none (the detector gives those attacks the wrong name or does not act on them) | 0.483 -> 0.483 (12 of 16 decided) |
+| `--window 60 --directions both`, re-decision | c2_beaconing, data_exfiltration, dns_tunneling_exfiltration, firmware_tampering: ALERT -> FORENSIC_CAPTURE (regret 1.80, 1.80, 1.80, 1.77 -> 0.00) | 0.448 -> 0.000 (16 of 16 decided) |
+
+No false alarms on the normal captures in either configuration.
+
+**What remains in-sample.** (1) The replay regret is graded against the same table the arbiter reads, so a correct label
+gives regret 0 by construction; the held-out table above is the honest number. (2) The held-out blocks are three
+repetitions of one lab, so they test run-to-run noise, not new networks, devices or attackers. (3) The four attacks were
+identified from the regret observed in the replay, after the fact; the fifth change (`credential_replay_distributed`) was
+not predicted. (4) The policies' proposals come from priors written by authors who knew the lab and a PPO trained on this
+table. (5) Intervals are over trials that share one testbed, so they understate uncertainty. (6) FORENSIC_CAPTURE records
+evidence; it contains nothing. That it scores best here is a property of the objective (intelligence weight 2, no cost
+for the attack that goes on), and a different objective could rank it differently.
+
+**Not yet measured live.** Fresh live paired trials need root. `evaluation/harness.py --live-arbiter-arms` adds two arms
+(`arbiter_live_before`, `arbiter_live_after`) that are applied and measured like any other; analyse with
+`python -m iot_defense.evaluation.arbiter_candidates_eval --fresh-results <file>`:
+
+```bash
+sudo .venv/bin/python3 -m iot_defense.evaluation.harness --trials-per-condition 8 --live-arbiter-arms \
+  --output data/evaluation/results_arbiter_live.jsonl --no-pcaps --restart   # about 2 hours
+```
+
 ### What it does not support
 
 - **No claim that PPO beats Stackelberg.** The gap is 0.027 utility with a CI touching zero, driven by 1 condition in 21.

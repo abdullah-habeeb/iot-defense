@@ -141,6 +141,9 @@ firewall actions per hour on a benign device; see `docs/FUTURE_WORK.md`.
   not handled.
 * The responses available here are ALLOW, ALERT, FORENSIC_CAPTURE, BLOCK_SOURCE and THROTTLE. A
   policy that proposes something else (a decoy needs a second machine) is set aside and the dashboard
-  says so.
+  says so. The arbiter then also scores these five responses even when no policy proposed them
+  (`policy.arbiter.consider_all_supported`, on by default): for exfiltration, C2 beaconing, DNS tunneling and
+  firmware tampering, where every policy proposes QUARANTINE or ISOLATE, it executes FORENSIC_CAPTURE instead of
+  alerting only. The Arbiter Verdict table marks such rows "Not proposed".
 * The arbiter's track record comes from the lab measurements. Here it is applied, not re-measured.
 * The detector thresholds were tuned on lab traffic. That is why step 3 exists.
