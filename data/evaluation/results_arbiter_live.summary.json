@@ -1,0 +1,30 @@
+{
+  "trials_per_condition": 8,
+  "conditions": [
+    "normal",
+    "reconnaissance_port_scan",
+    "dos_flood",
+    "brute_force",
+    "data_exfiltration",
+    "exploit_payload_injection",
+    "tcp_syn_flood",
+    "icmp_ping_flood",
+    "slow_loris_exhaustion",
+    "dns_amplification",
+    "dns_tunneling_exfiltration",
+    "mqtt_message_flood",
+    "firmware_tampering",
+    "buffer_overflow_probe",
+    "credential_replay",
+    "rogue_config_beacon",
+    "c2_beaconing",
+    "dos_flood_distributed",
+    "tcp_syn_flood_distributed",
+    "icmp_ping_flood_distributed",
+    "credential_replay_distributed"
+  ],
+  "total_condition_runs": 168,
+  "elapsed_seconds": 20596.1,
+  "output_path": "data/evaluation/results_arbiter_live.jsonl",
+  "pcap_dir": null
+}
