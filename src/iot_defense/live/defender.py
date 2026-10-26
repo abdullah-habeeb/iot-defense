@@ -124,9 +124,21 @@ class LiveDefender:
         service: LegitService | None = None,
         clock: Callable[[], float] = time.time,
         confirm_ticks: int = 2,
+        relabel: bool = True,
+        max_relabels: int = 2,
     ) -> None:
         self.confirm_ticks = max(1, int(confirm_ticks))
         self._streak: dict[str, int] = {}
+        # An attack is often named wrongly at first: the opening packets of one attack resemble another. The
+        # defender acts on the first confirmed label (waiting would give the attacker free seconds) and then keeps
+        # reading that source; if the label changes to one it has not held before and stays changed it decides
+        # again, and applies the new response only if it differs from the one already in place. Evidence only
+        # accumulates while an attack is arriving, so it never falls back to a label it already moved on from:
+        # once the attack ages out of the window the label drifts, and that drift is not new information.
+        self.relabel = relabel
+        self.max_relabels = max(0, int(max_relabels))
+        self._acted: dict[str, dict[str, Any]] = {}
+        self._relabel_streak: dict[str, tuple[str, int]] = {}
         self.box_ip = box_ip
         self.backend = backend
         self.pipeline = pipeline
@@ -173,10 +185,35 @@ class LiveDefender:
             self.respond(threat, now)
             self._streak.pop(threat.source_ip, None)
             acted = threat
+        relabelled = self._revisit(now) if self.relabel else None
         self.publish(now)
-        return acted
+        return acted or relabelled
 
-    def respond(self, threat: ThreatEvent, now: float) -> None:
+    def _revisit(self, now: float) -> ThreatEvent | None:
+        """Re-read each source already responded to; decide again if its label has changed and stayed changed."""
+        relabelled = None
+        for source, info in list(self._acted.items()):
+            if now - info["since"] > self.backend.ttl + self.window.window_seconds:
+                self._acted.pop(source, None)
+                self._relabel_streak.pop(source, None)
+                continue
+            recent = self.window.window_events(now, {source})
+            recency = min(10.0, max(2.0, self.window.window_seconds / 6.0))
+            still_sending = bool(recent) and now - float(recent[-1]["timestamp"]) <= recency
+            threat = self.window.evaluate(now, frozenset(), only={source}) if still_sending else None
+            if (threat is None or threat.attack_type in info["held"] or info["relabels"] >= self.max_relabels):
+                self._relabel_streak.pop(source, None)
+                continue
+            label, count = self._relabel_streak.get(source, ("", 0))
+            count = count + 1 if label == threat.attack_type else 1
+            self._relabel_streak[source] = (threat.attack_type, count)
+            if count >= self.confirm_ticks:
+                self._relabel_streak.pop(source, None)
+                self.respond(threat, now, relabel=True)
+                relabelled = threat
+        return relabelled
+
+    def respond(self, threat: ThreatEvent, now: float, relabel: bool = False) -> None:
         key = ATTACK_KEY_BY_TYPE.get(threat.attack_type)
         label = ATTACK_SCENARIOS[key].label if key else threat.attack_type
         source = threat.source_ip
@@ -222,8 +259,26 @@ class LiveDefender:
             ),
         )
 
-        self.state.update({"phase": "RESPONDING"}, message=f"Applying {selected.action.value} to {source}")
+        previous = self._acted.get(source)
+        if relabel and previous is not None:
+            old_label = previous["label"]
+            previous["label"], previous["relabels"] = threat.attack_type, previous["relabels"] + 1
+            previous["held"].add(threat.attack_type)
+            if previous["action"] == selected.action:
+                self.state.update(
+                    {"phase": POST_PHASE.get(selected.action, "OBSERVING")},
+                    message=f"Re-read as {label} (was {old_label}); {selected.action.value} stays in place",
+                )
+                return
+            self.state.update({"phase": "RESPONDING"}, message=f"Re-read as {label} (was {old_label}); now applying {selected.action.value} to {source}")
+        else:
+            self.state.update({"phase": "RESPONDING"}, message=f"Applying {selected.action.value} to {source}")
         result = self.execute(selected, now)
+        self._acted[source] = {
+            "label": threat.attack_type, "action": selected.action,
+            "since": previous["since"] if previous else now, "relabels": previous["relabels"] if previous else 0,
+            "held": previous["held"] if previous else {threat.attack_type},
+        }
         # Whatever was chosen, do not re-run the whole pipeline for this source every second
         # (an ALERT-only response never adds a block that would silence it).
         self._cooldown[source] = now + self.backend.ttl
@@ -358,9 +413,11 @@ def start_sniffer(iface: str, box_ip: str, sink: "queue.SimpleQueue[dict[str, An
     return sniffer
 
 
-def replay_events(defender: LiveDefender, events: list[dict[str, Any]], step: float = 1.0) -> list[ThreatEvent]:
+def replay_events(defender: LiveDefender, events: list[dict[str, Any]], step: float = 1.0, tail: float = 0.0) -> list[ThreatEvent]:
     """Drive the defender from recorded packets (a pcap or a calibration file) on
-    the packets' own clock, so a capture can be rehearsed without a network."""
+    the packets' own clock, so a capture can be rehearsed without a network. `tail` keeps the
+    clock running that many seconds after the last packet: a live defender goes on checking
+    while the last packets are still inside its window, which a short recorded burst needs."""
     ordered = sorted(events, key=lambda e: float(e["timestamp"]))
     threats: list[ThreatEvent] = []
     if not ordered:
@@ -369,7 +426,7 @@ def replay_events(defender: LiveDefender, events: list[dict[str, Any]], step: fl
     end = float(ordered[-1]["timestamp"])
     cursor = 0
     fake = defender.backend.clock
-    while clock <= end + step:
+    while clock <= end + step + tail:
         batch = []
         while cursor < len(ordered) and float(ordered[cursor]["timestamp"]) <= clock:
             batch.append(ordered[cursor])
@@ -409,7 +466,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     service = LegitService(port=args.port)
     defender = LiveDefender(
         box_ip=box_ip, backend=backend, pipeline=PolicyPipeline(args.policy, supported_actions=SUPPORTED_ACTIONS),
-        state=state, window=WindowedDetector([box_ip], window_seconds=args.window), service=service,
+        state=state, window=WindowedDetector([box_ip], window_seconds=args.window, directions=args.directions), service=service,
+        relabel=not args.no_relabel,
     )
     print("[live] warming up the policies (loads the PPO model; slow the first time)...", flush=True)
     print(f"[live] warm-up took {defender.warm_up():.1f}s", flush=True)
@@ -473,7 +531,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(json.dumps(e, default=str) + "\n" for e in recorded), encoding="utf-8")
-    probe = WindowedDetector([box_ip], window_seconds=args.window)
+    probe = WindowedDetector([box_ip], window_seconds=args.window, directions=args.directions)
     alarms = probe.scan_for_false_alarms(recorded)
     sources = sorted({e["src_ip"] for e in recorded})
     print(f"[calibrate] {len(recorded)} packets from {len(sources)} sources: {sources}")
@@ -509,7 +567,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--iface", required=True, help="the bridged (Wi-Fi side) interface to protect, e.g. enp0s8")
         p.add_argument("--box-ip", default=None, help="this machine's address on that interface (default: detected)")
         p.add_argument("--allow", nargs="*", default=[], help="addresses that must never be blocked (phone, teammate laptops)")
-        p.add_argument("--window", type=float, default=5.0)
+        p.add_argument("--window", type=float, default=5.0, help="seconds of traffic each check looks at (60 reads slow attacks correctly)")
+        p.add_argument("--directions", choices=("inbound", "both"), default="inbound",
+                       help="inbound: traffic arriving at this machine; both: also what it sends (needed for attacks that start inside)")
+        p.add_argument("--no-relabel", action="store_true", help="never decide again once a source has been responded to")
         p.add_argument("--ttl", type=float, default=60.0, help="seconds a block lasts")
         p.add_argument("--policy", default="arbiter", choices=["arbiter", "stackelberg", "rule_based", "ppo"])
 

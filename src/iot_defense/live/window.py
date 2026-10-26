@@ -57,23 +57,46 @@ class WindowedDetector:
         window_seconds: float = 5.0,
         max_events: int = 50_000,
         detector: UnifiedRuleBasedDetector | None = None,
+        directions: str = "inbound",
     ) -> None:
+        # "inbound": only traffic arriving at a protected host (the demo's view of an attacker).
+        # "both": also what the protected host sends. The detector rules were calibrated on captures that include
+        # both directions, and attacks that start inside (a compromised device beaconing out, exfiltrating) are
+        # only visible as outbound traffic.
+        if directions not in ("inbound", "both"):
+            raise ValueError(f"directions must be 'inbound' or 'both', not {directions!r}")
+        self.directions = directions
         self.protected_ips = frozenset(protected_ips)
         self.window_seconds = float(window_seconds)
         self.detector = detector or UnifiedRuleBasedDetector()
         self.aggregator = FeatureAggregator(window_seconds=window_seconds)
         self._events: deque[dict[str, Any]] = deque(maxlen=max_events)
 
+    def peer(self, event: dict[str, Any]) -> str:
+        """The address on the far side of an event from the protected host: who is attacking it, or who it is talking to."""
+        if self.directions == "inbound" or event.get("dst_ip") in self.protected_ips:
+            return str(event.get("src_ip", ""))
+        return str(event.get("dst_ip", ""))
+
     def ingest(self, event: dict[str, Any]) -> bool:
-        """Keep an event if it is IPv4 traffic from a real peer to a protected
-        address. Returns whether it was kept."""
-        if event.get("dst_ip") not in self.protected_ips:
-            return False
-        source = str(event.get("src_ip", ""))
-        if source in self.protected_ips or not is_routable_peer(source):
-            return False
+        """Keep an event if it is IPv4 traffic between a real peer and a protected
+        address (inbound only, or either direction). Returns whether it was kept."""
+        if self.directions == "inbound":
+            if event.get("dst_ip") not in self.protected_ips:
+                return False
+            source = str(event.get("src_ip", ""))
+            if source in self.protected_ips or not is_routable_peer(source):
+                return False
+        else:
+            if event.get("dst_ip") not in self.protected_ips and event.get("src_ip") not in self.protected_ips:
+                return False
+            if not is_routable_peer(self.peer(event)):  # broadcast, multicast and unset peers carry no attacker
+                return False
         self._events.append(event)
         return True
+
+    def has_events(self) -> bool:
+        return bool(self._events)
 
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_seconds
@@ -82,21 +105,34 @@ class WindowedDetector:
 
     def window_events(self, now: float, sources: set[str] | None = None) -> list[dict[str, Any]]:
         self._prune(now)
-        return [e for e in self._events if sources is None or e["src_ip"] in sources]
+        return [e for e in self._events if sources is None or self.peer(e) in sources]
 
-    def evaluate(self, now: float, ignore_sources: set[str] | frozenset[str] = frozenset()) -> ThreatEvent | None:
+    def evaluate(
+        self,
+        now: float,
+        ignore_sources: set[str] | frozenset[str] = frozenset(),
+        only: set[str] | frozenset[str] | None = None,
+    ) -> ThreatEvent | None:
         """The first attack the detectors see in the current window, or None.
         Sources in `ignore_sources` (already blocked, or trusted) are excluded
-        so a blocked attacker's continuing packets do not re-trigger."""
+        so a blocked attacker's continuing packets do not re-trigger. With `only`, just
+        those sources' traffic is considered: how the defender re-reads an attack it is
+        already responding to."""
         self._prune(now)
-        candidates = [e for e in self._events if e["src_ip"] not in ignore_sources]
+        candidates = [e for e in self._events if self.peer(e) not in ignore_sources and (only is None or self.peer(e) in only)]
         if not candidates:
             return None
         flows = self.aggregator.aggregate(candidates)
         if not flows:
             return None
         event = self.detector.detect_flows(flows)
-        return None if event.attack_type == "normal" else event
+        if event.attack_type == "normal":
+            return None
+        if self.directions == "both" and event.source_ip in self.protected_ips and event.destination_ip not in self.protected_ips:
+            # The flagged flow was the protected host talking out. Everything downstream (the streak, the cooldown,
+            # who a response is applied to) is keyed on the remote party, so name that as the source.
+            event.source_ip, event.destination_ip = event.destination_ip, event.source_ip
+        return event
 
     def scan_for_false_alarms(self, events: Iterable[dict[str, Any]], step: float = 1.0) -> list[dict[str, Any]]:
         """Replay recorded *normal* traffic and report every moment the
@@ -106,7 +142,9 @@ class WindowedDetector:
         ordered = sorted(events, key=lambda e: float(e.get("timestamp", 0.0)))
         if not ordered:
             return alarms
-        probe = WindowedDetector(self.protected_ips, window_seconds=self.window_seconds, detector=self.detector)
+        probe = WindowedDetector(
+            self.protected_ips, window_seconds=self.window_seconds, detector=self.detector, directions=self.directions
+        )
         clock = float(ordered[0]["timestamp"])
         cursor = 0
         end = float(ordered[-1]["timestamp"])

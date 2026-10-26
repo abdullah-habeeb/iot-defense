@@ -13,6 +13,8 @@ import urllib.request
 import pytest
 
 from iot_defense.defense.decision import DefenseAction, DefenseDecision
+from iot_defense.detection.detector import UnifiedRuleBasedDetector
+from iot_defense.detection.threat_event import ThreatEvent
 from iot_defense.defense.pipeline import PolicyPipeline
 from iot_defense.live import defender as live_defender
 from iot_defense.live.backend import CHAIN, SUPPORTED_ACTIONS, IptablesBackend, UnsafeTargetError
@@ -502,3 +504,91 @@ def test_packet_to_event_labels_direction_and_flags():
     event = packet_to_event(pkt, BOX)
     assert (event["src_ip"], event["dst_ip"], event["protocol"], event["dst_port"], event["tcp_flags"]) == (ATTACKER, BOX, "TCP", 22, 0x02)
     assert event["direction"] == "inbound" and event["background"] is False
+
+
+# ── naming an attack better as more of it is seen ─────────────────────────────
+class ScriptedDetector(UnifiedRuleBasedDetector):
+    """Names whatever it sees by the clock: `script` is [(until_epoch, attack_type), ...], the last entry open-ended."""
+
+    def __init__(self, script):
+        super().__init__(detectors={"unused": None})
+        self.script = script
+
+    def detect_flows(self, flows):
+        attacker = [f for f in flows if f.source_ip == ATTACKER]
+        flows = attacker or flows
+        now = max(f.window_end for f in flows)
+        name = next((a for until, a in self.script if now < until), self.script[-1][1]) if attacker else "normal"
+        return ThreatEvent.from_result(
+            source_ip=flows[0].source_ip, destination_ip=flows[0].destination_ip, attack_type=name,
+            threat_score=0.9, confidence=0.9, detection_reason="scripted", features={}, detector_name="scripted",
+        )
+
+
+def scripted_stack(tmp_path, script, **defender_kwargs):
+    runner = FakeRunner()
+    now = [0.0]
+    backend = IptablesBackend("enp0s8", [BOX], allowlist=[GATEWAY], runner=runner, clock=lambda: now[0], ttl_seconds=60,
+                              evidence_dir=tmp_path / "evidence")
+    backend.setup()
+    live = {"mode": "live", "iface": "enp0s8", "box_ip": BOX, "static_allow": [GATEWAY], "supported_actions": [], "blocks": [],
+            "trusted": [], "served_recent": 0, "dry_run": False, "kernel_expiry": True, "policy_mode": "stackelberg"}
+    state = LiveState(tmp_path / "state.json", live)
+    pipeline = PolicyPipeline("stackelberg", supported_actions=SUPPORTED_ACTIONS, ppo_model_path=str(tmp_path / "missing_ppo"))
+    window = WindowedDetector([BOX], detector=ScriptedDetector(script))
+    defender = LiveDefender(box_ip=BOX, backend=backend, pipeline=pipeline, state=state, window=window, **defender_kwargs)
+    return defender, runner, state
+
+
+def steady_attack(start=100.0, seconds=40, rate=20.0):
+    return [packet(ATTACKER, BOX, start + i / rate, 1 + (i % 400), sport=50000 + (i % 400)) for i in range(int(seconds * rate))]
+
+
+class TestRelabelling:
+    def test_the_first_name_is_acted_on_and_a_changed_name_decides_again(self, tmp_path):
+        defender, runner, state = scripted_stack(tmp_path, [(112.0, "exploit_payload_injection"), (1e12, "c2_beaconing")])
+        threats = replay_events(defender, steady_attack())
+        assert [t.attack_type for t in threats][0] == "exploit_payload_injection"
+        assert "c2_beaconing" in [t.attack_type for t in threats], "the better name must reach a second decision"
+        assert all(t.source_ip == ATTACKER for t in threats)
+        assert len([c for c in runner.joined() if "iotdef:block" in c]) == 1, "the block is not installed twice"
+
+    def test_an_unchanged_response_is_not_applied_again(self, tmp_path):
+        defender, runner, state = scripted_stack(tmp_path, [(112.0, "exploit_payload_injection"), (1e12, "buffer_overflow_probe")])
+        replay_events(defender, steady_attack())
+        assert len([c for c in runner.joined() if "iotdef:block" in c]) == 1
+        assert any("stays in place" in m for m in [e.get("message", "") for e in state.state.get("log", [])] + [str(state.state)])
+
+    def test_it_never_falls_back_to_a_name_it_already_moved_on_from(self, tmp_path):
+        script = [(108.0, "exploit_payload_injection"), (116.0, "c2_beaconing"), (1e12, "exploit_payload_injection")]
+        defender, runner, state = scripted_stack(tmp_path, script)
+        threats = replay_events(defender, steady_attack(seconds=40))
+        assert [t.attack_type for t in threats] == ["exploit_payload_injection", "c2_beaconing"]
+
+    def test_relabelling_can_be_turned_off(self, tmp_path):
+        defender, runner, state = scripted_stack(tmp_path, [(112.0, "exploit_payload_injection"), (1e12, "c2_beaconing")], relabel=False)
+        threats = replay_events(defender, steady_attack())
+        assert [t.attack_type for t in threats] == ["exploit_payload_injection"]
+
+    def test_a_source_that_has_stopped_sending_is_not_re_read(self, tmp_path):
+        defender, runner, state = scripted_stack(tmp_path, [(111.5, "exploit_payload_injection"), (1e12, "c2_beaconing")])
+        threats = replay_events(defender, steady_attack(seconds=10) + browsing(start=100.0, seconds=60))
+        assert [t.attack_type for t in threats] == ["exploit_payload_injection"]
+
+    def test_the_number_of_decisions_per_source_is_capped(self, tmp_path):
+        script = [(108.0, "exploit_payload_injection"), (112.0, "c2_beaconing"), (116.0, "dns_tunneling_exfiltration"),
+                  (120.0, "firmware_tampering"), (124.0, "rogue_config_beacon"), (1e12, "data_exfiltration")]
+        defender, runner, state = scripted_stack(tmp_path, script, max_relabels=1)
+        threats = replay_events(defender, steady_attack(seconds=40))
+        assert len(threats) <= 2
+
+
+class TestWindowAsksAboutOneSource:
+    def test_only_limits_the_traffic_considered(self):
+        window = WindowedDetector([BOX], window_seconds=60.0)
+        for e in scan(src=ATTACKER, start=100.0, ports=300) + scan(src="192.168.43.99", start=100.0, ports=300):
+            window.ingest(e)
+        assert window.evaluate(103.0) is not None
+        only_other = window.evaluate(103.0, only={"192.168.43.77"})
+        assert only_other is None
+        assert window.evaluate(103.0, only={ATTACKER}).source_ip == ATTACKER
