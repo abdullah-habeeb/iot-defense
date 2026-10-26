@@ -1,0 +1,1966 @@
+{
+  "captures": {
+    "captures": 279,
+    "unreadable_captures": [
+      "trial015_exploit_payload_injection.pcap",
+      "trial015_normal.pcap",
+      "trial016_normal.pcap",
+      "trial017_normal.pcap",
+      "trial018_exploit_payload_injection.pcap",
+      "trial019_normal.pcap"
+    ],
+    "accuracy": 0.996415770609319,
+    "accuracy_ci": [
+      0.9799797125550332,
+      0.9993670313468536
+    ],
+    "per_class": {
+      "brute_force": {
+        "support": 20,
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "buffer_overflow_probe": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "c2_beaconing": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "credential_replay": {
+        "support": 15,
+        "tp": 14,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7846829880728186,
+          1.0
+        ],
+        "recall": 0.9333333333333333,
+        "recall_ci": [
+          0.7018292244757601,
+          0.9881334113938051
+        ],
+        "f1": 0.9655172413793104
+      },
+      "data_exfiltration": {
+        "support": 20,
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "dns_amplification": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "dns_tunneling_exfiltration": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "dos_flood": {
+        "support": 20,
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "exploit_payload_injection": {
+        "support": 18,
+        "tp": 18,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.8241154494176252,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.8241154494176252,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "firmware_tampering": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "icmp_ping_flood": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "mqtt_message_flood": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "normal": {
+        "support": 16,
+        "tp": 16,
+        "fp": 1,
+        "fn": 0,
+        "precision": 0.9411764705882353,
+        "precision_ci": [
+          0.730174547964372,
+          0.9895398693548358
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.8063865817272802,
+          1.0
+        ],
+        "f1": 0.9696969696969697
+      },
+      "reconnaissance_port_scan": {
+        "support": 20,
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.8388698745050667,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "rogue_config_beacon": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "slow_loris_exhaustion": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "tcp_syn_flood": {
+        "support": 15,
+        "tp": 15,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.7961107336956521,
+          1.0
+        ],
+        "f1": 1.0
+      }
+    },
+    "false_alarms": {
+      "benign_samples": 16,
+      "flagged": 0,
+      "rate": 0.0,
+      "ci": [
+        0.0,
+        0.19361341827271994
+      ]
+    },
+    "confusions": {
+      "credential_replay -> normal": 1
+    },
+    "time_to_detect": {
+      "brute_force": {
+        "captures": 20,
+        "detected_by_windowed_defender": 20,
+        "median_seconds": 3.0,
+        "max_seconds": 4.0
+      },
+      "buffer_overflow_probe": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "c2_beaconing": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 3.0,
+        "max_seconds": 4.0
+      },
+      "credential_replay": {
+        "captures": 15,
+        "detected_by_windowed_defender": 0,
+        "median_seconds": null,
+        "max_seconds": null
+      },
+      "data_exfiltration": {
+        "captures": 20,
+        "detected_by_windowed_defender": 0,
+        "median_seconds": null,
+        "max_seconds": null
+      },
+      "dns_amplification": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "dns_tunneling_exfiltration": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "dos_flood": {
+        "captures": 20,
+        "detected_by_windowed_defender": 20,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "exploit_payload_injection": {
+        "captures": 18,
+        "detected_by_windowed_defender": 18,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "firmware_tampering": {
+        "captures": 15,
+        "detected_by_windowed_defender": 0,
+        "median_seconds": null,
+        "max_seconds": null
+      },
+      "icmp_ping_flood": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 3.0,
+        "max_seconds": 4.0
+      },
+      "mqtt_message_flood": {
+        "captures": 15,
+        "detected_by_windowed_defender": 0,
+        "median_seconds": null,
+        "max_seconds": null
+      },
+      "reconnaissance_port_scan": {
+        "captures": 20,
+        "detected_by_windowed_defender": 20,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "rogue_config_beacon": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      },
+      "slow_loris_exhaustion": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 27.0,
+        "max_seconds": 27.0
+      },
+      "tcp_syn_flood": {
+        "captures": 15,
+        "detected_by_windowed_defender": 15,
+        "median_seconds": 2.0,
+        "max_seconds": 2.0
+      }
+    },
+    "windowed_false_alarms_on_normal": 0
+  },
+  "flow_table": {
+    "rows": 260,
+    "folds": 5,
+    "rule_based": {
+      "accuracy": 0.8653846153846154,
+      "accuracy_ci": [
+        0.8185375865412283,
+        0.9015914605840165
+      ],
+      "per_class": {
+        "brute_force": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "buffer_overflow_probe": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "c2_beaconing": {
+          "support": 15,
+          "tp": 0,
+          "fp": 0,
+          "fn": 15,
+          "precision": null,
+          "precision_ci": null,
+          "recall": 0.0,
+          "recall_ci": [
+            0.0,
+            0.20388926630434784
+          ],
+          "f1": 0.0
+        },
+        "credential_replay": {
+          "support": 15,
+          "tp": 12,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7574992425007574,
+            1.0
+          ],
+          "recall": 0.8,
+          "recall_ci": [
+            0.5481406466534955,
+            0.9295257935638959
+          ],
+          "f1": 0.888888888888889
+        },
+        "data_exfiltration": {
+          "support": 15,
+          "tp": 15,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.9375,
+          "precision_ci": [
+            0.7167073163197013,
+            0.9888809426916687
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 0.967741935483871
+        },
+        "dns_amplification": {
+          "support": 15,
+          "tp": 13,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7718981569447083,
+            1.0
+          ],
+          "recall": 0.8666666666666667,
+          "recall_ci": [
+            0.6211750079348376,
+            0.9626395301086407
+          ],
+          "f1": 0.9285714285714286
+        },
+        "dns_tunneling_exfiltration": {
+          "support": 15,
+          "tp": 13,
+          "fp": 1,
+          "fn": 2,
+          "precision": 0.9285714285714286,
+          "precision_ci": [
+            0.6853073044604219,
+            0.9872781138877085
+          ],
+          "recall": 0.8666666666666667,
+          "recall_ci": [
+            0.6211750079348376,
+            0.9626395301086407
+          ],
+          "f1": 0.896551724137931
+        },
+        "dos_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "exploit_payload_injection": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "firmware_tampering": {
+          "support": 15,
+          "tp": 15,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.9375,
+          "precision_ci": [
+            0.7167073163197013,
+            0.9888809426916687
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 0.967741935483871
+        },
+        "icmp_ping_flood": {
+          "support": 15,
+          "tp": 13,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7718981569447083,
+            1.0
+          ],
+          "recall": 0.8666666666666667,
+          "recall_ci": [
+            0.6211750079348376,
+            0.9626395301086407
+          ],
+          "f1": 0.9285714285714286
+        },
+        "mqtt_message_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "normal": {
+          "support": 20,
+          "tp": 20,
+          "fp": 32,
+          "fn": 0,
+          "precision": 0.38461538461538464,
+          "precision_ci": [
+            0.26470271334885215,
+            0.5204037305925822
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.8388698745050667,
+            1.0
+          ],
+          "f1": 0.5555555555555556
+        },
+        "reconnaissance_port_scan": {
+          "support": 15,
+          "tp": 6,
+          "fp": 0,
+          "fn": 9,
+          "precision": 1.0,
+          "precision_ci": [
+            0.6096569663469354,
+            0.9999999999999999
+          ],
+          "recall": 0.4,
+          "recall_ci": [
+            0.19824228082594664,
+            0.642535572434923
+          ],
+          "f1": 0.5714285714285715
+        },
+        "rogue_config_beacon": {
+          "support": 15,
+          "tp": 13,
+          "fp": 0,
+          "fn": 2,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7718981569447083,
+            1.0
+          ],
+          "recall": 0.8666666666666667,
+          "recall_ci": [
+            0.6211750079348376,
+            0.9626395301086407
+          ],
+          "f1": 0.9285714285714286
+        },
+        "slow_loris_exhaustion": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "tcp_syn_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      },
+      "false_alarms": {
+        "benign_samples": 20,
+        "flagged": 0,
+        "rate": 0.0,
+        "ci": [
+          0.0,
+          0.16113012549493322
+        ]
+      }
+    },
+    "random_forest_cv": {
+      "accuracy": 0.9884615384615385,
+      "accuracy_ci": [
+        0.9666304926964924,
+        0.9960683387235718
+      ],
+      "per_class": {
+        "brute_force": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "buffer_overflow_probe": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "c2_beaconing": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "credential_replay": {
+          "support": 15,
+          "tp": 15,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.9375,
+          "precision_ci": [
+            0.7167073163197013,
+            0.9888809426916687
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 0.967741935483871
+        },
+        "data_exfiltration": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "dns_amplification": {
+          "support": 15,
+          "tp": 15,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.9375,
+          "precision_ci": [
+            0.7167073163197013,
+            0.9888809426916687
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 0.967741935483871
+        },
+        "dns_tunneling_exfiltration": {
+          "support": 15,
+          "tp": 15,
+          "fp": 1,
+          "fn": 0,
+          "precision": 0.9375,
+          "precision_ci": [
+            0.7167073163197013,
+            0.9888809426916687
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 0.967741935483871
+        },
+        "dos_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "exploit_payload_injection": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "firmware_tampering": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "icmp_ping_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "mqtt_message_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "normal": {
+          "support": 20,
+          "tp": 20,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.8388698745050667,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.8388698745050667,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "reconnaissance_port_scan": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "rogue_config_beacon": {
+          "support": 15,
+          "tp": 12,
+          "fp": 0,
+          "fn": 3,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7574992425007574,
+            1.0
+          ],
+          "recall": 0.8,
+          "recall_ci": [
+            0.5481406466534955,
+            0.9295257935638959
+          ],
+          "f1": 0.888888888888889
+        },
+        "slow_loris_exhaustion": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        },
+        "tcp_syn_flood": {
+          "support": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "precision_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "recall": 1.0,
+          "recall_ci": [
+            0.7961107336956521,
+            1.0
+          ],
+          "f1": 1.0
+        }
+      },
+      "false_alarms": {
+        "benign_samples": 20,
+        "flagged": 0,
+        "rate": 0.0,
+        "ci": [
+          0.0,
+          0.16113012549493322
+        ]
+      }
+    }
+  },
+  "live_harness": {
+    "trials": 168,
+    "accuracy": 0.9761904761904762,
+    "accuracy_ci": [
+      0.9403869961924775,
+      0.9907030309022423
+    ],
+    "per_class": {
+      "brute_force": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "buffer_overflow_probe": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "c2_beaconing": {
+        "support": 8,
+        "tp": 6,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6096569663469354,
+          0.9999999999999999
+        ],
+        "recall": 0.75,
+        "recall_ci": [
+          0.40926987910258916,
+          0.9285223111419724
+        ],
+        "f1": 0.8571428571428571
+      },
+      "credential_replay": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "credential_replay_distributed": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "data_exfiltration": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "dns_amplification": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "dns_tunneling_exfiltration": {
+        "support": 8,
+        "tp": 8,
+        "fp": 2,
+        "fn": 0,
+        "precision": 0.8,
+        "precision_ci": [
+          0.49015684672072335,
+          0.9433190520193067
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 0.888888888888889
+      },
+      "dos_flood": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "dos_flood_distributed": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "exploit_payload_injection": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "firmware_tampering": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "icmp_ping_flood": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "icmp_ping_flood_distributed": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "mqtt_message_flood": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "normal": {
+        "support": 8,
+        "tp": 8,
+        "fp": 2,
+        "fn": 0,
+        "precision": 0.8,
+        "precision_ci": [
+          0.49015684672072335,
+          0.9433190520193067
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 0.888888888888889
+      },
+      "reconnaissance_port_scan": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "rogue_config_beacon": {
+        "support": 8,
+        "tp": 6,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6096569663469354,
+          0.9999999999999999
+        ],
+        "recall": 0.75,
+        "recall_ci": [
+          0.40926987910258916,
+          0.9285223111419724
+        ],
+        "f1": 0.8571428571428571
+      },
+      "slow_loris_exhaustion": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "tcp_syn_flood": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      },
+      "tcp_syn_flood_distributed": {
+        "support": 8,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "precision_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "recall": 1.0,
+        "recall_ci": [
+          0.6755843804891231,
+          1.0
+        ],
+        "f1": 1.0
+      }
+    },
+    "false_alarms": {
+      "benign_samples": 8,
+      "flagged": 0,
+      "rate": 0.0,
+      "ci": [
+        0.0,
+        0.3244156195108769
+      ]
+    },
+    "confusions": {
+      "rogue_config_beacon -> dns_tunneling_exfiltration": 2,
+      "c2_beaconing -> normal": 2
+    },
+    "whole_observation_ms": {
+      "note": "times generating the traffic, capturing it and classifying it; not a time-to-detect",
+      "median": 14580.96,
+      "max": 111050.59
+    }
+  },
+  "label_timeline": {
+    "configs": [
+      {
+        "name": "before",
+        "directions": "inbound",
+        "window_seconds": 5.0
+      },
+      {
+        "name": "after",
+        "directions": "both",
+        "window_seconds": 60.0
+      }
+    ],
+    "classes": {
+      "brute_force": {
+        "captures": 20,
+        "by_config": {
+          "before": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": 2.0,
+            "max_seconds_to_correct": 3.0,
+            "first_names": {
+              "brute_force": 20
+            }
+          },
+          "after": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": 2.0,
+            "max_seconds_to_correct": 3.0,
+            "first_names": {
+              "brute_force": 20
+            }
+          }
+        }
+      },
+      "buffer_overflow_probe": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 31.0,
+            "max_seconds_to_correct": 37.0,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          }
+        }
+      },
+      "c2_beaconing": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": 22.0,
+            "max_seconds_to_correct": 27.0,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          }
+        }
+      },
+      "credential_replay": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 0,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": null,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {}
+          },
+          "after": {
+            "acted_on": 14,
+            "right_at_action": 14,
+            "ever_right": 14,
+            "median_seconds_to_act": 18.0,
+            "median_seconds_to_correct": 17.0,
+            "max_seconds_to_correct": 18.0,
+            "first_names": {
+              "credential_replay": 14
+            }
+          }
+        }
+      },
+      "data_exfiltration": {
+        "captures": 20,
+        "by_config": {
+          "before": {
+            "acted_on": 0,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": null,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {}
+          },
+          "after": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 4.0,
+            "median_seconds_to_correct": 3.0,
+            "max_seconds_to_correct": 3.0,
+            "first_names": {
+              "data_exfiltration": 20
+            }
+          }
+        }
+      },
+      "dns_amplification": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 3.0,
+            "max_seconds_to_correct": 4.0,
+            "first_names": {
+              "data_exfiltration": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 3.0,
+            "max_seconds_to_correct": 4.0,
+            "first_names": {
+              "data_exfiltration": 15
+            }
+          }
+        }
+      },
+      "dns_tunneling_exfiltration": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 9.0,
+            "max_seconds_to_correct": 10.0,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          }
+        }
+      },
+      "dos_flood": {
+        "captures": 20,
+        "by_config": {
+          "before": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "dos_flood": 20
+            }
+          },
+          "after": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "dos_flood": 20
+            }
+          }
+        }
+      },
+      "exploit_payload_injection": {
+        "captures": 18,
+        "by_config": {
+          "before": {
+            "acted_on": 18,
+            "right_at_action": 18,
+            "ever_right": 18,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "exploit_payload_injection": 18
+            }
+          },
+          "after": {
+            "acted_on": 18,
+            "right_at_action": 18,
+            "ever_right": 18,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "exploit_payload_injection": 18
+            }
+          }
+        }
+      },
+      "firmware_tampering": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 0,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": null,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {}
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 8.0,
+            "max_seconds_to_correct": 8.0,
+            "first_names": {
+              "data_exfiltration": 15
+            }
+          }
+        }
+      },
+      "icmp_ping_flood": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 15,
+            "ever_right": 15,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": 2.0,
+            "max_seconds_to_correct": 3.0,
+            "first_names": {
+              "icmp_ping_flood": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 15,
+            "ever_right": 15,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": 2.0,
+            "max_seconds_to_correct": 3.0,
+            "first_names": {
+              "icmp_ping_flood": 15
+            }
+          }
+        }
+      },
+      "mqtt_message_flood": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 0,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": null,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {}
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 14.0,
+            "median_seconds_to_correct": 31.0,
+            "max_seconds_to_correct": 31.0,
+            "first_names": {
+              "brute_force": 15
+            }
+          }
+        }
+      },
+      "normal": {
+        "captures": 16,
+        "by_config": {
+          "before": {
+            "acted_on": 0,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": null,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {}
+          },
+          "after": {
+            "acted_on": 0,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": null,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {}
+          }
+        }
+      },
+      "reconnaissance_port_scan": {
+        "captures": 20,
+        "by_config": {
+          "before": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "reconnaissance_port_scan": 20
+            }
+          },
+          "after": {
+            "acted_on": 20,
+            "right_at_action": 20,
+            "ever_right": 20,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "reconnaissance_port_scan": 20
+            }
+          }
+        }
+      },
+      "rogue_config_beacon": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 5.0,
+            "max_seconds_to_correct": 5.0,
+            "first_names": {
+              "exploit_payload_injection": 15
+            }
+          }
+        }
+      },
+      "slow_loris_exhaustion": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 0,
+            "median_seconds_to_act": 27.0,
+            "median_seconds_to_correct": null,
+            "max_seconds_to_correct": null,
+            "first_names": {
+              "dos_flood": 12,
+              "exploit_payload_injection": 3
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 0,
+            "ever_right": 15,
+            "median_seconds_to_act": 3.0,
+            "median_seconds_to_correct": 26.0,
+            "max_seconds_to_correct": 26.0,
+            "first_names": {
+              "reconnaissance_port_scan": 15
+            }
+          }
+        }
+      },
+      "tcp_syn_flood": {
+        "captures": 15,
+        "by_config": {
+          "before": {
+            "acted_on": 15,
+            "right_at_action": 15,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "tcp_syn_flood": 15
+            }
+          },
+          "after": {
+            "acted_on": 15,
+            "right_at_action": 15,
+            "ever_right": 15,
+            "median_seconds_to_act": 2.0,
+            "median_seconds_to_correct": 1.0,
+            "max_seconds_to_correct": 1.0,
+            "first_names": {
+              "tcp_syn_flood": 15
+            }
+          }
+        }
+      }
+    }
+  },
+  "threshold_margin": {
+    "reconnaissance": {
+      "perturbations_tested": 343,
+      "robust_rate": 0.7143,
+      "calibrated_point_correct": true
+    },
+    "dos": {
+      "perturbations_tested": 343,
+      "robust_rate": 1.0,
+      "calibrated_point_correct": true
+    },
+    "brute_force": {
+      "perturbations_tested": 343,
+      "robust_rate": 1.0,
+      "calibrated_point_correct": true
+    },
+    "exfiltration": {
+      "perturbations_tested": 2401,
+      "robust_rate": 1.0,
+      "calibrated_point_correct": true
+    },
+    "exploit": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.8571,
+      "calibrated_point_correct": true
+    },
+    "syn_flood": {
+      "perturbations_tested": 343,
+      "robust_rate": 0.4286,
+      "calibrated_point_correct": true
+    },
+    "icmp_flood": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.5714,
+      "calibrated_point_correct": true
+    },
+    "slow_loris": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.5714,
+      "calibrated_point_correct": true
+    },
+    "dns_amplification": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.2857,
+      "calibrated_point_correct": true
+    },
+    "dns_tunneling": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.4286,
+      "calibrated_point_correct": true
+    },
+    "mqtt_flood": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.7143,
+      "calibrated_point_correct": true
+    },
+    "firmware_tampering": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.2857,
+      "calibrated_point_correct": true
+    },
+    "buffer_overflow": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.2857,
+      "calibrated_point_correct": true
+    },
+    "replay_attack": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.7143,
+      "calibrated_point_correct": true
+    },
+    "rogue_beacon": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.3673,
+      "calibrated_point_correct": true
+    },
+    "c2_beacon": {
+      "perturbations_tested": 2401,
+      "robust_rate": 0.8571,
+      "calibrated_point_correct": true
+    }
+  }
+}

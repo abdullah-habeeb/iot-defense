@@ -1,0 +1,771 @@
+{
+  "policy": "arbiter",
+  "configs": {
+    "before": {
+      "settings": {
+        "directions": "inbound",
+        "window_seconds": 5.0,
+        "relabel": false
+      },
+      "classes": {
+        "brute_force": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 3.0,
+          "median_final_time": 3.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "brute_force",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "buffer_overflow_probe": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "c2_beaconing": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": 1.9999999999999996,
+          "mean_final_regret": 1.9999999999999996,
+          "median_first_time": 3.0,
+          "median_final_time": 3.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "credential_replay": {
+          "captures": 5,
+          "decided": 0,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": null,
+          "mean_final_regret": null,
+          "median_first_time": null,
+          "median_final_time": null,
+          "best_live_action": null,
+          "final_actions": [],
+          "example_decisions": null
+        },
+        "data_exfiltration": {
+          "captures": 5,
+          "decided": 0,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": null,
+          "mean_final_regret": null,
+          "median_first_time": null,
+          "median_final_time": null,
+          "best_live_action": null,
+          "final_actions": [],
+          "example_decisions": null
+        },
+        "dns_amplification": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 4.5777777777777775,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 4.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "data_exfiltration",
+              "action": "ALERT"
+            },
+            {
+              "at": 4.0,
+              "label": "dns_amplification",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "dns_tunneling_exfiltration": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": 2.0000000000000004,
+          "mean_final_regret": 2.0000000000000004,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "dos_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "dos_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "exploit_payload_injection": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "firmware_tampering": {
+          "captures": 5,
+          "decided": 0,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": null,
+          "mean_final_regret": null,
+          "median_first_time": null,
+          "median_final_time": null,
+          "best_live_action": null,
+          "final_actions": [],
+          "example_decisions": null
+        },
+        "icmp_ping_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 3.0,
+          "median_final_time": 3.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "icmp_ping_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "mqtt_message_flood": {
+          "captures": 5,
+          "decided": 0,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": null,
+          "mean_final_regret": null,
+          "median_first_time": null,
+          "median_final_time": null,
+          "best_live_action": null,
+          "final_actions": [],
+          "example_decisions": null
+        },
+        "normal": {
+          "captures": 5,
+          "false_alarms": 0
+        },
+        "reconnaissance_port_scan": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "reconnaissance_port_scan",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "rogue_config_beacon": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": 1.7931910569105685,
+          "mean_final_regret": 1.7931910569105685,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "slow_loris_exhaustion": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 0,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 27.0,
+          "median_final_time": 27.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 27.0,
+              "label": "dos_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "tcp_syn_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "tcp_syn_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        }
+      }
+    },
+    "after": {
+      "settings": {
+        "directions": "both",
+        "window_seconds": 60.0,
+        "relabel": true
+      },
+      "classes": {
+        "brute_force": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 3.0,
+          "median_final_time": 3.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "brute_force",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 64.0,
+              "label": "brute_force",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "buffer_overflow_probe": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 32.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 13.0,
+              "label": "data_exfiltration",
+              "action": "ALERT"
+            },
+            {
+              "at": 31.0,
+              "label": "buffer_overflow_probe",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 93.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "c2_beaconing": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 1.9999999999999996,
+          "mean_final_regret": 1.8000000000000003,
+          "median_first_time": 3.0,
+          "median_final_time": 23.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "ALERT"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 23.0,
+              "label": "c2_beaconing",
+              "action": "ALERT"
+            },
+            {
+              "at": 84.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "credential_replay": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 18.0,
+          "median_final_time": 18.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 18.0,
+              "label": "credential_replay",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "data_exfiltration": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 1.8000000000000012,
+          "mean_final_regret": 1.8000000000000012,
+          "median_first_time": 4.0,
+          "median_final_time": 4.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "ALERT"
+          ],
+          "example_decisions": [
+            {
+              "at": 4.0,
+              "label": "data_exfiltration",
+              "action": "ALERT"
+            }
+          ]
+        },
+        "dns_amplification": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 4.5777777777777775,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 4.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "data_exfiltration",
+              "action": "ALERT"
+            },
+            {
+              "at": 4.0,
+              "label": "dns_amplification",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 65.0,
+              "label": "data_exfiltration",
+              "action": "ALERT"
+            }
+          ]
+        },
+        "dns_tunneling_exfiltration": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 2.0000000000000004,
+          "mean_final_regret": 1.8000000000000012,
+          "median_first_time": 2.0,
+          "median_final_time": 10.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "ALERT"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 10.0,
+              "label": "dns_tunneling_exfiltration",
+              "action": "ALERT"
+            },
+            {
+              "at": 71.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "dos_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "dos_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "exploit_payload_injection": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "firmware_tampering": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 1.766666666666667,
+          "mean_final_regret": 1.766666666666667,
+          "median_first_time": 2.0,
+          "median_final_time": 9.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "ALERT"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "data_exfiltration",
+              "action": "ALERT"
+            },
+            {
+              "at": 9.0,
+              "label": "firmware_tampering",
+              "action": "ALERT"
+            },
+            {
+              "at": 63.0,
+              "label": "firmware_tampering",
+              "action": "ALERT"
+            }
+          ]
+        },
+        "icmp_ping_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 3.0,
+          "median_final_time": 3.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "icmp_ping_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "mqtt_message_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 14.0,
+          "median_final_time": 32.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 14.0,
+              "label": "brute_force",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 26.0,
+              "label": "mqtt_message_flood",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 75.0,
+              "label": "mqtt_message_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "normal": {
+          "captures": 5,
+          "false_alarms": 0
+        },
+        "reconnaissance_port_scan": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "reconnaissance_port_scan",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "rogue_config_beacon": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 1.7931910569105685,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 6.0,
+          "best_live_action": "FORENSIC_CAPTURE",
+          "final_actions": [
+            "FORENSIC_CAPTURE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 6.0,
+              "label": "rogue_config_beacon",
+              "action": "FORENSIC_CAPTURE"
+            },
+            {
+              "at": 67.0,
+              "label": "exploit_payload_injection",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "slow_loris_exhaustion": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 0,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 3.0,
+          "median_final_time": 27.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 3.0,
+              "label": "reconnaissance_port_scan",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 27.0,
+              "label": "slow_loris_exhaustion",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 64.0,
+              "label": "slow_loris_exhaustion",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        },
+        "tcp_syn_flood": {
+          "captures": 5,
+          "decided": 5,
+          "first_label_right": 5,
+          "final_label_right": 5,
+          "mean_first_regret": 0.0,
+          "mean_final_regret": 0.0,
+          "median_first_time": 2.0,
+          "median_final_time": 2.0,
+          "best_live_action": "BLOCK_SOURCE",
+          "final_actions": [
+            "BLOCK_SOURCE"
+          ],
+          "example_decisions": [
+            {
+              "at": 2.0,
+              "label": "tcp_syn_flood",
+              "action": "BLOCK_SOURCE"
+            },
+            {
+              "at": 63.0,
+              "label": "tcp_syn_flood",
+              "action": "BLOCK_SOURCE"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
