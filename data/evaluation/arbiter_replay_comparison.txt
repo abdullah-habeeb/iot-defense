@@ -1,0 +1,46 @@
+
+=== detector configuration: before
+old code == new code with proposals only (decided, final regret, final actions, all 16 attacks): True
+attack                         decided  final regret old -> supported  final actions old -> supported
+brute_force                    5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+buffer_overflow_probe          5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+c2_beaconing                   5/5 -> 5/5     2.00 ->   2.00   BLOCK_SOURCE -> BLOCK_SOURCE <-- focus
+credential_replay              0/5 -> 0/5        - ->      -   - -> -
+data_exfiltration              0/5 -> 0/5        - ->      -   - -> - <-- focus
+dns_amplification              5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+dns_tunneling_exfiltration     5/5 -> 5/5     2.00 ->   2.00   BLOCK_SOURCE -> BLOCK_SOURCE <-- focus
+dos_flood                      5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+exploit_payload_injection      5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+firmware_tampering             0/5 -> 0/5        - ->      -   - -> - <-- focus
+icmp_ping_flood                5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+mqtt_message_flood             0/5 -> 0/5        - ->      -   - -> -
+reconnaissance_port_scan       5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+rogue_config_beacon            5/5 -> 5/5     1.79 ->   1.79   BLOCK_SOURCE -> BLOCK_SOURCE
+slow_loris_exhaustion          5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+tcp_syn_flood                  5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+attacks whose final action set changed: []
+mean final regret over attacks that decided: old 0.483 (n=12) -> supported 0.483 (n=12)
+normal traffic false alarms: {'captures': 5, 'false_alarms': 0} -> {'captures': 5, 'false_alarms': 0}
+
+=== detector configuration: after
+old code == new code with proposals only (decided, final regret, final actions, all 16 attacks): True
+attack                         decided  final regret old -> supported  final actions old -> supported
+brute_force                    5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+buffer_overflow_probe          5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+c2_beaconing                   5/5 -> 5/5     1.80 ->   0.00   ALERT -> FORENSIC_CAPTURE <-- focus
+credential_replay              5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+data_exfiltration              5/5 -> 5/5     1.80 ->   0.00   ALERT -> FORENSIC_CAPTURE <-- focus
+dns_amplification              5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+dns_tunneling_exfiltration     5/5 -> 5/5     1.80 ->   0.00   ALERT -> FORENSIC_CAPTURE <-- focus
+dos_flood                      5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+exploit_payload_injection      5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+firmware_tampering             5/5 -> 5/5     1.77 ->   0.00   ALERT -> FORENSIC_CAPTURE <-- focus
+icmp_ping_flood                5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+mqtt_message_flood             5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+reconnaissance_port_scan       5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+rogue_config_beacon            5/5 -> 5/5     0.00 ->   0.00   FORENSIC_CAPTURE -> FORENSIC_CAPTURE
+slow_loris_exhaustion          5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+tcp_syn_flood                  5/5 -> 5/5     0.00 ->   0.00   BLOCK_SOURCE -> BLOCK_SOURCE
+attacks whose final action set changed: ['c2_beaconing', 'data_exfiltration', 'dns_tunneling_exfiltration', 'firmware_tampering']
+mean final regret over attacks that decided: old 0.448 (n=16) -> supported 0.000 (n=16)
+normal traffic false alarms: {'captures': 5, 'false_alarms': 0} -> {'captures': 5, 'false_alarms': 0}
