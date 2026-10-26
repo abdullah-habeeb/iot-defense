@@ -13,7 +13,6 @@ from iot_defense.defense.decision import DefenseDecision
 from iot_defense.defense.objective import Objective
 from iot_defense.detection.threat_event import ThreatEvent
 from iot_defense.evaluation import arbiter_candidates_eval as ev
-from iot_defense.evaluation import harness
 from iot_defense.evaluation.outcome import Measurement, OutcomeTable
 from iot_defense.evaluation.harness import ARMS_PER_TRIAL, LIVE_ARBITER_ARMS, live_arbiter_decisions, prepare_output, run_fingerprint, run_trial
 from iot_defense.defense.ppo_real_env import RealMininetDefenseEnv
@@ -108,7 +107,8 @@ class TestRunTrial:
 
 class TestResume:
     def test_a_file_with_the_extra_arms_is_not_resumed_without_them(self, tmp_path):
-        assert run_fingerprint("models/ppo_defense", True) != run_fingerprint("models/ppo_defense", False)
+        (tmp_path / "m.zip").write_bytes(b"model")  # the fingerprint hashes the model file, which is not tracked in git
+        assert run_fingerprint(tmp_path / "m", True) != run_fingerprint(tmp_path / "m", False)
 
     def test_resume_counts_the_extra_arms_when_deciding_which_blocks_are_complete(self, tmp_path):
         out = tmp_path / "r.jsonl"
