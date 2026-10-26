@@ -7,15 +7,26 @@ Mininet IoT Network -> Monitoring Agent -> Feature Extraction -> Detection Agent
 
 For a research-style comparison of the 3-policy system against simpler baselines on real Mininet trials -- methodology, results, and honest limitations -- see [EVALUATION.md](EVALUATION.md).
 
+## Status and what the evidence shows
+This is a research prototype (a college major project), not a product. Every result comes from one 5-host Mininet lab, plus replays of public IoT-23 captures; do not generalise it to other networks, devices or attackers. Numbers, confidence intervals and caveats are in [EVALUATION.md](EVALUATION.md); the research framing and future work are in [docs/FUTURE_WORK.md](docs/FUTURE_WORK.md); the physical demo is in [docs/LIVE_DEMO.md](docs/LIVE_DEMO.md).
+
+- **A measured-outcome benchmark** (the 693-row "record book", `data/outcomes/outcome_table.jsonl`): each of 10 responses applied to each of 21 situations (normal traffic plus 20 attacks) in live Mininet, three repetitions, scored by one objective (`5 x containment + 3 x service kept + 2 x intelligence - cost`).
+- **Three response-selection policies graded against it**: a rule-based playbook, a Stackelberg game that models the attacker's reaction, and PPO. The playbook loses about 3.0 utility points of regret to the measured-best response (best in 4 of 21 situations). Stackelberg, built from mechanism priors alone, loses 0.04 (best in 20 of 21); the same priors without the attacker's reaction lose 0.55. Trained on the measurements, PPO and Stackelberg tie in live paired trials (p = 0.69), so **the results do not show that "Stackelberg is best"**. A PPO trained on the table it is graded on is circular and is labelled as such.
+- **An evidence-based arbiter** that executes the candidate response with the best measured evidence, and a **live defender** that applies real `iptables` rules on the machine it runs on. The arbiter also scores every response the device can perform, not only the policies' proposals; on 168 fresh live trials this raised mean utility on the live defender from 6.07 to 6.52 (paired +0.44, 95% CI [+0.33, +0.57]).
+- **A detector evaluation.** The live defender names all 16 single-source lab attacks correctly with a 60 s window and re-decision (a development-set result: thresholds were tuned on those captures). The detector does not transfer to real traffic: on 5.5 hours of a benign Amazon Echo it would take about 17 to 21 firewall actions per hour, and command-and-control traffic is noticed but never named a beacon.
+- **Limits that apply to everything above:** three repetitions per cell, scripted attackers, Stackelberg priors written by authors who knew the lab (not blind), nothing re-measured on physical IoT hardware.
+
 ## Current architecture
 - Mininet network simulation (5 hosts: sensor, camera, smart plug, attacker, decoy)
 - Monitoring agent for packet observations
 - Feature extraction pipeline (13 behavioural `FlowFeatures` columns -- 12 feed ML training; the 13th, `inter_arrival_cv`, is a deliberate scope boundary, see "Attack types" below)
 - **Attack scenario registry** (`src/iot_defense/attacks/registry.py`) — a single `AttackScenario` definition per attack type. Every dependent module (detection, decision policy, the Stackelberg payoff lookup, PPO's observation encoding, dataset generation, the demo controller) derives its per-attack behaviour from this one registry instead of hardcoding it separately in each place.
 - Attack-type-agnostic rule-based detection layer (`UnifiedRuleBasedDetector`) — classifies captured traffic purely from its shape (rate, port diversity, payload size), never from which attack was requested
-- Decision agent comparing three independent policies (rule-based, Stackelberg game-theoretic, PPO reinforcement-learned) for response selection
+- Decision agent comparing three independent policies (rule-based, Stackelberg game-theoretic, PPO reinforcement-learned) for response selection, and an evidence-based arbiter (`defense/arbiter.py`) that executes the best-evidenced candidate
 - Response/deception handlers, all executing real changes inside the Mininet network (real interface isolation, real decoy redirection, real connection-rate limiting)
 - Logging and metrics collection
+- Live physical-demo defender (`src/iot_defense/live/`): the same detectors, policies and arbiter on real packets, applying real `iptables` rules on one machine ([docs/LIVE_DEMO.md](docs/LIVE_DEMO.md))
+- Evaluation tooling (`src/iot_defense/evaluation/`): the measured-outcome table and harness, outcome report, held-out arbiter evaluation, detector evaluation, pcap and public-data replay
 
 ## Environment
 - Ubuntu 24.04.4 LTS
@@ -24,9 +35,9 @@ For a research-style comparison of the 3-policy system against simpler baselines
 - Open vSwitch 3.3.9
 
 ## Attack types
-Sixteen attack types are currently registered, selectable at demo start via `--attack <key>`. Every rule-based detector's numeric thresholds were hand-placed in a real, unclaimed gap between its neighbors' own thresholds (not guessed), and cross-checked two ways: a generic test runs every attack's own synthetic signature through the *complete* detector sweep (not just its own detector) and confirms no earlier-registered one claims it first, and real live Mininet runs (repeated across many rounds) confirm the same holds under real-world timing variance, not just on paper.
+Sixteen single-source attack types are registered, plus four distributed (spoofed-source) variants described below (20 attack conditions; 21 situations with `normal`), selectable at demo start via `--attack <key>`. Every rule-based detector's numeric thresholds were hand-placed in a real, unclaimed gap between its neighbors' own thresholds (not guessed), and cross-checked two ways: a generic test runs every attack's own synthetic signature through the *complete* detector sweep (not just its own detector) and confirms no earlier-registered one claims it first, and real live Mininet runs (repeated across many rounds) confirm the same holds under real-world timing variance, not just on paper.
 
-| Key | Label | Signature | Preferred response |
+| Key | Label | Signature | Playbook response (rule-based default) |
 |---|---|---|---|
 | `reconnaissance` | Port scan | Many destination ports, moderate rate | `DECOY` |
 | `dos` | DDoS flood | Single port, very high packet rate | `ISOLATE` |
@@ -167,14 +178,14 @@ The dashboard is a browser-based operations console for observing the live pipel
 
 ### Prerequisites
 ```bash
-cd /home/abdullah/iot-defense
+cd iot-defense   # the repository root
 source .venv/bin/activate
 ```
 `fastapi`, `uvicorn`, and `httpx` are declared in `pyproject.toml` / `requirements.txt`.
 
 ### Start the dashboard server
 ```bash
-cd /home/abdullah/iot-defense
+cd iot-defense   # the repository root
 source .venv/bin/activate
 PYTHONPATH=src uvicorn iot_defense.dashboard.server:app --host 0.0.0.0 --port 8000
 ```
@@ -182,9 +193,9 @@ Then open **http://<host>:8000** in a browser.
 
 ### Run the live demo (requires Mininet, typically sudo)
 ```bash
-cd /home/abdullah/iot-defense
+cd iot-defense   # the repository root
 sudo .venv/bin/python3 -m iot_defense.demo.controller --attack <key>
-# <key> is any registered key -- see "Attack types" above for the full list of 16, or trigger a run from the dashboard's own "Run attack" control instead
+# <key> is any registered key -- see "Attack types" above for the full list of 20, or trigger a run from the dashboard's own "Run attack" control instead
 ```
 Omit `--attack` to be prompted interactively. The dashboard server and the demo process share `data/dashboard/state.json` and the controller's SSE event queue when run together as one process; run the dashboard server itself with the demo controller instantiated once (as `server.py` does) so browser clients observe the same controller instance.
 
@@ -209,17 +220,24 @@ The controller's `cleanup()` tears down the response executor (removing any ipta
 - Only two attack signatures (reconnaissance, credential-stuffing) are genuinely distinguished by connection *rate/pattern*; the flood and exfiltration signatures rely more heavily on volume and direction, and `exploit` relies on payload size rather than any of those. `c2_beacon` adds a third, genuinely different axis -- inter-packet timing regularity (`inter_arrival_cv`) -- rather than rate, volume, or size (see "Attack types" above).
 - `exploit`'s rule-based detector separates a single oversized request from ordinary low-volume traffic almost entirely by `average_packet_size` — packet_count and port diversity alone overlap with real observed normal-traffic values, so this signature has the least headroom of any currently registered detector if normal traffic patterns ever shift. A live capture of `generate_exploit_mininet_traffic` measured `average_packet_size=442` against a detection window of 250-550 and real normal traffic's observed max of 111.6 (see `data/ml/controlled_flows_6class.csv`) — real margin on both sides today, not a coin flip, but a narrower gap than the other four attacks have.
 - Run durations vary a lot across the 16 attacks, by design, not by accident — most finish in 4-25s, but `mqtt_flood` takes ~110s, `buffer_overflow` ~40s, and `c2_beacon` ~33s (its fixed 1.5s beacon interval is the signal being detected, not an incidental slowdown): the first two were deliberately slowed down to a real, wide-margin sub-1.0 packets-per-second rate after live runs found the alternative (a faster, narrower rate shared with other attacks) intermittently misclassified under this VM's own real timing variance. A slower, longer, reliable run was preferred over a faster, occasionally-wrong one.
-- The `--attack` CLI choice is registry-driven (`ATTACK_SCENARIOS`), so all 16 keys are always available at the live demo (and the dashboard's own run-control) and always exercise the real detection/decision/response pipeline. ML dataset *generation* now covers all 16, but the **deployed** RF model is still trained only on the original 6 classes (see "Attack types" and "Controlled ML detection experiment" above).
+- The `--attack` CLI choice is registry-driven (`ATTACK_SCENARIOS`), so all 20 keys are always available at the live demo (and the dashboard's own run-control) and always exercise the real detection/decision/response pipeline. ML dataset *generation* covers the 16 single-source attacks and the **deployed** RF model is trained on all 17 classes (16 attacks plus `normal`; see "Controlled ML detection experiment" above). The four distributed variants are not per-flow detectable, so they are recognised by the rule-based aggregate stage and stay out of the per-flow classifier.
+- The limits of the policy comparison and of the detector evaluation (three repetitions per cell, one lab, priors not blind, in-sample lab accuracy, no transfer to real device traffic) are listed under "Limitations" in [EVALUATION.md](EVALUATION.md).
 
 ## Virtual environment
 ```bash
-cd /home/abdullah/iot-defense
+cd iot-defense   # the repository root
 source .venv/bin/activate
 ```
 
 ## Run tests
 ```bash
-cd /home/abdullah/iot-defense
+cd iot-defense   # the repository root
 source .venv/bin/activate
 pytest -q
 ```
+The full suite (about 900 tests, roughly 4 to 8 minutes on a two-vCPU VM) needs neither Mininet nor root: tests that touch the network use fakes, and every test builds its own data. Run it with nothing else using the CPU: a few tests (the live defender, policy decision latency) are timing-sensitive.
+
+## What is and is not in git
+- **Tracked:** the source, tests, config, docs, the measured outcome tables (`data/outcomes/outcome_table.jsonl`, `adaptive_table.jsonl`), and the small result files behind the claims in `EVALUATION.md` (force-added from `data/evaluation/`: held-out and live arbiter evaluations, detector and public-data results, the harness rows for the fresh live trials).
+- **Ignored, regenerated:** `models/` (retrain PPO with `python -m iot_defense.simulation.train_ppo`; the RF detector needs `ml.generate_dataset` and `ml.train_random_forest`, which need Mininet and root), `data/ml/`, the rest of `data/evaluation/` (harness runs and pcaps), logs, runtime state (`data/dashboard/state.json`, `live_state.json`).
+- **Not redistributed:** `data/external/` holds the public IoT-23 captures (Stratosphere Laboratory) used by `evaluation/public_eval.py`; fetch them yourself. `scripts/launch_public_eval.sh` lists the six malware captures (3-1, 34-1, 20-1, 21-1, 8-1, 42-1, saved as `m03.pcap` and so on) and the benign Amazon Echo capture it expects.

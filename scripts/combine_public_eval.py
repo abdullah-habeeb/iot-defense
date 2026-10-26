@@ -1,4 +1,4 @@
-"""Summarise the corrected public-data runs: like-for-like before/after, named recall, firewall actions."""
+"""Run from the repository root after scripts/launch_public_eval.sh. Summarise the corrected public-data runs: like-for-like before/after, named recall, firewall actions."""
 import json
 from pathlib import Path
 

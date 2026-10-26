@@ -1,6 +1,6 @@
 # Future work and how to build on this project
 
-Written 2026-10-22. Plain-language companion to `EVALUATION.md` (the numbers) and `docs/LIVE_DEMO.md` (the physical demo).
+Written 2026-10-22, updated 2026-10-26. Plain-language companion to `EVALUATION.md` (the numbers) and `docs/LIVE_DEMO.md` (the physical demo).
 
 ## 1. What this research is about
 
@@ -26,18 +26,20 @@ How it is tested:
 | Noisy detector (20-30% wrong) | noise-aware PPO beats Stackelberg by 0.3-0.56 | simulated errors |
 | Reactive source-rotating attacker | deployed Stackelberg 2.17; adaptive-trained PPO 0.07 | in-sample; attacker is scripted |
 | Table lookup of the best row | 7.322 (ceiling on known attacks) | strategies do not beat it on known attacks |
+| Arbiter scoring every response the device can apply (live defender, 5 responses) | +0.443 per trial [+0.326, +0.565] on 168 fresh live trials; matches the held-out-block estimate (+0.442) | same lab, scripted attackers; the device is still about 0.75 below the unconstrained arms |
+| Detector on public IoT-23 traffic | about 17-21 firewall actions per hour on a benign Echo; C&C noticed, never named a beacon | in-sample lab accuracy does not transfer; section 8 |
 
 Limits to state wherever results are quoted: 5 virtual devices, 3 repetitions per cell, scripted attacker, one lab, priors not blind, PPO-on-table is circular.
 
-## 3. Immediate to-do for this project
+## 3. Status of the immediate to-do (2026-10-26)
 
-1. Train PPO on the model only and drop PPO-on-table from the main comparison. First attempt (no attacker in the practice world): regret 0.577. Also run an attacker-aware version and report both. Code: `src/iot_defense/defense/model_outcomes.py`, `src/iot_defense/evaluation/model_trained_ppo.py`, `tests/test_model_outcomes.py` (uncommitted).
-2. Re-run the noisy-detector and reactive-attacker experiments with model-trained PPO so every PPO result is consistent.
-3. Add bootstrap confidence intervals to the headline numbers; gaps like 0.017 vs 0.042 are within noise at 3 repetitions.
-4. Grade on fresh data: build the key from repetitions 1-2 and grade on repetition 3, or re-measure.
-5. Perturb Stackelberg's priors by +/-0.2 and show its regret barely moves (answers "written knowing the lab").
-6. Add a table-lookup baseline as a named fourth strategy.
-7. Use the 168 live paired trials as the headline (fresh measurements), table regret as secondary.
+1. **Train PPO on the model only and drop PPO-on-table from the main comparison.** Done: PPO-M (regret 0.577), `defense/model_outcomes.py`, `evaluation/model_trained_ppo.py`. Not done: an attacker-aware training environment.
+2. **Re-run the noisy-detector and reactive-attacker experiments with model-trained PPO.** Not done; they still use benchmark-trained PPO and are indicative only.
+3. **Bootstrap confidence intervals on the headline numbers.** Done for the live paired trials, the leave-one-out result and the arbiter evaluations. Table-graded regret is still a point estimate.
+4. **Grade on fresh data.** Done for the arbiter: each measurement block held out in turn, and 168 fresh live trials. The table-graded policy regret still reuses the rows that define the best response.
+5. **Perturb Stackelberg's priors by +/-0.2 and show its regret barely moves.** Not done.
+6. **Table-lookup baseline as a named fourth strategy.** Not done (the lookup is reported as the ceiling, 7.322).
+7. **Use the 168 live paired trials as the headline.** Done in `EVALUATION.md`.
 
 ## 4. What the physical demo does and does not show
 
@@ -59,7 +61,7 @@ To show the lab results hold, re-measure a **small slice** of the record book on
 ### Near-term: make the evidence stronger
 1. **Measure more.** 10 repetitions per cell, confidence intervals, more device types.
 2. **Replicate a slice on real hardware** (section 4).
-3. **Test the detector on public data** (IoT-23, CICIoT2023) to check attack recognition beyond this lab. No public table of attack -> response -> measured outcome exists, so the record book itself is new.
+3. **Test the detector on more public data.** IoT-23 is done (section 8: it does not transfer); CICIoT2023 and more benign devices are not. No public table of attack -> response -> measured outcome exists, so the record book itself is new.
 
 ### Mid-term: make the system smarter
 4. **Let the record book build itself.** A home cannot try all 10 responses on every attack. A defender could start from the priors, learn from what happens after each response, and try new responses only where being wrong is cheap. This is the step from "lab benchmark" to "learns in your home".
