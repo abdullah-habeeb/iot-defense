@@ -1,0 +1,63 @@
+# Pre-registration for the new-attack transfer experiment.
+#
+# THIS FILE IS A TEMPLATE. The fixed parts (claim, mechanism descriptions, criteria defaults) are final; the parts marked
+# FILL IN are written by a person who has NOT seen any measurement of the two new attacks (ideally has not seen the 693-row
+# benchmark either; say which in blind_declaration). Read docs/NEW_ATTACKS_BLIND_AUTHOR_BRIEF.md first and nothing else about
+# results. When finished, set `status: READY`, run `python -m iot_defense.experiments.new_attacks.prereg validate`, commit, and
+# follow docs/NEW_ATTACKS_PROTOCOL.md. After the freeze nothing in this file can change.
+schema_version: 1
+status: TEMPLATE        # change to READY only when every FILL IN below is done
+
+title: Does the Stackelberg policy transfer to attacks nobody has measured?
+claim: |
+  A defender that has only mechanism priors (written knowledge of what each response does to a kind of traffic, and no
+  measurement of the attack) can choose a response close to the measured best for an attack it has never seen, and does so at
+  least as well as a hand-written playbook. Test: two attacks that appear nowhere in the 693-row benchmark. Their priors and
+  playbook entries are written and committed before any response to them is measured. Every response is then measured three
+  times per attack, and each policy is graded on regret: the mean utility of the best of the ten responses minus the mean
+  utility of the response the policy chose.
+
+# Fixed BEFORE the priors are written, from the earlier results (Stackelberg's worst regret on the 21 known situations was 0.88;
+# the playbook's mean was 3.0). Change them now or never: they are frozen with everything else.
+success_criteria:
+  stackelberg_max_regret: 1.0                    # Stackelberg's regret must be at most this, on each new attack
+  stackelberg_not_worse_than_playbook: true      # and its regret must not exceed the playbook's, on each new attack
+
+blind_declaration:
+  priors_author: ""                  # FILL IN: full name(s) of whoever wrote the priors
+  playbook_author: ""                # FILL IN: full name(s) of whoever chose the playbook responses
+  date_written: ""                   # FILL IN: ISO date, e.g. 2026-11-02
+  saw_new_attack_measurements: null  # FILL IN: must be false. If the author saw any measurement of these attacks, stop.
+  saw_outcome_table: null            # FILL IN: true or false, honestly: did the author see the 693-row benchmark or its results?
+
+attacks:
+  ssdp_reflection:
+    mechanism: |
+      Unsolicited SSDP/UPnP search responses arrive at the protected sensor: UDP datagrams of about 340 bytes from source port
+      1900 to a high destination port, from a single lab address, up to 60 packets at about 7 packets per second (the cap is
+      reached in about 9 seconds). This is the traffic a victim of an SSDP reflection-amplification attack receives (it never sent the search that
+      these responses answer). Inbound to the sensor.
+    attack_class: ""                 # FILL IN: one of the existing classes (see the brief), or NEW
+    class_rationale: ""              # FILL IN: why this class, in at least a sentence or two
+    # new_class:                     # only if attack_class is NEW: uncomment and fill in all seven priors with a reason each
+    #   name: ""
+    #   containment_prior: {ISOLATE: 0.0, QUARANTINE: 0.0, BLOCK_SOURCE: 0.0, THROTTLE: 0.0, RESET_SESSIONS: 0.0, DECOY: 0.0, BANDWIDTH_CAP: 0.0}
+    #   rationale: {ISOLATE: "", QUARANTINE: "", BLOCK_SOURCE: "", THROTTLE: "", RESET_SESSIONS: "", DECOY: "", BANDWIDTH_CAP: ""}
+    playbook_response: ""            # FILL IN: the one response a hand-written playbook would list for this attack
+    playbook_rationale: ""           # FILL IN
+    nearest_known_attack: ""         # FILL IN: the known attack type it most resembles (used for the "borrow its measured best" baseline)
+
+  telnet_scan_outbound:
+    mechanism: |
+      The protected sensor itself, assumed compromised, opens many short TCP connections to ports 23 and 2323 of another host,
+      alternating between them, about 15 attempts per second for about 6 seconds; the target refuses them. This is the traffic of
+      Mirai-style Telnet scanning, the way a compromised device looks for more devices to infect. The traffic leaves the device.
+    attack_class: ""                 # FILL IN
+    class_rationale: ""              # FILL IN
+    # new_class:
+    #   name: ""
+    #   containment_prior: {ISOLATE: 0.0, QUARANTINE: 0.0, BLOCK_SOURCE: 0.0, THROTTLE: 0.0, RESET_SESSIONS: 0.0, DECOY: 0.0, BANDWIDTH_CAP: 0.0}
+    #   rationale: {ISOLATE: "", QUARANTINE: "", BLOCK_SOURCE: "", THROTTLE: "", RESET_SESSIONS: "", DECOY: "", BANDWIDTH_CAP: ""}
+    playbook_response: ""            # FILL IN
+    playbook_rationale: ""           # FILL IN
+    nearest_known_attack: ""         # FILL IN
