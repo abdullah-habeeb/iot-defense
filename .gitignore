@@ -29,5 +29,6 @@ data/captures/
 data/dashboard/state.json
 data/dashboard/live_state.json
 
-# Public datasets downloaded for evaluation (large, not ours to redistribute)
+# Public IoT-23 captures (CC BY 4.0, 581 MB; two files exceed GitHub's 100 MB limit). They are attached to the
+# GitHub release data-iot23-v1; scripts/fetch_iot23.sh downloads and verifies them.
 data/external/

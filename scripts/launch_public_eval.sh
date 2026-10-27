@@ -1,7 +1,7 @@
 #!/bin/bash
 # Output directories keep the names data/evaluation/pub3_{after,before}_{benign,small,large}: this is the third
 # iteration; the earlier ones scored the two configurations with different matching windows and are superseded.
-# Needs data/external/iot23/ (IoT-23, not redistributed; see README "What is and is not in git").
+# Needs data/external/iot23/ (IoT-23, CC BY 4.0): run scripts/fetch_iot23.sh first (see README "What is and is not in git").
 # Re-run the public-data evaluation with the corrected metrics (one 60 s scoring window for every configuration,
 # named recall, firewall actions that respect the 60 s block). Two waves so the 2-vCPU VM is not overloaded.
 cd ~/iot-defense || exit 1
