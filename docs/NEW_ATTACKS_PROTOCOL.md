@@ -33,13 +33,13 @@ and does not write priors.
 |---|---|---|---|---|
 | 1 | done | Tooling, tests, template, this protocol | `pytest tests/test_new_attacks_*.py` | - |
 | 2 | operator | Check the clock; blind-safe smoke test (ALLOW only: the generators work and each baseline is at least 3 packets) | `timedatectl` then `sudo .venv/bin/python3 -m iot_defense.experiments.new_attacks.smoke` | about 3 min |
-| 3 | author | Read `docs/NEW_ATTACKS_BLIND_AUTHOR_BRIEF.md`; fill in `config/experiments/new_attacks/preregistration.yaml`; set `status: READY` | `python -m iot_defense.experiments.new_attacks.prereg validate` | 1 to 2 h |
+| 3 | author | Read `docs/NEW_ATTACKS_BLIND_AUTHOR_BRIEF.md`; fill in `config/experiments/new_attacks/preregistration.yaml`; set `status: READY` | `.venv/bin/python3 -m iot_defense.experiments.new_attacks.prereg validate` | 1 to 2 h |
 | 4 | operator | Commit and push the filled file as its own commit | `git add config/experiments/new_attacks/preregistration.yaml && git commit -m "Blind priors and playbook for the new attacks" && git push` | 1 min |
-| 5 | operator | Freeze: writes FREEZE.json (refuses on a dirty tree or if any row exists); commit and push it; then post its commit hash as a PR comment (GitHub timestamps it) | `python -m iot_defense.experiments.new_attacks.prereg freeze`, commit, push, `gh pr comment 1 --body "Pre-registration frozen at <freeze commit sha>"` | 3 min |
+| 5 | operator | Freeze: writes FREEZE.json (refuses on a dirty tree or if any row exists); commit and push it; then post its commit hash as a PR comment (GitHub timestamps it) | `.venv/bin/python3 -m iot_defense.experiments.new_attacks.prereg freeze`, commit, push, `gh pr comment 1 --body "Pre-registration frozen at <freeze commit sha>"` | 3 min |
 | 6 | operator | Measure: 3 blocks x 11 responses x 2 attacks = 66 rows. Refuses unless the freeze is intact, the tree is clean and HEAD is pushed | `sudo .venv/bin/python3 -m iot_defense.experiments.new_attacks.measure --reps 3` | about 13 min |
 | 7 | operator | Commit the raw rows and logs (they are git-ignored, so force-add), push, post their sha256 as a PR comment | `git add -f data/experiments/new_attacks/rows.jsonl data/experiments/new_attacks/run_log.jsonl data/experiments/new_attacks/smoke_log.jsonl` | 2 min |
-| 8 | operator | Grade | `python -m iot_defense.experiments.new_attacks.analyze` | seconds |
-| 9 | operator | Generate the evidence report and open `data/experiments/new_attacks/evidence_report.html` | `python -m iot_defense.experiments.new_attacks.evidence --server` | seconds |
+| 8 | operator | Grade | `.venv/bin/python3 -m iot_defense.experiments.new_attacks.analyze` | seconds |
+| 9 | operator | Generate the evidence report and open `data/experiments/new_attacks/evidence_report.html` | `.venv/bin/python3 -m iot_defense.experiments.new_attacks.evidence --server` | seconds |
 | 10 | optional | Three more blocks per attack, graded separately, as independent confirmation | `sudo .venv/bin/python3 -m iot_defense.experiments.new_attacks.measure --reps 6 --phase confirmatory`, then steps 7 to 9 | about 13 min |
 
 The time for step 6 comes from the benchmark itself: its blocks for attacks of 5 to 9 seconds took 80 to 140 seconds each (for

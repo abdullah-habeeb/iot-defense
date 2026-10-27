@@ -87,6 +87,6 @@ For **each** attack:
 4. `nearest_known_attack`: which of the 20 known attack types it most resembles (a separate baseline borrows that attack's measured best).
 
 Then fill in `blind_declaration` truthfully, set `status: READY`, and run
-`python -m iot_defense.experiments.new_attacks.prereg validate`.
+`.venv/bin/python3 -m iot_defense.experiments.new_attacks.prereg validate`.
 
 A good reason names a mechanism, what the response physically does to this kind of traffic. A neutral example, about neither attack: "a limit on new connection attempts cannot shorten a connection that is already open, so it does little against traffic carried on one long-lived connection". A weak reason names an outcome you remember or guess. If you are unsure between two values, pick the one the mechanism supports and say how unsure you are in the reason.

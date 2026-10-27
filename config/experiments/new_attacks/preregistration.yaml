@@ -3,7 +3,7 @@
 # THIS FILE IS A TEMPLATE. The fixed parts (claim, mechanism descriptions, criteria defaults) are final; the parts marked
 # FILL IN are written by a person who has NOT seen any measurement of the two new attacks (ideally has not seen the 693-row
 # benchmark either; say which in blind_declaration). Read docs/NEW_ATTACKS_BLIND_AUTHOR_BRIEF.md first and nothing else about
-# results. When finished, set `status: READY`, run `python -m iot_defense.experiments.new_attacks.prereg validate`, commit, and
+# results. When finished, set `status: READY`, run `.venv/bin/python3 -m iot_defense.experiments.new_attacks.prereg validate`, commit, and
 # follow docs/NEW_ATTACKS_PROTOCOL.md. After the freeze nothing in this file can change.
 schema_version: 1
 status: TEMPLATE        # change to READY only when every FILL IN below is done
