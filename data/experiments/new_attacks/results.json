@@ -1,0 +1,536 @@
+{
+  "confirmatory": null,
+  "criteria": {
+    "not_worse_than_playbook_required": true,
+    "of": 2,
+    "overall": "PASS",
+    "passed": 2,
+    "per_attack": {
+      "ssdp_reflection": {
+        "not_worse_than_playbook": true,
+        "playbook_regret": 0.0,
+        "regret_within_ceiling": true,
+        "stackelberg_regret": 0.0,
+        "verdict": "PASS"
+      },
+      "telnet_scan_outbound": {
+        "not_worse_than_playbook": true,
+        "playbook_regret": 0.0,
+        "regret_within_ceiling": true,
+        "stackelberg_regret": 0.0,
+        "verdict": "PASS"
+      }
+    },
+    "stackelberg_max_regret": 1.0
+  },
+  "decisions": {
+    "ssdp_reflection": {
+      "allow": "ALLOW",
+      "best_fixed_known": "QUARANTINE",
+      "class": "reflection",
+      "fixed_quarantine": "QUARANTINE",
+      "nearest_known_attack": "BLOCK_SOURCE",
+      "nearest_known_attack_name": "dos_flood",
+      "priors_without_attacker": "BLOCK_SOURCE",
+      "rule_based": "BLOCK_SOURCE",
+      "stackelberg": "BLOCK_SOURCE"
+    },
+    "telnet_scan_outbound": {
+      "allow": "ALLOW",
+      "best_fixed_known": "QUARANTINE",
+      "class": "outbound",
+      "fixed_quarantine": "QUARANTINE",
+      "nearest_known_attack": "BLOCK_SOURCE",
+      "nearest_known_attack_name": "reconnaissance_port_scan",
+      "priors_without_attacker": "QUARANTINE",
+      "rule_based": "QUARANTINE",
+      "stackelberg": "QUARANTINE"
+    }
+  },
+  "freeze_checked": true,
+  "generated_at": "2026-10-27T10:50:10+0000",
+  "known_reference": {
+    "mean_regret": {
+      "rule_based": 2.9955,
+      "stackelberg": 0.0419
+    },
+    "situations": 21
+  },
+  "ppo": "Not applicable. PPO's observation encodes the attack label as one of the 21 known conditions, so an unseen attack cannot be presented to a trained model; using it would mean rebuilding and retraining it on the very measurements being predicted.",
+  "primary": {
+    "ssdp_reflection": {
+      "best_action": "BLOCK_SOURCE",
+      "best_mean": 7.7,
+      "complete_blocks": [
+        0,
+        1,
+        2
+      ],
+      "invalid_rows": 0,
+      "mean_utility": {
+        "ALERT": 2.9,
+        "ALLOW": 3.0,
+        "BANDWIDTH_CAP": 2.7000000000000006,
+        "BLOCK_SOURCE": 7.7,
+        "DECOY": 2.5,
+        "FORENSIC_CAPTURE": 4.7,
+        "ISOLATE": 4.0,
+        "QUARANTINE": 7.3,
+        "RESET_SESSIONS": 2.6,
+        "THROTTLE": 5.599999999999999
+      },
+      "policies": {
+        "allow": {
+          "action": "ALLOW",
+          "mean": 3.0,
+          "rank": 6,
+          "regret": 4.7,
+          "regret_by_block": [
+            4.7,
+            4.7,
+            4.7
+          ]
+        },
+        "best_fixed_known": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 2,
+          "regret": 0.4,
+          "regret_by_block": [
+            0.4,
+            0.4,
+            0.4
+          ]
+        },
+        "fixed_quarantine": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 2,
+          "regret": 0.4,
+          "regret_by_block": [
+            0.4,
+            0.4,
+            0.4
+          ]
+        },
+        "nearest_known_attack": {
+          "action": "BLOCK_SOURCE",
+          "mean": 7.7,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "priors_without_attacker": {
+          "action": "BLOCK_SOURCE",
+          "mean": 7.7,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "rule_based": {
+          "action": "BLOCK_SOURCE",
+          "mean": 7.7,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "stackelberg": {
+          "action": "BLOCK_SOURCE",
+          "mean": 7.7,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "status": "OK",
+      "tied_with_best": [
+        "BLOCK_SOURCE"
+      ],
+      "valid_rows": 33
+    },
+    "telnet_scan_outbound": {
+      "best_action": "QUARANTINE",
+      "best_mean": 7.3,
+      "complete_blocks": [
+        0,
+        1,
+        2
+      ],
+      "invalid_rows": 0,
+      "mean_utility": {
+        "ALERT": 2.9,
+        "ALLOW": 3.0,
+        "BANDWIDTH_CAP": 2.7515463917525778,
+        "BLOCK_SOURCE": 6.66549255441008,
+        "DECOY": 2.551546391752577,
+        "FORENSIC_CAPTURE": 4.751546391752577,
+        "ISOLATE": 4.0,
+        "QUARANTINE": 7.3,
+        "RESET_SESSIONS": 2.6517253722794956,
+        "THROTTLE": 2.6171821305841925
+      },
+      "policies": {
+        "allow": {
+          "action": "ALLOW",
+          "mean": 3.0,
+          "rank": 5,
+          "regret": 4.3,
+          "regret_by_block": [
+            4.3,
+            4.3,
+            4.3
+          ]
+        },
+        "best_fixed_known": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "fixed_quarantine": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "nearest_known_attack": {
+          "action": "BLOCK_SOURCE",
+          "mean": 6.66549255441008,
+          "rank": 2,
+          "regret": 0.6345,
+          "regret_by_block": [
+            0.6417,
+            0.6309,
+            0.6309
+          ]
+        },
+        "priors_without_attacker": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "rule_based": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "stackelberg": {
+          "action": "QUARANTINE",
+          "mean": 7.3,
+          "rank": 1,
+          "regret": 0.0,
+          "regret_by_block": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "status": "OK",
+      "tied_with_best": [
+        "QUARANTINE"
+      ],
+      "valid_rows": 33
+    }
+  },
+  "primary_reps": [
+    0,
+    1,
+    2
+  ],
+  "prior_accuracy": {
+    "ssdp_reflection": {
+      "error_by_action": {
+        "ALERT": 0.0,
+        "ALLOW": 0.0,
+        "BANDWIDTH_CAP": 4.0,
+        "BLOCK_SOURCE": -0.25,
+        "DECOY": 2.45,
+        "FORENSIC_CAPTURE": -0.2,
+        "ISOLATE": 0.0,
+        "QUARANTINE": -1.3,
+        "RESET_SESSIONS": -0.45,
+        "THROTTLE": -2.25
+      },
+      "largest_error_action": "BANDWIDTH_CAP",
+      "mean_absolute_error": 1.09
+    },
+    "telnet_scan_outbound": {
+      "error_by_action": {
+        "ALERT": 0.0,
+        "ALLOW": 0.0,
+        "BANDWIDTH_CAP": -0.0515,
+        "BLOCK_SOURCE": -2.4655,
+        "DECOY": 2.3985,
+        "FORENSIC_CAPTURE": -0.2515,
+        "ISOLATE": 0.0,
+        "QUARANTINE": -1.55,
+        "RESET_SESSIONS": 0.4983,
+        "THROTTLE": -0.2672
+      },
+      "largest_error_action": "BLOCK_SOURCE",
+      "mean_absolute_error": 0.7482
+    }
+  },
+  "rows": 66,
+  "rows_sha256": "c10785d79cbdbfd55c2e5793811145ff3e8a7860e040bb3e3e32d7bc46339f34",
+  "stackelberg_reasoning": {
+    "ssdp_reflection": {
+      "candidates": [
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "ALLOW",
+          "defender_utility": 3.0,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "ALERT",
+          "defender_utility": 2.9,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": -2.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 0.0,
+          "defender_action": "ISOLATE",
+          "defender_utility": 4.0,
+          "predicted_attacker_strategy": "RETREAT"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 3.6,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 3.6,
+          "defender_action": "DECOY",
+          "defender_utility": 4.949999999999999,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 2.9,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 2.9,
+          "defender_action": "THROTTLE",
+          "defender_utility": 3.35,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": -1.6499999999999997,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 0.0,
+          "defender_action": "BLOCK_SOURCE",
+          "defender_utility": 7.7,
+          "predicted_attacker_strategy": "RETREAT"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": -1.6499999999999997,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 0.0,
+          "defender_action": "QUARANTINE",
+          "defender_utility": 6.25,
+          "predicted_attacker_strategy": "RETREAT"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "RESET_SESSIONS",
+          "defender_utility": 2.15,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "FORENSIC_CAPTURE",
+          "defender_utility": 4.5,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": -0.6000000000000003,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 0.0,
+          "defender_action": "BANDWIDTH_CAP",
+          "defender_utility": 7.7,
+          "predicted_attacker_strategy": "RETREAT"
+        }
+      ],
+      "observed_threat": "SSDP_REFLECTION",
+      "predicted_attacker_strategy": "RETREAT",
+      "selected_action": "BLOCK_SOURCE",
+      "selected_attacker_utility": 0.0,
+      "selected_defender_utility": 7.7
+    },
+    "telnet_scan_outbound": {
+      "candidates": [
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "ALLOW",
+          "defender_utility": 3.0,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "ALERT",
+          "defender_utility": 2.9,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": -2.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 0.0,
+          "defender_action": "ISOLATE",
+          "defender_utility": 4.0,
+          "predicted_attacker_strategy": "RETREAT"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 3.6,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 3.6,
+          "defender_action": "DECOY",
+          "defender_utility": 4.949999999999999,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 4.3,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 4.3,
+          "defender_action": "THROTTLE",
+          "defender_utility": 2.35,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 2.9,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 2.9,
+          "defender_action": "BLOCK_SOURCE",
+          "defender_utility": 4.2,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": -1.3000000000000003,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 0.0,
+          "defender_action": "QUARANTINE",
+          "defender_utility": 6.25,
+          "predicted_attacker_strategy": "RETREAT"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 3.6,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 3.6,
+          "defender_action": "RESET_SESSIONS",
+          "defender_utility": 3.15,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "FORENSIC_CAPTURE",
+          "defender_utility": 4.5,
+          "predicted_attacker_strategy": "CONTINUE"
+        },
+        {
+          "attacker_utilities": {
+            "CONTINUE": 5.0,
+            "RETREAT": 0.0
+          },
+          "attacker_utility": 5.0,
+          "defender_action": "BANDWIDTH_CAP",
+          "defender_utility": 2.7,
+          "predicted_attacker_strategy": "CONTINUE"
+        }
+      ],
+      "observed_threat": "TELNET_SCAN_OUTBOUND",
+      "predicted_attacker_strategy": "RETREAT",
+      "selected_action": "QUARANTINE",
+      "selected_attacker_utility": 0.0,
+      "selected_defender_utility": 6.25
+    }
+  },
+  "tie_band": 0.25
+}
