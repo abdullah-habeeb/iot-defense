@@ -1,0 +1,80 @@
+[
+  {
+    "id": "E1",
+    "claim": "Every file that decides, generates or grades is byte-identical to the frozen manifest",
+    "status": "PASS",
+    "detail": "15 files and the priors/objective sections match"
+  },
+  {
+    "id": "E2",
+    "claim": "The pre-registration is complete and declares who wrote the priors and that they had seen no measurement of the new attacks",
+    "status": "PASS",
+    "detail": "priors by Teammate B, playbook by Teammate B, saw outcome table: False"
+  },
+  {
+    "id": "E3",
+    "claim": "Git order: the priors were committed, then frozen, then the first response was measured",
+    "status": "PASS",
+    "detail": "priors 2026-10-27T10:31:57+00:00 -> freeze 2026-10-27T10:33:26+00:00 -> first row 2026-10-27T10:38:13+00:00 (local git and local clock: this check can be forged by editing either)"
+  },
+  {
+    "id": "E4",
+    "claim": "GitHub's own clock agrees that the freeze was published before the first measurement",
+    "status": "PASS",
+    "detail": "GitHub recorded the freeze at 2026-10-27T10:33:35+00:00; first row 2026-10-27T10:38:13+00:00"
+  },
+  {
+    "id": "E5",
+    "claim": "No measured row existed when the pre-registration was frozen",
+    "status": "PASS",
+    "detail": "manifest rows_state={'exists': False, 'lines': 0}; first run began with 0 rows"
+  },
+  {
+    "id": "E6",
+    "claim": "The run log is an unbroken hash chain and the rows file is exactly what the logged runs produced (append-only)",
+    "status": "PASS",
+    "detail": "2 records chained; final rows sha256 c10785d79cbdbfd5... (66 rows)"
+  },
+  {
+    "id": "E7",
+    "claim": "Every primary block is complete (3 blocks x 11 measurements per attack) with no failed probe",
+    "status": "PASS",
+    "detail": "rows per attack and block: {'ssdp_reflection': {0: 11, 1: 11, 2: 11}, 'telnet_scan_outbound': {0: 11, 1: 11, 2: 11}}; probe errors: 0"
+  },
+  {
+    "id": "E8",
+    "claim": "Every row's timestamp lies inside a logged measurement run",
+    "status": "PASS",
+    "detail": "runs 1; rows 2026-10-27T10:38:13+00:00 .. 2026-10-27T10:47:36+00:00"
+  },
+  {
+    "id": "E9",
+    "claim": "The 693-row benchmark the old priors were validated on is unchanged since the freeze",
+    "status": "PASS",
+    "detail": "sha256 5d1344a2ebc45806..."
+  },
+  {
+    "id": "E10",
+    "claim": "Recomputing the result from the raw rows right now reproduces the stored result",
+    "status": "PASS",
+    "detail": "identical"
+  },
+  {
+    "id": "E11",
+    "claim": "The pre-freeze smoke test applied no response (so it could not leak how any response performs)",
+    "status": "PASS",
+    "detail": "1 smoke run(s); actions applied: ['ALLOW']"
+  },
+  {
+    "id": "E12",
+    "claim": "The measured rows were committed after they were measured, unchanged",
+    "status": "PASS",
+    "detail": "rows commit 2026-10-27T10:49:53+00:00"
+  },
+  {
+    "id": "E13",
+    "claim": "The machine's clock was NTP-synchronised during every run",
+    "status": "PASS",
+    "detail": "timedatectl reported ['yes']; hosts ['iot-defense']"
+  }
+]

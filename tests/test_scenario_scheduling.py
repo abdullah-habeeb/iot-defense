@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 # Import AFTER mocking to avoid triggering imports in generate_dataset
 # We must use patch.dict to safely patch sys.modules without permanent global impact
-import sys
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.ml.generate_dataset import _DATASET_GENERATION_UNSUPPORTED, get_scenario_type
 
@@ -13,8 +12,10 @@ from iot_defense.ml.generate_dataset import _DATASET_GENERATION_UNSUPPORTED, get
 # own sub-scenario values look like is still attack-specific (matching
 # generate_dataset.py's own documented convention), so ATTACK_ASSERTIONS
 # below needs one entry added per newly registered attack.
-NUM_BUCKETS = 1 + len(ATTACK_SCENARIOS)
-ATTACK_KEYS = list(ATTACK_SCENARIOS.keys())
+# Only per-flow-detectable attacks enter the ML dataset pipeline (the distributed
+# variants are recognized from destination aggregates and have no per-flow label).
+ATTACK_KEYS = [key for key, scenario in ATTACK_SCENARIOS.items() if scenario.per_flow_detectable]
+NUM_BUCKETS = 1 + len(ATTACK_KEYS)
 
 def _assert_reconnaissance_bucket(case: unittest.TestCase, values: list[str]) -> None:
     for value in values:

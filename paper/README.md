@@ -1,20 +1,11 @@
 # Paper
 
-`paper.tex` / `references.bib` build to `paper.pdf`, a 6-page IEEE-conference-format writeup of
-this project's evaluation (see `../EVALUATION.md`, which this paper condenses and cites the same
-real numbers from).
+The manuscript is not in this repository yet.
 
-No `texlive` is installed on this VM (outside the project's scoped passwordless sudo). Instead,
-`~/bin/tectonic` -- a self-contained LaTeX engine that fetches the packages it needs over the
-network on first use, no `apt install` required -- was downloaded from
-<https://github.com/tectonic-typesetting/tectonic/releases> (the `x86_64-unknown-linux-musl`
-static build; the `-gnu` build needs `libgraphite2` which is not installed here).
+The earlier 6-page draft that lived here reported the original evaluation, in which every policy was scored on
+agreement with a registered `preferred_action` (a 99.6% three-way tie). That comparison was circular (see "Methodology
+correction" at the top of `../EVALUATION.md`), so the draft was removed rather than left beside results that contradict
+it. It remains in git history (last version: commit `6104875`).
 
-Rebuild after editing `paper.tex`:
-
-```bash
-~/bin/tectonic paper.tex
-```
-
-`paper.pdf` is committed alongside the source so the paper is viewable without needing tectonic
-installed.
+A rewrite on the measured-outcome evaluation is in preparation and will be added here with its sources. Every number in
+it must come from `../EVALUATION.md` and the result files under `../data/evaluation/`.

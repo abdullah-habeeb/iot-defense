@@ -1,25 +1,29 @@
-"""FastAPI dashboard server — SSE event bus, static file serving, state endpoint."""
+"""FastAPI dashboard server — two dashboards (Mininet simulation at /, live physical demo at /live),
+each with its own state file and SSE stream, plus static file serving."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from iot_defense.attacks.briefings import describe_attack
 from iot_defense.attacks.registry import ATTACK_SCENARIOS
 from iot_defense.demo.controller import DemoController
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-_REPO_ROOT = Path("/home/abdullah/iot-defense")
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _STATIC_DIR = _REPO_ROOT / "data" / "dashboard" / "static"
 _STATIC_DIR.mkdir(parents=True, exist_ok=True)
 _STATE_FILE = _REPO_ROOT / "data" / "dashboard" / "state.json"
+# The live defender (a separate, root process) writes here. Keeping it apart from the
+# simulation's state.json means a live run and a Mininet run can never overwrite each other.
+_LIVE_STATE_FILE = _REPO_ROOT / "data" / "dashboard" / "live_state.json"
 # The venv's own python3, not sys.executable -- this process is already
 # running inside that venv (uvicorn is installed there), but spelling it
 # out explicitly here matches the one, sole sudoers rule every other real
@@ -51,16 +55,45 @@ app = FastAPI(
 # Singleton controller — shared across all SSE streams and the /state endpoint
 controller = DemoController()
 
+class _RevalidatingStaticFiles(StaticFiles):
+    """Static files that the browser must revalidate on every load, so an
+    edited dashboard.js/style.css is never served stale from its cache."""
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Mount static files (index.html, dashboard.js, style.css)
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+app.mount("/static", _RevalidatingStaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+def _page(name: str, assets: tuple[str, ...]) -> HTMLResponse:
+    """A dashboard page with each asset URL stamped by the file's mtime, so an
+    edited script or stylesheet is never served stale from the browser cache."""
+    html = (_STATIC_DIR / name).read_text(encoding="utf-8")
+    for asset in assets:
+        try:
+            stamp = int((_STATIC_DIR / asset).stat().st_mtime)
+        except OSError:
+            continue
+        html = html.replace(f"/static/{asset}", f"/static/{asset}?v={stamp}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/")
-async def read_root() -> FileResponse:
-    """Serve the dashboard SPA."""
-    return FileResponse(str(_STATIC_DIR / "index.html"))
+async def read_root() -> HTMLResponse:
+    """The Mininet simulation dashboard."""
+    return _page("index.html", ("style.css", "dashboard.js"))
+
+
+@app.get("/live")
+async def read_live() -> HTMLResponse:
+    """The live physical demo dashboard."""
+    return _page("live.html", ("style.css", "live.css", "dashboard.js", "live.js"))
 
 
 @app.get("/state")
@@ -73,14 +106,22 @@ async def get_state() -> JSONResponse:
         return JSONResponse(content={"phase": "IDLE"})
 
 
+@app.get("/live/state")
+async def get_live_state() -> JSONResponse:
+    """The latest state written by the live defender (IDLE if it has never run)."""
+    try:
+        return JSONResponse(content=json.loads(_LIVE_STATE_FILE.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError):
+        return JSONResponse(content={"phase": "IDLE", "live": None})
+
+
 @app.get("/attacks")
 async def list_attacks() -> JSONResponse:
-    """The registry's own attack keys and display labels -- the dashboard's
-    run-trigger control builds its options from this, not a hand-maintained
-    list, so it can never drift out of sync with what's actually registered."""
-    return JSONResponse(
-        content=[{"key": key, "label": scenario.label} for key, scenario in ATTACK_SCENARIOS.items()]
-    )
+    """The registry's own attack keys and display labels, plus each attack's
+    plain-language briefing -- the dashboard's run-trigger control and its
+    Attack Briefing card are built from this, not a hand-maintained list, so
+    they can never drift out of sync with what's actually registered."""
+    return JSONResponse(content=[describe_attack(key) for key in ATTACK_SCENARIOS])
 
 
 # Guards the one real Mininet network this project's every live entry point
@@ -209,7 +250,7 @@ async def message_stream(request: Request) -> StreamingResponse:
                 last_sent = json.dumps(controller.state, default=str)
                 yield f"data: {last_sent}\n\n"
             except Exception:  # noqa: BLE001
-                yield f"data: {{}}\n\n"
+                yield "data: {}\n\n"
         try:
             last_mtime = _STATE_FILE.stat().st_mtime
         except OSError:
@@ -282,4 +323,44 @@ async def message_stream(request: Request) -> StreamingResponse:
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
+    )
+
+
+@app.get("/live/stream")
+async def live_message_stream(request: Request) -> StreamingResponse:
+    """SSE for the live dashboard. The defender is always a separate process, so the
+    only channel is its state file: send it on connect, then whenever it changes. The
+    defender rewrites it every second, which is also how the page knows it is alive."""
+
+    async def event_generator():
+        last_text: str | None = None
+        last_mtime: float | None = None
+        idle_ticks = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            sent = False
+            try:
+                mtime = _LIVE_STATE_FILE.stat().st_mtime
+                if mtime != last_mtime:
+                    text = _LIVE_STATE_FILE.read_text(encoding="utf-8")
+                    json.loads(text)  # a mid-write read raises here and is retried next tick
+                    last_mtime = mtime
+                    if text != last_text:
+                        yield f"data: {text}\n\n"
+                        last_text, sent = text, True
+            except (OSError, json.JSONDecodeError):
+                if last_text is None:
+                    yield 'data: {"phase": "IDLE", "live": null}\n\n'
+                    last_text, sent = "", True
+            idle_ticks = 0 if sent else idle_ticks + 1
+            if idle_ticks >= _STATE_POLL_TICKS_PER_KEEPALIVE:
+                yield ": keepalive\n\n"
+                idle_ticks = 0
+            await asyncio.sleep(_STATE_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )

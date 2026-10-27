@@ -1,0 +1,393 @@
+{
+  "paired_trials": 168,
+  "mean_utility": {
+    "arbiter_live_before": {
+      "mean": 6.073698764859323,
+      "ci95": [
+        5.73994765859771,
+        6.396270543533501
+      ]
+    },
+    "arbiter_live_after": {
+      "mean": 6.516717210347526,
+      "ci95": [
+        6.2722580774734205,
+        6.746576280571112
+      ]
+    }
+  },
+  "after_minus_before": {
+    "n_trials": 168,
+    "n_nonzero": 40,
+    "mean_diff": 0.4430184454882036,
+    "mean_diff_ci95": [
+      0.3256979081955363,
+      0.5650724068964849
+    ],
+    "wilcoxon_p": 2.177948534042439e-08,
+    "sign_test_p": 1.8189894035458565e-12
+  },
+  "trials_with_a_different_action": 40,
+  "conditions": {
+    "brute_force": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "buffer_overflow_probe": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "c2_beaconing": {
+      "trials": 8,
+      "detector_label_correct": 7,
+      "arbiter_live_before": {
+        "mean_utility": 2.94375,
+        "actions": {
+          "ALERT": 7,
+          "ALLOW": 1
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 4.487500000000001,
+        "actions": {
+          "ALLOW": 1,
+          "FORENSIC_CAPTURE": 7
+        }
+      },
+      "changed_trials": 7
+    },
+    "credential_replay": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "credential_replay_distributed": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 2.441452205882353,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 4.5805147058823525,
+        "actions": {
+          "FORENSIC_CAPTURE": 8
+        }
+      },
+      "changed_trials": 8
+    },
+    "data_exfiltration": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 2.9,
+        "actions": {
+          "ALERT": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 4.7,
+        "actions": {
+          "FORENSIC_CAPTURE": 8
+        }
+      },
+      "changed_trials": 8
+    },
+    "dns_amplification": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "dns_tunneling_exfiltration": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 2.953368121442125,
+        "actions": {
+          "ALERT": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 4.713045540796964,
+        "actions": {
+          "FORENSIC_CAPTURE": 8
+        }
+      },
+      "changed_trials": 8
+    },
+    "dos_flood": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "dos_flood_distributed": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.539583333333333,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.539583333333333,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "exploit_payload_injection": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "firmware_tampering": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 2.738655628763994,
+        "actions": {
+          "ALERT": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 4.638655628763995,
+        "actions": {
+          "FORENSIC_CAPTURE": 8
+        }
+      },
+      "changed_trials": 8
+    },
+    "icmp_ping_flood": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "icmp_ping_flood_distributed": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 6.446875,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 6.446875,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "mqtt_message_flood": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "normal": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 3.0,
+        "actions": {
+          "ALLOW": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 3.0,
+        "actions": {
+          "ALLOW": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "reconnaissance_port_scan": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "rogue_config_beacon": {
+      "trials": 8,
+      "detector_label_correct": 7,
+      "arbiter_live_before": {
+        "mean_utility": 4.465239772623949,
+        "actions": {
+          "ALERT": 1,
+          "FORENSIC_CAPTURE": 7
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 4.626137208521385,
+        "actions": {
+          "FORENSIC_CAPTURE": 8
+        }
+      },
+      "changed_trials": 1
+    },
+    "slow_loris_exhaustion": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "tcp_syn_flood": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.7,
+        "actions": {
+          "BLOCK_SOURCE": 8
+        }
+      },
+      "changed_trials": 0
+    },
+    "tcp_syn_flood_distributed": {
+      "trials": 8,
+      "detector_label_correct": 8,
+      "arbiter_live_before": {
+        "mean_utility": 7.41875,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "arbiter_live_after": {
+        "mean_utility": 7.41875,
+        "actions": {
+          "THROTTLE": 8
+        }
+      },
+      "changed_trials": 0
+    }
+  }
+}

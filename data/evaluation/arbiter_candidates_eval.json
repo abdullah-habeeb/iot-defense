@@ -1,0 +1,1314 @@
+{
+  "blocks": [
+    0,
+    1,
+    2
+  ],
+  "paired_trials": 168,
+  "excluded_trials": 0,
+  "risk_aversion": 1.0,
+  "min_samples": 2,
+  "settings": {
+    "live": {
+      "available": [
+        "ALERT",
+        "ALLOW",
+        "BLOCK_SOURCE",
+        "FORENSIC_CAPTURE",
+        "THROTTLE"
+      ],
+      "trials": 168,
+      "situations": {
+        "brute_force": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "BLOCK_SOURCE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "buffer_overflow_probe": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "RESET_SESSIONS",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "c2_beaconing": {
+          "trials": 8,
+          "detector_label_correct": 6,
+          "all_proposals_unsupported_trials": 6,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 6,
+          "before": {
+            "modal_action": "ALERT",
+            "actions": {
+              "ALERT": 18,
+              "ALLOW": 6
+            },
+            "heldout_utility": 2.925,
+            "in_sample_regret": 1.7750000000000001
+          },
+          "after": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "ALLOW": 6,
+              "FORENSIC_CAPTURE": 18
+            },
+            "heldout_utility": 4.275,
+            "in_sample_regret": 0.42500000000000004
+          },
+          "modal_action_changed": true
+        },
+        "credential_replay": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "BLOCK_SOURCE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "credential_replay_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 8,
+          "before": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 2.7960784313725493,
+            "in_sample_regret": 2.099999999999999
+          },
+          "after": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "FORENSIC_CAPTURE": 24
+            },
+            "heldout_utility": 4.8960784313725485,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": true
+        },
+        "data_exfiltration": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 8,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 8,
+          "before": {
+            "modal_action": "ALERT",
+            "actions": {
+              "ALERT": 24
+            },
+            "heldout_utility": 2.483333333333333,
+            "in_sample_regret": 1.8000000000000014
+          },
+          "after": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "FORENSIC_CAPTURE": 24
+            },
+            "heldout_utility": 4.283333333333334,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": true
+        },
+        "dns_amplification": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "BANDWIDTH_CAP",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "dns_tunneling_exfiltration": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 8,
+          "modal_proposals": {
+            "rule_based": "DECOY",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 8,
+          "before": {
+            "modal_action": "ALERT",
+            "actions": {
+              "ALERT": 24
+            },
+            "heldout_utility": 2.795833333333333,
+            "in_sample_regret": 1.8000000000000014
+          },
+          "after": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "FORENSIC_CAPTURE": 24
+            },
+            "heldout_utility": 4.595833333333334,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": true
+        },
+        "dos_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "dos_flood_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "THROTTLE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.540277777777777,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.540277777777777,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "exploit_payload_injection": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "DECOY",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "firmware_tampering": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 8,
+          "modal_proposals": {
+            "rule_based": "QUARANTINE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 8,
+          "before": {
+            "modal_action": "ALERT",
+            "actions": {
+              "ALERT": 24
+            },
+            "heldout_utility": 2.7884057971014493,
+            "in_sample_regret": 1.7666666666666668
+          },
+          "after": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "FORENSIC_CAPTURE": 24
+            },
+            "heldout_utility": 4.555072463768116,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": true
+        },
+        "icmp_ping_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "icmp_ping_flood_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "THROTTLE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 6.420833333333334,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 6.420833333333334,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "mqtt_message_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "normal": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ALLOW",
+            "stackelberg": "ALLOW",
+            "ppo": "ALLOW"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "ALLOW",
+            "actions": {
+              "ALLOW": 24
+            },
+            "heldout_utility": 3.0,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "ALLOW",
+            "actions": {
+              "ALLOW": 24
+            },
+            "heldout_utility": 3.0,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "reconnaissance_port_scan": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "DECOY",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "rogue_config_beacon": {
+          "trials": 8,
+          "detector_label_correct": 6,
+          "all_proposals_unsupported_trials": 2,
+          "modal_proposals": {
+            "rule_based": "FORENSIC_CAPTURE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 2,
+          "before": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "ALERT": 6,
+              "FORENSIC_CAPTURE": 18
+            },
+            "heldout_utility": 4.068216463414634,
+            "in_sample_regret": 0.459672619047619
+          },
+          "after": {
+            "modal_action": "FORENSIC_CAPTURE",
+            "actions": {
+              "FORENSIC_CAPTURE": 24
+            },
+            "heldout_utility": 4.527889082462253,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "slow_loris_exhaustion": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "tcp_syn_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "tcp_syn_flood_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "THROTTLE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.420833333333334,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.420833333333334,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        }
+      },
+      "mean_over_situations": {
+        "before": {
+          "heldout_utility": 6.044705323952369,
+          "in_sample_regret": 0.46196853741496613
+        },
+        "after": {
+          "heldout_utility": 6.48643576612924,
+          "in_sample_regret": 0.02023809523809524
+        }
+      },
+      "mean_over_trials_heldout_utility": {
+        "before": 6.044705323952369,
+        "after": 6.48643576612924
+      },
+      "heldout_utility_after_minus_before": {
+        "n_trials": 168,
+        "n_nonzero": 40,
+        "mean_diff": 0.44173044217687085,
+        "mean_diff_ci95": [
+          0.32644850127551023,
+          0.5631958616780045
+        ],
+        "wilcoxon_p": 2.5949078240454722e-08,
+        "sign_test_p": 1.8189894035458565e-12
+      },
+      "heldout_utility_ci95": {
+        "before": [
+          5.705076076140071,
+          6.367854487907231
+        ],
+        "after": [
+          6.240751214392689,
+          6.719643414197084
+        ]
+      },
+      "situations_with_a_changed_modal_action": [
+        "c2_beaconing",
+        "credential_replay_distributed",
+        "data_exfiltration",
+        "dns_tunneling_exfiltration",
+        "firmware_tampering"
+      ],
+      "trials_with_a_different_choice": 40,
+      "trials_where_every_proposal_was_unsupported": 32,
+      "chosen_from_after": {
+        "stackelberg": 366,
+        "not_proposed": 120,
+        "rule_based": 18
+      }
+    },
+    "lab": {
+      "available": [
+        "ALERT",
+        "ALLOW",
+        "BANDWIDTH_CAP",
+        "BLOCK_SOURCE",
+        "DECOY",
+        "FORENSIC_CAPTURE",
+        "ISOLATE",
+        "QUARANTINE",
+        "RESET_SESSIONS",
+        "THROTTLE"
+      ],
+      "trials": 168,
+      "situations": {
+        "brute_force": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "BLOCK_SOURCE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "buffer_overflow_probe": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "RESET_SESSIONS",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "c2_beaconing": {
+          "trials": 8,
+          "detector_label_correct": 6,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "ALLOW": 6,
+              "QUARANTINE": 18
+            },
+            "heldout_utility": 6.225,
+            "in_sample_regret": 1.075
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "ALLOW": 6,
+              "QUARANTINE": 18
+            },
+            "heldout_utility": 6.225,
+            "in_sample_regret": 1.075
+          },
+          "modal_action_changed": false
+        },
+        "credential_replay": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "BLOCK_SOURCE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "credential_replay_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "data_exfiltration": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "dns_amplification": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "BANDWIDTH_CAP",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "dns_tunneling_exfiltration": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "DECOY",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "dos_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "dos_flood_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "THROTTLE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.540277777777777,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.540277777777777,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "exploit_payload_injection": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "DECOY",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "firmware_tampering": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "QUARANTINE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "icmp_ping_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "icmp_ping_flood_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "THROTTLE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "mqtt_message_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "normal": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ALLOW",
+            "stackelberg": "ALLOW",
+            "ppo": "ALLOW"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "ALLOW",
+            "actions": {
+              "ALLOW": 24
+            },
+            "heldout_utility": 3.0,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "ALLOW",
+            "actions": {
+              "ALLOW": 24
+            },
+            "heldout_utility": 3.0,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "reconnaissance_port_scan": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "DECOY",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "rogue_config_beacon": {
+          "trials": 8,
+          "detector_label_correct": 6,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "FORENSIC_CAPTURE",
+            "stackelberg": "QUARANTINE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "QUARANTINE",
+            "actions": {
+              "QUARANTINE": 24
+            },
+            "heldout_utility": 7.3,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "slow_loris_exhaustion": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "THROTTLE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "tcp_syn_flood": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "BLOCK_SOURCE",
+            "ppo": "BLOCK_SOURCE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "BLOCK_SOURCE",
+            "actions": {
+              "BLOCK_SOURCE": 24
+            },
+            "heldout_utility": 7.7,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        },
+        "tcp_syn_flood_distributed": {
+          "trials": 8,
+          "detector_label_correct": 8,
+          "all_proposals_unsupported_trials": 0,
+          "modal_proposals": {
+            "rule_based": "ISOLATE",
+            "stackelberg": "THROTTLE",
+            "ppo": "QUARANTINE"
+          },
+          "trials_with_a_different_choice": 0,
+          "before": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.420833333333334,
+            "in_sample_regret": 0.0
+          },
+          "after": {
+            "modal_action": "THROTTLE",
+            "actions": {
+              "THROTTLE": 24
+            },
+            "heldout_utility": 7.420833333333334,
+            "in_sample_regret": 0.0
+          },
+          "modal_action_changed": false
+        }
+      },
+      "mean_over_situations": {
+        "before": {
+          "heldout_utility": 7.2707671957671955,
+          "in_sample_regret": 0.05119047619047619
+        },
+        "after": {
+          "heldout_utility": 7.2707671957671955,
+          "in_sample_regret": 0.05119047619047619
+        }
+      },
+      "mean_over_trials_heldout_utility": {
+        "before": 7.2707671957671955,
+        "after": 7.2707671957671955
+      },
+      "heldout_utility_after_minus_before": {
+        "n_trials": 168,
+        "n_nonzero": 0,
+        "mean_diff": 0.0,
+        "mean_diff_ci95": [
+          0.0,
+          0.0
+        ],
+        "wilcoxon_p": 1.0,
+        "sign_test_p": 1.0
+      },
+      "heldout_utility_ci95": {
+        "before": [
+          7.0947862929894185,
+          7.423378182870372
+        ],
+        "after": [
+          7.0947862929894185,
+          7.423378182870372
+        ]
+      },
+      "situations_with_a_changed_modal_action": [],
+      "trials_with_a_different_choice": 0,
+      "trials_where_every_proposal_was_unsupported": 0,
+      "chosen_from_after": {
+        "stackelberg": 480,
+        "ppo": 24
+      }
+    }
+  }
+}

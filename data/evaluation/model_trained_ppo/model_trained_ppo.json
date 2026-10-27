@@ -1,0 +1,464 @@
+{
+  "timesteps": 120000,
+  "seeds": [
+    1,
+    7,
+    13
+  ],
+  "noise_sigma": 0.0,
+  "training": [
+    {
+      "seed": 1,
+      "seconds": 411.0,
+      "model": "data/evaluation/model_trained_ppo/ppo_model_s1.zip"
+    },
+    {
+      "seed": 7,
+      "seconds": 433.4,
+      "model": "data/evaluation/model_trained_ppo/ppo_model_s7.zip"
+    },
+    {
+      "seed": 13,
+      "seconds": 450.7,
+      "model": "data/evaluation/model_trained_ppo/ppo_model_s13.zip"
+    }
+  ],
+  "summary": {
+    "rule_based": {
+      "n_models": 1,
+      "mean_regret": 2.9955194006542065,
+      "mean_regret_by_model": [
+        2.9955194006542065
+      ],
+      "max_regret": 5.2,
+      "picks_best": 4.0,
+      "mean_utility": 4.3264382713034655,
+      "per_condition_regret": {
+        "normal": 0.0,
+        "reconnaissance_port_scan": 0.2071052136269529,
+        "dos_flood": 3.7,
+        "brute_force": 0.0,
+        "data_exfiltration": 3.3,
+        "exploit_payload_injection": 5.2,
+        "tcp_syn_flood": 3.7,
+        "icmp_ping_flood": 3.2666666666666666,
+        "slow_loris_exhaustion": 5.123809523809523,
+        "dns_amplification": 5.0,
+        "dns_tunneling_exfiltration": 4.904166666666667,
+        "mqtt_message_flood": 5.137878787878789,
+        "firmware_tampering": 0.0,
+        "buffer_overflow_probe": 4.949970291146762,
+        "credential_replay": 0.0,
+        "rogue_config_beacon": 2.7721109175377467,
+        "c2_beaconing": 3.3,
+        "dos_flood_distributed": 3.540277777777777,
+        "tcp_syn_flood_distributed": 3.4208333333333343,
+        "icmp_ping_flood_distributed": 0.8791666666666655,
+        "credential_replay_distributed": 4.503921568627451
+      }
+    },
+    "stackelberg": {
+      "n_models": 1,
+      "mean_regret": 0.041865079365079313,
+      "mean_regret_by_model": [
+        0.041865079365079313
+      ],
+      "max_regret": 0.8791666666666655,
+      "picks_best": 20.0,
+      "mean_utility": 7.2800925925925934,
+      "per_condition_regret": {
+        "normal": 0.0,
+        "reconnaissance_port_scan": 0.0,
+        "dos_flood": 0.0,
+        "brute_force": 0.0,
+        "data_exfiltration": 0.0,
+        "exploit_payload_injection": 0.0,
+        "tcp_syn_flood": 0.0,
+        "icmp_ping_flood": 0.0,
+        "slow_loris_exhaustion": 0.0,
+        "dns_amplification": 0.0,
+        "dns_tunneling_exfiltration": 0.0,
+        "mqtt_message_flood": 0.0,
+        "firmware_tampering": 0.0,
+        "buffer_overflow_probe": 0.0,
+        "credential_replay": 0.0,
+        "rogue_config_beacon": 0.0,
+        "c2_beaconing": 0.0,
+        "dos_flood_distributed": 0.0,
+        "tcp_syn_flood_distributed": 0.0,
+        "icmp_ping_flood_distributed": 0.8791666666666655,
+        "credential_replay_distributed": 0.0
+      }
+    },
+    "model_argmax": {
+      "n_models": 1,
+      "mean_regret": 0.5493703300380319,
+      "mean_regret_by_model": [
+        0.5493703300380319
+      ],
+      "max_regret": 5.250505050505051,
+      "picks_best": 17.0,
+      "mean_utility": 6.77258734191964,
+      "per_condition_regret": {
+        "normal": 0.0,
+        "reconnaissance_port_scan": 0.2071052136269529,
+        "dos_flood": 0.0,
+        "brute_force": 0.0,
+        "data_exfiltration": 0.0,
+        "exploit_payload_injection": 5.2,
+        "tcp_syn_flood": 0.0,
+        "icmp_ping_flood": 0.0,
+        "slow_loris_exhaustion": 0.0,
+        "dns_amplification": 0.0,
+        "dns_tunneling_exfiltration": 0.0,
+        "mqtt_message_flood": 0.0,
+        "firmware_tampering": 0.0,
+        "buffer_overflow_probe": 5.250505050505051,
+        "credential_replay": 0.0,
+        "rogue_config_beacon": 0.0,
+        "c2_beaconing": 0.0,
+        "dos_flood_distributed": 0.0,
+        "tcp_syn_flood_distributed": 0.0,
+        "icmp_ping_flood_distributed": 0.8791666666666655,
+        "credential_replay_distributed": 0.0
+      }
+    },
+    "ppo_trained_on_measured_table": {
+      "n_models": 1,
+      "mean_regret": 0.01719576719576722,
+      "mean_regret_by_model": [
+        0.01719576719576722
+      ],
+      "max_regret": 0.24027777777777715,
+      "picks_best": 19.0,
+      "mean_utility": 7.304761904761906,
+      "per_condition_regret": {
+        "normal": 0.0,
+        "reconnaissance_port_scan": 0.0,
+        "dos_flood": 0.0,
+        "brute_force": 0.0,
+        "data_exfiltration": 0.0,
+        "exploit_payload_injection": 0.0,
+        "tcp_syn_flood": 0.0,
+        "icmp_ping_flood": 0.0,
+        "slow_loris_exhaustion": 0.0,
+        "dns_amplification": 0.0,
+        "dns_tunneling_exfiltration": 0.0,
+        "mqtt_message_flood": 0.0,
+        "firmware_tampering": 0.0,
+        "buffer_overflow_probe": 0.0,
+        "credential_replay": 0.0,
+        "rogue_config_beacon": 0.0,
+        "c2_beaconing": 0.0,
+        "dos_flood_distributed": 0.24027777777777715,
+        "tcp_syn_flood_distributed": 0.12083333333333446,
+        "icmp_ping_flood_distributed": 0.0,
+        "credential_replay_distributed": 0.0
+      }
+    },
+    "ppo_trained_on_model": {
+      "n_models": 3,
+      "mean_regret": 0.5770819702496721,
+      "mean_regret_by_model": [
+        0.5247010178687197,
+        0.5247010178687197,
+        0.681843875011577
+      ],
+      "max_regret": 5.250505050505051,
+      "picks_best": 15.666666666666666,
+      "mean_utility": 6.7448757017080005,
+      "per_condition_regret": {
+        "normal": 1.0999999999999999,
+        "reconnaissance_port_scan": 0.2071052136269529,
+        "dos_flood": 0.0,
+        "brute_force": 0.0,
+        "data_exfiltration": 0.0,
+        "exploit_payload_injection": 5.2,
+        "tcp_syn_flood": 0.0,
+        "icmp_ping_flood": 0.0,
+        "slow_loris_exhaustion": 0.0,
+        "dns_amplification": 0.0,
+        "dns_tunneling_exfiltration": 0.0,
+        "mqtt_message_flood": 0.0,
+        "firmware_tampering": 0.0,
+        "buffer_overflow_probe": 5.250505050505051,
+        "credential_replay": 0.0,
+        "rogue_config_beacon": 0.0,
+        "c2_beaconing": 0.0,
+        "dos_flood_distributed": 0.24027777777777715,
+        "tcp_syn_flood_distributed": 0.12083333333333446,
+        "icmp_ping_flood_distributed": 0.0,
+        "credential_replay_distributed": 0.0
+      }
+    }
+  },
+  "ppo_matches_model_argmax": [
+    0.8571428571428571,
+    0.8571428571428571,
+    0.8095238095238095
+  ],
+  "ppo_matches_stackelberg": [
+    0.7142857142857143,
+    0.7142857142857143,
+    0.6666666666666666
+  ],
+  "choices": {
+    "rule_based": [
+      {
+        "normal": "ALLOW",
+        "reconnaissance_port_scan": "DECOY",
+        "dos_flood": "ISOLATE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "ISOLATE",
+        "exploit_payload_injection": "DECOY",
+        "tcp_syn_flood": "ISOLATE",
+        "icmp_ping_flood": "THROTTLE",
+        "slow_loris_exhaustion": "THROTTLE",
+        "dns_amplification": "BANDWIDTH_CAP",
+        "dns_tunneling_exfiltration": "DECOY",
+        "mqtt_message_flood": "THROTTLE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "RESET_SESSIONS",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "FORENSIC_CAPTURE",
+        "c2_beaconing": "ISOLATE",
+        "dos_flood_distributed": "ISOLATE",
+        "tcp_syn_flood_distributed": "ISOLATE",
+        "icmp_ping_flood_distributed": "THROTTLE",
+        "credential_replay_distributed": "THROTTLE"
+      }
+    ],
+    "stackelberg": [
+      {
+        "normal": "ALLOW",
+        "reconnaissance_port_scan": "BLOCK_SOURCE",
+        "dos_flood": "BLOCK_SOURCE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "QUARANTINE",
+        "exploit_payload_injection": "BLOCK_SOURCE",
+        "tcp_syn_flood": "BLOCK_SOURCE",
+        "icmp_ping_flood": "BLOCK_SOURCE",
+        "slow_loris_exhaustion": "BLOCK_SOURCE",
+        "dns_amplification": "BLOCK_SOURCE",
+        "dns_tunneling_exfiltration": "QUARANTINE",
+        "mqtt_message_flood": "BLOCK_SOURCE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "BLOCK_SOURCE",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "QUARANTINE",
+        "c2_beaconing": "QUARANTINE",
+        "dos_flood_distributed": "THROTTLE",
+        "tcp_syn_flood_distributed": "THROTTLE",
+        "icmp_ping_flood_distributed": "THROTTLE",
+        "credential_replay_distributed": "QUARANTINE"
+      }
+    ],
+    "model_argmax": [
+      {
+        "normal": "ALLOW",
+        "reconnaissance_port_scan": "DECOY",
+        "dos_flood": "BLOCK_SOURCE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "QUARANTINE",
+        "exploit_payload_injection": "DECOY",
+        "tcp_syn_flood": "BLOCK_SOURCE",
+        "icmp_ping_flood": "BLOCK_SOURCE",
+        "slow_loris_exhaustion": "BLOCK_SOURCE",
+        "dns_amplification": "BLOCK_SOURCE",
+        "dns_tunneling_exfiltration": "QUARANTINE",
+        "mqtt_message_flood": "BLOCK_SOURCE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "DECOY",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "QUARANTINE",
+        "c2_beaconing": "QUARANTINE",
+        "dos_flood_distributed": "THROTTLE",
+        "tcp_syn_flood_distributed": "THROTTLE",
+        "icmp_ping_flood_distributed": "THROTTLE",
+        "credential_replay_distributed": "QUARANTINE"
+      }
+    ],
+    "ppo_trained_on_measured_table": [
+      {
+        "normal": "ALLOW",
+        "reconnaissance_port_scan": "BLOCK_SOURCE",
+        "dos_flood": "BLOCK_SOURCE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "QUARANTINE",
+        "exploit_payload_injection": "BLOCK_SOURCE",
+        "tcp_syn_flood": "BLOCK_SOURCE",
+        "icmp_ping_flood": "BLOCK_SOURCE",
+        "slow_loris_exhaustion": "BLOCK_SOURCE",
+        "dns_amplification": "BLOCK_SOURCE",
+        "dns_tunneling_exfiltration": "QUARANTINE",
+        "mqtt_message_flood": "BLOCK_SOURCE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "BLOCK_SOURCE",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "QUARANTINE",
+        "c2_beaconing": "QUARANTINE",
+        "dos_flood_distributed": "QUARANTINE",
+        "tcp_syn_flood_distributed": "QUARANTINE",
+        "icmp_ping_flood_distributed": "QUARANTINE",
+        "credential_replay_distributed": "QUARANTINE"
+      }
+    ],
+    "ppo_trained_on_model": [
+      {
+        "normal": "ALLOW",
+        "reconnaissance_port_scan": "DECOY",
+        "dos_flood": "BLOCK_SOURCE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "QUARANTINE",
+        "exploit_payload_injection": "DECOY",
+        "tcp_syn_flood": "BLOCK_SOURCE",
+        "icmp_ping_flood": "BLOCK_SOURCE",
+        "slow_loris_exhaustion": "BLOCK_SOURCE",
+        "dns_amplification": "BLOCK_SOURCE",
+        "dns_tunneling_exfiltration": "QUARANTINE",
+        "mqtt_message_flood": "BLOCK_SOURCE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "DECOY",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "QUARANTINE",
+        "c2_beaconing": "QUARANTINE",
+        "dos_flood_distributed": "QUARANTINE",
+        "tcp_syn_flood_distributed": "QUARANTINE",
+        "icmp_ping_flood_distributed": "QUARANTINE",
+        "credential_replay_distributed": "QUARANTINE"
+      },
+      {
+        "normal": "ALLOW",
+        "reconnaissance_port_scan": "DECOY",
+        "dos_flood": "BLOCK_SOURCE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "QUARANTINE",
+        "exploit_payload_injection": "DECOY",
+        "tcp_syn_flood": "BLOCK_SOURCE",
+        "icmp_ping_flood": "BLOCK_SOURCE",
+        "slow_loris_exhaustion": "BLOCK_SOURCE",
+        "dns_amplification": "BLOCK_SOURCE",
+        "dns_tunneling_exfiltration": "QUARANTINE",
+        "mqtt_message_flood": "BLOCK_SOURCE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "DECOY",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "QUARANTINE",
+        "c2_beaconing": "QUARANTINE",
+        "dos_flood_distributed": "QUARANTINE",
+        "tcp_syn_flood_distributed": "QUARANTINE",
+        "icmp_ping_flood_distributed": "QUARANTINE",
+        "credential_replay_distributed": "QUARANTINE"
+      },
+      {
+        "normal": "BLOCK_SOURCE",
+        "reconnaissance_port_scan": "DECOY",
+        "dos_flood": "BLOCK_SOURCE",
+        "brute_force": "BLOCK_SOURCE",
+        "data_exfiltration": "QUARANTINE",
+        "exploit_payload_injection": "DECOY",
+        "tcp_syn_flood": "BLOCK_SOURCE",
+        "icmp_ping_flood": "BLOCK_SOURCE",
+        "slow_loris_exhaustion": "BLOCK_SOURCE",
+        "dns_amplification": "BLOCK_SOURCE",
+        "dns_tunneling_exfiltration": "QUARANTINE",
+        "mqtt_message_flood": "BLOCK_SOURCE",
+        "firmware_tampering": "QUARANTINE",
+        "buffer_overflow_probe": "DECOY",
+        "credential_replay": "BLOCK_SOURCE",
+        "rogue_config_beacon": "QUARANTINE",
+        "c2_beaconing": "QUARANTINE",
+        "dos_flood_distributed": "QUARANTINE",
+        "tcp_syn_flood_distributed": "QUARANTINE",
+        "icmp_ping_flood_distributed": "QUARANTINE",
+        "credential_replay_distributed": "QUARANTINE"
+      }
+    ]
+  },
+  "model_vs_measured_best": {
+    "normal": [
+      "ALLOW",
+      "ALLOW"
+    ],
+    "reconnaissance_port_scan": [
+      "DECOY",
+      "BLOCK_SOURCE"
+    ],
+    "dos_flood": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "brute_force": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "data_exfiltration": [
+      "QUARANTINE",
+      "QUARANTINE"
+    ],
+    "exploit_payload_injection": [
+      "DECOY",
+      "BLOCK_SOURCE"
+    ],
+    "tcp_syn_flood": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "icmp_ping_flood": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "slow_loris_exhaustion": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "dns_amplification": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "dns_tunneling_exfiltration": [
+      "QUARANTINE",
+      "QUARANTINE"
+    ],
+    "mqtt_message_flood": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "firmware_tampering": [
+      "QUARANTINE",
+      "QUARANTINE"
+    ],
+    "buffer_overflow_probe": [
+      "DECOY",
+      "BLOCK_SOURCE"
+    ],
+    "credential_replay": [
+      "BLOCK_SOURCE",
+      "BLOCK_SOURCE"
+    ],
+    "rogue_config_beacon": [
+      "QUARANTINE",
+      "QUARANTINE"
+    ],
+    "c2_beaconing": [
+      "QUARANTINE",
+      "QUARANTINE"
+    ],
+    "dos_flood_distributed": [
+      "THROTTLE",
+      "THROTTLE"
+    ],
+    "tcp_syn_flood_distributed": [
+      "THROTTLE",
+      "THROTTLE"
+    ],
+    "icmp_ping_flood_distributed": [
+      "THROTTLE",
+      "QUARANTINE"
+    ],
+    "credential_replay_distributed": [
+      "QUARANTINE",
+      "QUARANTINE"
+    ]
+  }
+}

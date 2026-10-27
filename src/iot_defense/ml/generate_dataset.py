@@ -24,7 +24,7 @@ from iot_defense.simulation.traffic import start_multi_connection_listener
 # shape, sub-variations, and labeling condition), so this file still needs
 # one branch added per new attack -- what's generic here is only the bucket
 # *count*, which grows automatically as ATTACK_SCENARIOS grows.
-_ATTACK_KEYS = tuple(ATTACK_SCENARIOS.keys())
+_ATTACK_KEYS = tuple(key for key, scenario in ATTACK_SCENARIOS.items() if scenario.per_flow_detectable)
 
 # Every attack registered after the original 5 reuses its own registered
 # AttackScenario.generate_traffic directly (see the dispatch in
@@ -402,9 +402,6 @@ def generate_dataset(
         raise ValueError("At least six independent runs are required for group-aware evaluation.")
     rng = random.Random(seed)
     target_options = [("sensor", "10.0.0.10"), ("camera", "10.0.0.20"), ("smart_plug", "10.0.0.30")]
-
-    # Benign variations
-    normal_ports_pool = [5683, 1883, 80, 443, 8080, 9999, 10001]
 
     # Recon variations - split into known and unseen
     recon_known_port_sets = [

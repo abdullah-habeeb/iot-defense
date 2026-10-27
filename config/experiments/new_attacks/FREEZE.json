@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-10-27T10:33:22+0000",
+  "created_at_epoch": 1793097202.5431345,
+  "files": {
+    "config/experiments/new_attacks/preregistration.yaml": "bb0ab123c7de848a5b0eb28a6b343ea4594c10d6f2e7787144461982f6967f06",
+    "config/policies.yaml": "9534f9d8a6fc26eb48f1dc52aa8cfd8e5259300bc2aed0810a134aefae6c653b",
+    "src/iot_defense/defense/game_model.py": "a76ac6bd186a286c67d84948fc1f9e1a5df288b4c95637ea5a4440fdfac1a059",
+    "src/iot_defense/defense/model_outcomes.py": "0d93ef0253ee7caf3e3f4d8ec4c85c1b25309e6305714bf3ff5375936160f579",
+    "src/iot_defense/defense/policy.py": "d66b0bdf20b15099bcc52f63fc26af900601461a5bfe294ee419c832b7c81c23",
+    "src/iot_defense/defense/ppo_real_env.py": "661d387ffdd9a4bb59a7bc94881a2ecb1a4bd673c705d3828d9b980fac39d65e",
+    "src/iot_defense/defense/stackelberg.py": "c1be63434058f079c8b376b33b84dddb53b82f22514933f1b494f1011f44c560",
+    "src/iot_defense/evaluation/outcome.py": "2ac1faacccc21348e31f4281da5da7678b8bd4944550a48be1748859a5fe4a53",
+    "src/iot_defense/evaluation/outcome_table.py": "161eb865010bfca302974729db266902402d1cd67ec01428c482166423e98881",
+    "src/iot_defense/experiments/new_attacks/analyze.py": "49c9cd40471a61fb3682d586fee467f741f76b80b076d1998882d8ce2434c61c",
+    "src/iot_defense/experiments/new_attacks/common.py": "a3531925e9344380f09b5aeefe694b34636592a35b8b46f954814a4b932aaed9",
+    "src/iot_defense/experiments/new_attacks/measure.py": "a81b593c47d66175382f2d90c71f7387ac1170e2af24a903f4cc2db2912598e6",
+    "src/iot_defense/experiments/new_attacks/prereg.py": "4373662d0e8fa2df694260b68bd0344a4122670a9f0d8b5bbb5240bc5c05c439",
+    "src/iot_defense/experiments/new_attacks/scenarios.py": "91628fd19676d71988f828d69b79b9d2e8ce6f1c752304b09f1843a99dab8f76",
+    "src/iot_defense/experiments/new_attacks/smoke.py": "3369fbe2f6834ea4971b80585504dbddef493ac2f60aa6059e908c368acefb4a"
+  },
+  "game_model_sha256": "b0a04f8ed844a483aea4a826bc467deb26853929b5e146fea749b52f71edda03",
+  "git_head_at_freeze": "52e432e13caf0a498caf8a80b4944f87ff4103da",
+  "main_outcome_table_sha256": "5d1344a2ebc45806b8c05ccd907c9dfcde3da447578effc4fb68ad2e7ec13011",
+  "objective_sha256": "95a29aa90be92c8a248f071a14d7723f81741a3b3f188ef4fe9f8c4892de6a68",
+  "rows_state": {
+    "exists": false,
+    "lines": 0
+  },
+  "schema_version": 1
+}

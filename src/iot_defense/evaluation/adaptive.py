@@ -10,6 +10,11 @@ per-source (BLOCK_SOURCE, the preferred_action for both brute_force and
 replay_attack), does a *repeat* attacker actually get contained across
 multiple attempts, or does each new source IP simply start over unblocked?
 
+NOTE: this is the earlier, pre-measured-outcome version of the experiment. Its per-round
+columns still include `matches_preferred_action`, a diagnostic only. The reactive-attacker
+comparison of the three policies on measured utility is evaluation/adaptive_table.py and
+adaptive_eval.py (EVALUATION.md, "Where the strategies differ").
+
 This module runs one real, multi-round campaign against a single, persistent
 Mininet network: replay_attack's own registered traffic generator for round
 0 (a real, unspoofed attempt), then simulation/traffic.py's existing

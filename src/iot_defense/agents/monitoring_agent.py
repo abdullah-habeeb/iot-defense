@@ -24,4 +24,9 @@ class MonitoringAgent:
             # carries both ports, so FeatureAggregator needs the real flags
             # to tell a SYN scan from a completed handshake.
             "tcp_flags": packet.get("tcp_flags"),
+            # Display-only labelling (see monitoring.monitor.describe_for_display).
+            "display_src": packet.get("display_src", packet.get("src_ip", "unknown")),
+            "display_dst": packet.get("display_dst", packet.get("dst_ip", "unknown")),
+            "display_protocol": packet.get("display_protocol", packet.get("protocol", "UNKNOWN")),
+            "background": bool(packet.get("background", False)),
         }

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import asdict, dataclass, field
 from ipaddress import ip_address
 from typing import Any

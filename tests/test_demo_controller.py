@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from unittest.mock import patch
 
 import pytest
@@ -314,3 +313,41 @@ class TestNodeIpsMatchesRealTopologyConfig:
             f"NODE_IPS has drifted from config/topology.yaml: "
             f"NODE_IPS={NODE_IPS} vs real config={real_ips}"
         )
+
+
+class TestPolicyWarmUpAndLatencyMetrics:
+    """A live run showed 'detection latency 19,881 ms': the first policy evaluation (RL library import, PPO
+    model and outcome-table load) was being timed as detection. The policies are now loaded before the
+    network starts, and decision latency is its own metric."""
+
+    def test_warm_up_evaluates_the_policies_once_without_touching_the_runs_history(self, ctrl):
+        calls = []
+        real = ctrl._build_policy_comparison
+        ctrl._build_policy_comparison = lambda event, context: (calls.append(event.attack_type), real(event, context))[1]
+        seconds = ctrl._warm_up_policies()
+        assert calls == ["reconnaissance_port_scan"] and seconds >= 0.0
+        assert ctrl.decision_agent.event_history == []
+
+    def test_warm_up_loads_the_arbiters_evidence_in_arbiter_mode_only(self, ctrl, monkeypatch):
+        loaded = []
+        monkeypatch.setattr(type(ctrl), "_arbitrate", lambda self, *args: loaded.append(self.policy_mode))
+        ctrl._warm_up_policies()
+        assert loaded == ["arbiter"]
+
+    def test_run_demo_warms_up_before_the_network_is_created(self):
+        import inspect
+
+        source = inspect.getsource(DemoController.run_demo)
+        assert source.index("_warm_up_policies") < source.index("create_mininet_network")
+
+    def test_decision_and_detection_are_separate_metrics_measured_where_they_happen(self):
+        import inspect
+
+        from iot_defense.demo.controller import _initial_state
+
+        metrics = _initial_state()["metrics"]
+        assert metrics["detection_latency_ms"] is None and metrics["decision_latency_ms"] is None
+        decide = inspect.getsource(DemoController._run_evaluate_and_respond)
+        assert "decision_latency_ms" in decide and "detection_latency_ms" not in decide
+        run = inspect.getsource(DemoController.run_demo)
+        assert run.index("attack_started") < run.index("generate_traffic(self.net)") < run.index("detection_latency_ms")

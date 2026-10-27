@@ -237,7 +237,7 @@ def compare_policies(
         "stackelberg_decision": stack_decision.to_dict(),
     }
     if ppo_policy is not None:
-        ppo_decision = ppo_policy.decide(context, stackelberg_info=reasoning)
+        ppo_decision = ppo_policy.decide(context)
         comparison["ppo_action"] = ppo_decision.action.value
         comparison["ppo_decision"] = ppo_decision.to_dict()
     return comparison

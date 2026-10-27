@@ -1,0 +1,59 @@
+# Pre-registration for the new-attack transfer experiment.
+schema_version: 1
+status: READY
+
+title: Does the Stackelberg policy transfer to attacks nobody has measured?
+claim: |
+  A defender that has only mechanism priors (written knowledge of what each response does to a kind of traffic, and no
+  measurement of the attack) can choose a response close to the measured best for an attack it has never seen, and does so at
+  least as well as a hand-written playbook. Test: two attacks that appear nowhere in the 693-row benchmark. Their priors and
+  playbook entries are written and committed before any response to them is measured. Every response is then measured three
+  times per attack, and each policy is graded on regret: the mean utility of the best of the ten responses minus the mean
+  utility of the response the policy chose.
+
+success_criteria:
+  stackelberg_max_regret: 1.0
+  stackelberg_not_worse_than_playbook: true
+
+blind_declaration:
+  priors_author: "Teammate B"
+  playbook_author: "Teammate B"
+  date_written: "2026-10-27"
+  saw_new_attack_measurements: false
+  saw_outcome_table: false
+
+attacks:
+  ssdp_reflection:
+    mechanism: |
+      Unsolicited SSDP/UPnP search responses arrive at the protected sensor: UDP datagrams of about 340 bytes from source port
+      1900 to a high destination port, from a single lab address, up to 60 packets at about 7 packets per second (the cap is
+      reached in about 9 seconds). This is the traffic a victim of an SSDP reflection-amplification attack receives (it never sent the search that
+      these responses answer). Inbound to the sensor.
+    attack_class: reflection
+    class_rationale: |
+      The traffic is unsolicited inbound amplification response traffic, so its defining mechanism is reflection rather than a
+      generic UDP flood. The attack arrives from a single apparent source address and matches the existing reflection class's
+      intended mechanism closely enough to reuse its priors unchanged.
+    playbook_response: BLOCK_SOURCE
+    playbook_rationale: |
+      A home gateway can identify the single source address sending the unsolicited responses and drop its packets at the
+      protected device. This directly targets the described one-source stream while avoiding the broader service interruption
+      of isolating or quarantining the sensor.
+    nearest_known_attack: "dos_flood"
+
+  telnet_scan_outbound:
+    mechanism: |
+      The protected sensor itself, assumed compromised, opens many short TCP connections to ports 23 and 2323 of another host,
+      alternating between them, about 15 attempts per second for about 6 seconds; the target refuses them. This is the traffic of
+      Mirai-style Telnet scanning, the way a compromised device looks for more devices to infect. The traffic leaves the device.
+    attack_class: outbound
+    class_rationale: |
+      The harmful behavior consists of new TCP connection attempts originating at the protected sensor and leaving for a remote
+      host. That is the existing outbound mechanism class; the Telnet destination ports and rapid scan pattern describe the
+      application and rate but do not change the direction or basic mechanism.
+    playbook_response: QUARANTINE
+    playbook_rationale: |
+      A home gateway should contain a compromised device by applying a default-deny policy to its outbound traffic while
+      preserving communication with known legitimate peers. This stops further Telnet scan attempts without taking the sensor's
+      interface entirely offline.
+    nearest_known_attack: "reconnaissance_port_scan"

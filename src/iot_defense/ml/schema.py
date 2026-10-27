@@ -36,7 +36,10 @@ AUDIT_COLUMNS = (
 )
 DATASET_COLUMNS = AUDIT_COLUMNS + FEATURE_COLUMNS
 LABEL_NAMES = {0: "normal"} | {
-    index: scenario.attack_type for index, scenario in enumerate(ATTACK_SCENARIOS.values(), start=1)
+    index: scenario.attack_type
+    for index, scenario in enumerate(
+        (s for s in ATTACK_SCENARIOS.values() if s.per_flow_detectable), start=1
+    )
 }
 NUMERIC_FEATURE_COLUMNS = tuple(column for column in FEATURE_COLUMNS if column != "protocol")
 
