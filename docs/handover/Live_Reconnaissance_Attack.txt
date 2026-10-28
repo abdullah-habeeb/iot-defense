@@ -1,0 +1,73 @@
+LIVE RECONNAISSANCE ATTACK
+==========================
+
+Devices
+  LAPTOP 1 = defender. Runs the VM (the "box"). You present from this one.
+  MAC      = attacker. Has nmap.
+  Both on the SAME Wi-Fi.   Box address: 192.168.1.3   Interface: enp0s8
+  (If the Wi-Fi changes, run  ip -4 -br addr  in the VM and use the new enp0s8 address everywhere below.)
+
+
+BEFORE YOU START (once, 5 minutes)
+  [ ] Laptop 1 and the Mac are on the same Wi-Fi.
+  [ ] VM is running. VirtualBox > VM > Network > Adapter 2 = Bridged Adapter (Wi-Fi), Promiscuous Mode = Allow All.
+  [ ] LAPTOP 1 (VM terminal): check the address
+        ip -4 -br addr
+      The enp0s8 line shows the box address (192.168.1.3 now).
+  [ ] MAC: check you can reach the box (must show replies, not timeouts), then Ctrl+C
+        ping 192.168.1.3
+  [ ] MAC: check nmap works
+        nmap --version
+
+
+THE DEMO, IN ORDER
+
+1. LAPTOP 1 - VM terminal: start the defender (leave it running, wait ~10 s)
+        cd ~/iot-defense && sudo .venv/bin/python3 -m iot_defense.live.defender run --iface enp0s8
+
+2. LAPTOP 1 - normal laptop terminal (not the VM): open the dashboard tunnel
+        ssh -N -L 8000:127.0.0.1:8000 127.0.0.1
+
+3. LAPTOP 1 - browser: open the live tab. Badge should say RUNNING.
+        http://localhost:8000/live
+
+4. MAC - terminal 1: start a ping and leave it running (this is the proof)
+        ping 192.168.1.3
+
+5. LAPTOP 1 - VM, second terminal (optional, shows the firewall rule)
+        sudo watch -n 1 iptables -L IOTDEF -n -v
+
+6. MAC - terminal 2: run the attack
+        nmap -sT -p 1-1000 192.168.1.3
+
+
+WHAT YOUR GUIDE SHOULD SEE
+  1-3 s   Dashboard: "Threat detected: Reconnaissance (port scan)" + the Mac's address
+  3-4 s   Three advisors propose; the arbiter picks BLOCK_SOURCE
+  4-5 s   Firewall rule appears with a rising dropped-packet counter (step 5 shows the DROP rule too)
+  then    MAC ping: replies -> "Request timeout"; nmap stalls / ports "filtered"
+  ~60 s   Rule expires by itself; ping replies come back
+
+
+HOW TO PROVE THE DEFENCE HAPPENED
+  - Ping: replies -> timeouts -> replies again after ~60 s
+  - iptables rule (step 5): DROP rule for the attacker address, packet counter rising, gone after expiry
+  - Same scan with the defender stopped finishes normally; with it running it stalls
+
+
+RUN IT AGAIN OR STOP
+  Again : wait for the 60-second expiry message on the dashboard, then repeat step 6
+  Stop  : Ctrl+C in the defender terminal (removes every firewall rule it added)
+
+
+DON'T
+  - Do NOT open http://192.168.1.3:8080 on the MAC. That registers the attacker as a trusted user and it will not be blocked.
+  - Only a different device (e.g. a phone on the same Wi-Fi) should open that page, to show the legitimate-user panel ONLINE. Optional.
+  - Do not use college Wi-Fi (it blocks devices from talking to each other).
+
+
+IF SOMETHING FAILS
+  Network down / ping times out : both laptops on the same Wi-Fi? otherwise use the fallback below.
+  Dashboard not loading         : re-run step 2 (the tunnel drops when the VM restarts).
+  Badge not RUNNING             : read the defender terminal for the error (usually a wrong interface name).
+  FALLBACK (laptop 1 only)      : http://localhost:8000/  -> Mininet Simulation tab -> pick an attack -> Run attack.

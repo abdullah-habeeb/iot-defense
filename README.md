@@ -5,7 +5,7 @@ This project implements a modular, agent-based cyber-defense framework for resid
 
 Mininet IoT Network -> Monitoring Agent -> Feature Extraction -> Detection Agent -> Decision Agent -> Response / Deception -> Observability / Metrics.
 
-For a research-style comparison of the 3-policy system against simpler baselines on real Mininet trials -- methodology, results, and honest limitations -- see [EVALUATION.md](EVALUATION.md).
+For a research-style comparison of the 3-policy system against simpler baselines on real Mininet trials -- methodology, results, and honest limitations -- see [EVALUATION.md](EVALUATION.md). **Taking this project over? Read [HANDOVER.md](HANDOVER.md) first.**
 
 ## Status and what the evidence shows
 This is a research prototype (a college major project), not a product. Every result comes from one 5-host Mininet lab, plus replays of public IoT-23 captures; do not generalise it to other networks, devices or attackers. Numbers, confidence intervals and caveats are in [EVALUATION.md](EVALUATION.md); the research framing and future work are in [docs/FUTURE_WORK.md](docs/FUTURE_WORK.md); the physical demo is in [docs/LIVE_DEMO.md](docs/LIVE_DEMO.md).
