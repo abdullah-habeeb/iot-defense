@@ -1,0 +1,15 @@
+{
+  "seed": 42,
+  "requested_runs": 20,
+  "rows": 16,
+  "class_counts": {
+    "0": 6,
+    "1": 10
+  },
+  "unique_runs": 16,
+  "unique_scenarios": 16,
+  "anomalies": [],
+  "generated_at_utc": "2026-08-27T05:15:12Z",
+  "source": "real Mininet packet capture and FlowFeatures aggregation",
+  "output_path": "data/ml/controlled_flows_pilot_v2.csv"
+}

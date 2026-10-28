@@ -1,0 +1,9 @@
+{
+  "seed": 7,
+  "requested_runs": 20,
+  "rows": 20,
+  "anomalies": [],
+  "generated_at_utc": "2026-08-27T01:51:27Z",
+  "source": "real Mininet packet capture and FlowFeatures aggregation",
+  "output_path": "data/ml/controlled_flows.csv"
+}

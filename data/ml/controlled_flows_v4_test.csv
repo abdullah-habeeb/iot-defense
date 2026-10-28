@@ -1,0 +1,7 @@
+flow_id,run_id,scenario_id,source_ip,destination_ip,label,label_name,protocol,duration,packet_count,packets_per_second,bytes_total,average_packet_size,unique_destination_ports,unique_source_ports,tcp_syn_count,tcp_ack_count,udp_packet_count,icmp_packet_count
+run-0000-flow-0000,run-0000,normal-0000,10.0.0.20,10.0.0.30,0,normal,UDP,0.19619512557983398,4,20.38786635589657,480,120.0,1,1,0,0,4,0
+run-0001-flow-0001,run-0001,reconnaissance_port_scan-0001,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.4281799793243408,4,9.341866021647993,296,74.0,4,4,4,4,0,0
+run-0002-flow-0002,run-0002,normal-0002,10.0.0.20,10.0.0.30,0,normal,UDP,5.222698926925659,11,2.106190717463997,1404,127.63636363636364,2,3,0,0,11,0
+run-0003-flow-0003,run-0003,reconnaissance_port_scan-0003,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.9979219436645508,7,7.014576685521843,518,74.0,7,7,7,7,0,0
+run-0004-flow-0004,run-0004,normal-0004,10.0.0.30,10.0.0.20,0,normal,UDP,0.6109869480133057,5,8.183480868548951,725,145.0,1,1,0,0,5,0
+run-0005-flow-0005,run-0005,reconnaissance_port_scan-0005,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.3053629398345947,5,16.373958158473123,370,74.0,5,5,5,5,0,0

@@ -1,0 +1,382 @@
+{
+  "dataset_rows": 164,
+  "class_counts": {
+    "0": 34,
+    "1": 26,
+    "2": 26,
+    "3": 26,
+    "4": 26,
+    "5": 26
+  },
+  "run_counts": {
+    "total": 156,
+    "ordinary": 150,
+    "train": 105,
+    "validation": 22,
+    "test": 23,
+    "unseen_pattern": 6
+  },
+  "row_counts": {
+    "train": 111,
+    "validation": 23,
+    "test": 24
+  },
+  "anomalies": [],
+  "random_forest": {
+    "confusion_matrix": [
+      [
+        4,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        5,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        8
+      ]
+    ],
+    "labels": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "accuracy": 0.9583333333333334,
+    "precision": 0.9666666666666667,
+    "recall": 0.9814814814814815,
+    "f1": 0.9716775599128541,
+    "per_class": {
+      "0": {
+        "precision": 0.8,
+        "recall": 1.0,
+        "f1": 0.8888888888888888
+      },
+      "1": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "2": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "3": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "4": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "5": {
+        "precision": 1.0,
+        "recall": 0.8888888888888888,
+        "f1": 0.9411764705882353
+      }
+    }
+  },
+  "rule_based": {
+    "confusion_matrix": [
+      [
+        4,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        3,
+        2,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        9
+      ]
+    ],
+    "labels": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "accuracy": 0.875,
+    "precision": 0.9285714285714285,
+    "recall": 0.9,
+    "f1": 0.8831168831168831,
+    "per_class": {
+      "0": {
+        "precision": 0.5714285714285714,
+        "recall": 1.0,
+        "f1": 0.7272727272727273
+      },
+      "1": {
+        "precision": 1.0,
+        "recall": 0.4,
+        "f1": 0.5714285714285714
+      },
+      "2": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "3": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "4": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "5": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    }
+  },
+  "unseen_pattern_random_forest": {
+    "confusion_matrix": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "labels": [
+      0,
+      1
+    ],
+    "tn": 0,
+    "fp": 0,
+    "fn": 0,
+    "tp": 6,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0
+  },
+  "unseen_pattern_rule_based": {
+    "confusion_matrix": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "labels": [
+      0,
+      1
+    ],
+    "tn": 0,
+    "fp": 0,
+    "fn": 0,
+    "tp": 6,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0
+  },
+  "validation_random_forest": {
+    "confusion_matrix": [
+      [
+        6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        4,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        2,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        7,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        3
+      ]
+    ],
+    "labels": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "per_class": {
+      "0": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "1": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "2": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "3": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "4": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "5": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    }
+  },
+  "feature_columns": [
+    "protocol",
+    "duration",
+    "packet_count",
+    "packets_per_second",
+    "bytes_total",
+    "average_packet_size",
+    "unique_destination_ports",
+    "unique_source_ports",
+    "tcp_syn_count",
+    "tcp_ack_count",
+    "udp_packet_count",
+    "icmp_packet_count"
+  ],
+  "model_path": "models/random_forest_detector.joblib",
+  "seed": 7,
+  "trained_at_utc": "2026-09-11T06:45:58Z"
+}

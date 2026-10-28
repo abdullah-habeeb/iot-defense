@@ -1,0 +1,22 @@
+{
+  "seed": 42,
+  "requested_runs": 156,
+  "successful_runs": 156,
+  "failed_runs": 0,
+  "failure_details": [],
+  "rows": 164,
+  "class_counts": {
+    "0": 34,
+    "1": 26,
+    "2": 26,
+    "3": 26,
+    "4": 26,
+    "5": 26
+  },
+  "unique_runs": 156,
+  "unique_scenarios": 156,
+  "anomalies": [],
+  "generated_at_utc": "2026-09-11T06:33:14Z",
+  "source": "real Mininet packet capture and FlowFeatures aggregation",
+  "output_path": "data/ml/controlled_flows_6class.csv"
+}

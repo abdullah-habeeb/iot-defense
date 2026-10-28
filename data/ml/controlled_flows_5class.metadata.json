@@ -1,0 +1,88 @@
+{
+  "seed": 42,
+  "requested_runs": 130,
+  "successful_runs": 119,
+  "failed_runs": 11,
+  "failure_details": [
+    {
+      "run": 5,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 20,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 35,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 50,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 65,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 80,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 85,
+      "scenario": "normal_mixed",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 95,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 100,
+      "scenario": "normal_mixed",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 110,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    },
+    {
+      "run": 125,
+      "scenario": "normal_tcp",
+      "stage": "process_capture",
+      "error": "No data could be read!"
+    }
+  ],
+  "rows": 126,
+  "class_counts": {
+    "0": 21,
+    "1": 26,
+    "2": 26,
+    "3": 27,
+    "4": 26
+  },
+  "unique_runs": 119,
+  "unique_scenarios": 119,
+  "anomalies": [],
+  "generated_at_utc": "2026-09-08T12:29:11Z",
+  "source": "real Mininet packet capture and FlowFeatures aggregation",
+  "output_path": "data/ml/controlled_flows_5class.csv"
+}

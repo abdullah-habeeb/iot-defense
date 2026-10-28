@@ -1,0 +1,8 @@
+{
+  "base_model": "models/ppo_defense",
+  "output_model": "models/ppo_defense_real.zip",
+  "timesteps": 30,
+  "episode_length": 17,
+  "training_seconds": 914.7,
+  "trained_at_utc": "2026-09-21T07:25:24.320107+00:00"
+}

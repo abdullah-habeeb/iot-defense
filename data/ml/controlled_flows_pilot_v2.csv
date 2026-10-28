@@ -1,0 +1,17 @@
+flow_id,run_id,scenario_id,source_ip,destination_ip,label,label_name,protocol,duration,packet_count,packets_per_second,bytes_total,average_packet_size,unique_destination_ports,unique_source_ports,tcp_syn_count,tcp_ack_count,udp_packet_count,icmp_packet_count
+run-0000-flow-0000,run-0000,normal-0000,10.0.0.20,10.0.0.30,0,normal,UDP,0.2614760398864746,6,22.94665317175917,720,120.0,1,1,0,0,6,0
+run-0001-flow-0001,run-0001,reconnaissance_port_scan-0001,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.3087151050567627,4,12.95692998003622,296,74.0,4,4,4,4,0,0
+run-0003-flow-0002,run-0003,reconnaissance_port_scan-0003,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.40511488914489746,5,12.342177821589889,370,74.0,5,5,5,5,0,0
+run-0004-flow-0003,run-0004,normal-0004,10.0.0.20,10.0.0.30,0,normal,UDP,0.4737570285797119,10,21.107866262120165,1650,165.0,1,1,0,0,10,0
+run-0005-flow-0004,run-0005,reconnaissance_port_scan-0005,10.0.0.100,10.0.0.20,1,reconnaissance_port_scan,TCP,0.026874065399169922,3,111.63178906651999,222,74.0,3,3,3,3,0,0
+run-0007-flow-0005,run-0007,reconnaissance_port_scan-0007,10.0.0.100,10.0.0.20,1,reconnaissance_port_scan,TCP,0.046755075454711914,4,85.55220927564315,296,74.0,4,4,4,4,0,0
+run-0009-flow-0006,run-0009,reconnaissance_port_scan-0009,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.6257860660552979,7,11.185931390459311,518,74.0,7,7,7,7,0,0
+run-0010-flow-0007,run-0010,normal-0010,10.0.0.30,10.0.0.10,0,normal,UDP,3.0167300701141357,30,9.944542369634341,3990,133.0,3,3,0,0,30,0
+run-0011-flow-0008,run-0011,reconnaissance_port_scan-0011,10.0.0.100,10.0.0.30,1,reconnaissance_port_scan,TCP,0.40657496452331543,5,12.297855097551807,370,74.0,5,5,5,5,0,0
+run-0012-flow-0009,run-0012,normal-0012,10.0.0.30,10.0.0.10,0,normal,UDP,0.3249680995941162,6,18.463350733484223,468,78.0,1,1,0,0,6,0
+run-0013-flow-0010,run-0013,reconnaissance_port_scan-0013,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.2621290683746338,6,22.889487370491945,444,74.0,6,6,6,6,0,0
+run-0014-flow-0011,run-0014,normal-0014,10.0.0.30,10.0.0.20,0,normal,UDP,0.667518138885498,14,20.973212837893346,2072,148.0,2,2,0,0,14,0
+run-0015-flow-0012,run-0015,reconnaissance_port_scan-0015,10.0.0.100,10.0.0.30,1,reconnaissance_port_scan,TCP,0.2065598964691162,3,14.52363237628048,222,74.0,3,3,3,3,0,0
+run-0016-flow-0013,run-0016,normal-0016,10.0.0.20,10.0.0.30,0,normal,UDP,0.5631279945373535,10,17.757952183172236,2440,244.0,1,1,0,0,10,0
+run-0017-flow-0014,run-0017,reconnaissance_port_scan-0017,10.0.0.100,10.0.0.10,1,reconnaissance_port_scan,TCP,0.3113439083099365,7,22.48317636274946,518,74.0,7,7,7,7,0,0
+run-0019-flow-0015,run-0019,reconnaissance_port_scan-0019,10.0.0.100,10.0.0.20,1,reconnaissance_port_scan,TCP,0.26082301139831543,6,23.004105227652285,444,74.0,6,6,6,6,0,0
