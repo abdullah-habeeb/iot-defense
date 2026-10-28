@@ -19,7 +19,7 @@ rules) sit on top.
 - Always state limits: 3 repetitions per cell, one virtual lab, scripted attackers, priors written by authors who knew the lab, nothing measured on physical IoT hardware. Report in-sample and circular results as such. Never invent numbers.
 
 ## 3. State of the repository
-- Repo `abdullah-habeeb/iot-defense`, branch **`outcome-based-policy-eval`**, PR #1 (base `main`) is **open and not merged**; merging is the owner's decision. Tag `demo-ready-2026-10-28` marks the demo-ready state.
+- Repo `abdullah-habeeb/iot-defense`, branch **`outcome-based-policy-eval`**, PR #1 (base `main`) is **open and not merged**; merging is the owner's decision. Tag `demo-ready-final-2026-10-28` marks the final demo-ready state (all 1022 tests pass on a fresh clone).
 - Public IoT-23 captures (581 MB, CC BY 4.0) are assets of the GitHub release `data-iot23-v1`; `scripts/fetch_iot23.sh` downloads and verifies them.
 - Test suite: **1022 tests**, need no Mininet and no root: `pytest -q` (6 to 8 minutes on 2 vCPUs; do not run two copies at once on a 3 GB machine, it froze the VM once).
 
