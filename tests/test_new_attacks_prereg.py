@@ -23,15 +23,21 @@ class TestValidation:
     def test_a_complete_pre_registration_is_valid(self):
         assert problems(valid_prereg()) == []
 
-    def test_the_shipped_template_is_not_ready_and_says_why(self):
-        found = problems(prereg.load())
-        text = " ".join(found)
+    def test_an_unfilled_template_is_not_ready_and_says_why(self):
+        template = valid_prereg()
+        template["status"] = "TEMPLATE"
+        template["blind_declaration"] = {"priors_author": "", "playbook_author": "", "date_written": "",
+                                         "saw_new_attack_measurements": None, "saw_outcome_table": None}
+        for entry in template["attacks"].values():
+            entry.update({"attack_class": "", "class_rationale": "", "playbook_response": "", "playbook_rationale": "", "nearest_known_attack": ""})
+        text = " ".join(problems(template))
         assert "status is" in text and "attack_class" in text and "playbook_response" in text and "saw_new_attack_measurements" in text
-        assert problems(prereg.load(), require_ready=False)  # still incomplete without the status requirement
+        assert problems(template, require_ready=False)  # still incomplete without the status requirement
 
-    def test_the_shipped_template_carries_the_fixed_text_and_defaults(self):
+    def test_the_shipped_pre_registration_is_the_valid_frozen_one(self):
         spec = prereg.load()
-        assert spec["status"] == "TEMPLATE" and set(spec["attacks"]) == {"ssdp_reflection", "telnet_scan_outbound"}
+        assert problems(spec) == []
+        assert spec["status"] == "READY" and set(spec["attacks"]) == {"ssdp_reflection", "telnet_scan_outbound"}
         assert spec["success_criteria"] == {"stackelberg_max_regret": 1.0, "stackelberg_not_worse_than_playbook": True}
         assert all(spec["attacks"][k]["mechanism"].strip() for k in spec["attacks"])
 
@@ -168,7 +174,8 @@ class TestFreeze:
 
         monkeypatch.setattr(common, "git", lambda *a, **k: "" if a[:1] == ("status",) else real_git(*a, **k))
         prereg.main()
-        assert json.loads(freeze_path.read_text(encoding="utf-8"))["rows_state"] == {"exists": False, "lines": 0}
+        written = json.loads(freeze_path.read_text(encoding="utf-8"))
+        assert set(written["files"]) == set(common.FROZEN_FILES) and "rows_state" in written
 
     def test_the_freeze_command_refuses_an_unfinished_template(self, monkeypatch):
         import sys
